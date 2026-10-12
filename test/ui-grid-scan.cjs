@@ -59,7 +59,8 @@ const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQ
    await page.locator('.auth-swap[data-active="true"][data-transitioning="false"]').waitFor();
    await page.getByRole('heading', { name: '我的游戏', exact: true }).waitFor();
    assert.equal(await page.locator('.gridscan').count(), 0);
-   await page.getByRole('button', { name: '返回登录页面', exact: true }).click();
+   await page.getByLabel('账号菜单', { exact: true }).click();
+   await page.getByRole('banner').getByRole('button', { name: '退出登录', exact: true }).click();
    await page.locator('.auth-swap[data-active="false"][data-transitioning="false"]').waitFor();
   }
   const evidence = await page.evaluate(() => ({ ...window.scanEvidence, contexts: window.scanEvidence.contexts.map(record => ({ detached: !record.canvas.isConnected, lost: record.gl.isContextLost() })) }));
@@ -77,7 +78,8 @@ const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQ
   assert.equal(await page.locator('.gridscan').count(), 0);
   assert.equal(await page.evaluate(() => window.scanEvidence.contexts.length), 6);
   await page.emulateMedia({ reducedMotion: 'no-preference' });
-  await page.getByRole('button', { name: '返回登录页面', exact: true }).click();
+  await page.getByLabel('账号菜单', { exact: true }).click();
+  await page.getByRole('banner').getByRole('button', { name: '退出登录', exact: true }).click();
   await page.locator('.auth-swap[data-active="false"][data-transitioning="false"]').waitFor();
   await page.addInitScript(() => {
    const getContext = HTMLCanvasElement.prototype.getContext;

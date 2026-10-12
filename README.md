@@ -77,9 +77,15 @@ Windows 本机游戏库、社区 Mod 浏览下载与按游戏规则安装管理�
 
 账号界面只在输入错误、验证码过期或处理中显示当前提示。验证码步骤的 `?` 可主动展开收件帮助和有效期，再次点击或按 Escape 收起，帮助不会改变卡片尺寸。注册前需勾选用户协议和隐私政策，桌面版通过系统浏览器打开 MU 的协议页面。
 
+登录的“输入密码”步骤提供“找回密码”。找回流程沿用分步卡片：确认邮箱 → 新密码 → 确认新密码 → 邮箱验证码，发送验证码使用 MU 的 `purpose: reset`，完整验证码填写后提交 `auth/reset-password`。密码需 8–128 位，两次一致；发送失败和验证码错误保留已填写内容，返回修改时保留原验证码及重发倒计时。重置成功后清空密码并返回同一邮箱的登录密码步骤，提示使用新密码重新登录，不会自动进入游戏库。
+
 默认复用 `https://mu-api.claude-api.cn/` 的 MU 账号服务，已有 MU 账号可直接登录。密码为 8–128 位，邮箱验证码有效期 10 分钟，重发倒计时遵循服务端响应。发送验证码调用 `POST /api/v1/auth/code`（`purpose: register`）；填写完整验证码后直接调用 `POST /api/v1/auth/register`，由 MU 验证并创建账号，无单独验证码校验接口。登录调用 `POST /api/v1/auth/login`。错误密码、验证码无效、限流、账号停用和维护提示使用服务端状态与文案。
 
-React 入口为 `src/main.jsx`，认证适配器为 `src/auth/client.cjs`。`account.cjs` 经本地服务代理 MU 请求，避免浏览器跨域；访问令牌和刷新令牌只保存在本地服务内存，不返回界面、不写入磁盘，密码不保存。界面仅持有 HttpOnly / SameSite Cookie 对应的随机会话标识。页面刷新会调用 `account/me` 校验账号，访问令牌即将到期或返回 401 时串行刷新；退出会调用 MU 的注销接口并清除本地会话。退出应用后需重新登录。本地业务接口和外部 NXM 链接处理均要求有效登录，已验证账号状态最多缓存 30 秒；失效或停用时回到登录页。MU 会员权益不自动作为 MODDOCK 的功能权限。原生游戏库由 `public/app.js` 提供挂载/卸载入口。
+React 入口为 `src/main.jsx`，认证适配器为 `src/auth/client.cjs`。`account.cjs` 经本地服务代理 MU 请求，避免浏览器跨域；MU 令牌不返回界面，密码不保存。默认仅在服务内存中保存会话；桌面版可通过 `remember: true` 将刷新令牌保存到系统加密缓存，保存失败会返回提示。界面仅持有 HttpOnly / SameSite Cookie 对应的随机会话标识。页面刷新会校验账号，访问令牌即将到期或返回 401 时串行刷新；退出、改密和密码重置会清除对应会话。本地业务接口和 NXM 接收均要求登录，关键操作按 MU 的游戏库、配置和启动权限实时授权。原生游戏库由 `public/app.js` 提供挂载/卸载入口。
+
+登录后可从顶部账号菜单打开“个人中心”，以可拖动、翻面的挂绳卡片查看 MU 邮箱、账号名称、用户 ID、会员等级及有效期；每次打开时刷新账号信息。弹窗打开时暂停游戏库轮询，关闭后恢复，支持 Escape、关闭按钮和点击背景退出，并将焦点归还账号菜单。退出登录也位于账号菜单。界面使用 `src/account/UserCenter.jsx` 与账号状态模块 `src/account/store.cjs`。
+
+用户系统功能层还提供完整权限快照、套餐与订单查询及下单错误处理；支付仍遵循 MU 未开放的状态。接口表、调用示例、心跳和保持登录说明见 [用户系统功能层](docs/account-system.md)。
 
 可通过 `MODDOCK_ACCOUNT_URL` 配置账号服务根地址（HTTPS，或用于测试的本机 HTTP）。协议版本沿用 MU 的 `2026-09-26`，后续 MU 更新协议时需要同步。
 
@@ -136,6 +142,15 @@ npm start
 - Cyberpunk Mod 工具维护者指南：https://wiki.redmodding.org/cyberpunk-2077-modding/for-mod-users/users-modding-cyberpunk-2077
 
 ## Windows 打包
+
+生成 Windows x64 安装包：
+
+```sh
+npm run build
+npm exec --yes --package=electron-builder@26.15.3 -- electron-builder --win nsis --x64 --publish never --config scripts/electron-builder.cjs
+```
+
+安装包输出到 `output/windows/Moddock-0.5.0-windows-x64-Setup.exe`，支持选择安装目录并创建桌面及开始菜单快捷方式。安装包未签名；生成后仍需在 Windows 实机验证安装、启动和卸载。
 
 使用已校验的 Electron Windows x64 运行目录（含 Moddock.exe 及伴随文件），运行：
 

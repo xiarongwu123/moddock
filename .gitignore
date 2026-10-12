@@ -7,3 +7,4 @@ playwright-report/
 public/auth.js
 public/auth.css
 output/playwright/
+output/windows/

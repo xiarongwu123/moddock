@@ -1,0 +1,118 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="360" viewBox="0 0 320 360" fill="none">
+  <title>游匣 MODDOCK Logo loading</title>
+  <desc>磨砂绿色手柄徽章持续悬浮，按键依次点亮，柔光循环掠过表面。</desc>
+  <defs>
+    <radialGradient id="ambient">
+      <stop stop-color="#99bf74" stop-opacity=".13"/>
+      <stop offset=".55" stop-color="#608047" stop-opacity=".045"/>
+      <stop offset="1" stop-color="#608047" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="edge" x1="-75" y1="-60" x2="60" y2="92" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#d8f4b5"/><stop offset=".4" stop-color="#9dbe71"/>
+      <stop offset=".8" stop-color="#4a6435"/><stop offset="1" stop-color="#293c21"/>
+    </linearGradient>
+    <linearGradient id="face" x1="-65" y1="-78" x2="72" y2="85" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#e4facb"/><stop offset=".25" stop-color="#c9ef9c"/>
+      <stop offset=".58" stop-color="#a9d977"/><stop offset="1" stop-color="#6f994d"/>
+    </linearGradient>
+    <radialGradient id="soft-light" cx=".15" cy="0" r="1.05">
+      <stop stop-color="#f7ffe9" stop-opacity=".68"/>
+      <stop offset=".55" stop-color="#f7ffe9" stop-opacity=".08"/>
+      <stop offset="1" stop-color="#f7ffe9" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="reflection" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#fff" stop-opacity=".44"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="sheen">
+      <stop stop-color="#f6ffea" stop-opacity="0"/>
+      <stop offset=".5" stop-color="#f6ffea" stop-opacity=".52"/>
+      <stop offset="1" stop-color="#f6ffea" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="engraving" x1="3" y1="8" x2="20" y2="20" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#15220f"/><stop offset="1" stop-color="#3f5730"/>
+    </linearGradient>
+    <linearGradient id="type-light" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#f2f4ed"/><stop offset="1" stop-color="#cbd3c5"/>
+    </linearGradient>
+    <filter id="cast-shadow" x="-65%" y="-55%" width="230%" height="260%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="24" stdDeviation="22" flood-color="#000" flood-opacity=".5"/>
+      <feDropShadow dx="0" dy="5" stdDeviation="5" flood-color="#000" flood-opacity=".26"/>
+    </filter>
+    <filter id="ground-blur" x="-50%" y="-250%" width="200%" height="600%">
+      <feGaussianBlur stdDeviation="12"/>
+    </filter>
+    <filter id="reflection-blur" x="-50%" y="-100%" width="200%" height="300%">
+      <feGaussianBlur stdDeviation="9"/>
+    </filter>
+    <filter id="grain" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency=".82" numOctaves="3" stitchTiles="stitch" seed="12"/>
+      <feColorMatrix type="saturate" values="0"/>
+      <feComponentTransfer><feFuncA type="linear" slope=".1"/></feComponentTransfer>
+    </filter>
+    <filter id="recess" x="-15%" y="-30%" width="130%" height="160%" color-interpolation-filters="sRGB">
+      <feOffset in="SourceAlpha" dy=".3" result="offset"/>
+      <feGaussianBlur in="offset" stdDeviation=".2" result="blur"/>
+      <feComposite in="SourceAlpha" in2="blur" operator="out" result="inner"/>
+      <feFlood flood-color="#040b02" flood-opacity=".85"/>
+      <feComposite in2="inner" operator="in" result="shade"/>
+      <feBlend in="SourceGraphic" in2="shade" mode="normal"/>
+    </filter>
+    <clipPath id="face-clip"><rect x="-73" y="-76" width="146" height="146" rx="39"/></clipPath>
+    <path id="controller" d="M6 8h12a4 4 0 0 1 4 4l-1 6a2 2 0 0 1-3 1l-3-3H9l-3 3a2 2 0 0 1-3-1l-1-6a4 4 0 0 1 4-4Z"/>
+    <style>
+      .badge{transform:rotate(-7deg);animation:float 3s ease-in-out infinite}
+      .ambient{animation:breathe 3s ease-in-out infinite}
+      .ground{transform-origin:160px 236px;animation:shadow 3s ease-in-out infinite}
+      .sheen{opacity:0;animation:sweep 3s ease-in-out infinite}
+      .key{fill:#b9dd8b;animation:press 3s ease-in-out infinite}
+      .key-two{animation-delay:.24s}.key-three{animation-delay:.48s}
+      .dot{transform-box:fill-box;transform-origin:center;opacity:.3;animation:waiting 1.5s ease-in-out infinite}
+      .dot-two{animation-delay:.18s}.dot-three{animation-delay:.36s}
+      @keyframes float{0%,100%{transform:translateY(0) rotate(-7deg) scale(1)}50%{transform:translateY(-11px) rotate(-3deg) scale(1.025)}}
+      @keyframes breathe{0%,100%{opacity:.55}50%{opacity:1}}
+      @keyframes shadow{0%,100%{opacity:.28;transform:scale(1)}50%{opacity:.14;transform:scale(.78)}}
+      @keyframes sweep{0%,12%{opacity:0;transform:translateX(-200px)}25%{opacity:1}52%{opacity:1;transform:translateX(150px)}66%,100%{opacity:0;transform:translateX(200px)}}
+      @keyframes press{0%,10%,60%,100%{fill:#b9dd8b}22%,35%{fill:#f6ffe9}}
+      @keyframes waiting{0%,70%,100%{opacity:.3;transform:translateY(0) scale(1)}35%{opacity:1;transform:translateY(-3px) scale(1.1)}}
+      @media(prefers-reduced-motion:reduce){*{animation:none!important}.sheen{opacity:0}}
+    </style>
+  </defs>
+  <ellipse class="ambient" cx="160" cy="151" rx="138" ry="116" fill="url(#ambient)"/>
+  <ellipse class="ground" cx="160" cy="236" rx="53" ry="6" fill="#000" opacity=".28" filter="url(#ground-blur)"/>
+  <g transform="translate(160 150) scale(.88)">
+    <g class="badge">
+      <g filter="url(#cast-shadow)">
+        <rect x="-75" y="-76" width="150" height="155" rx="41" fill="url(#edge)"/>
+        <rect x="-73" y="-76" width="146" height="146" rx="39" fill="url(#face)"/>
+        <rect x="-73" y="-76" width="146" height="146" rx="39" fill="url(#soft-light)"/>
+      </g>
+      <g clip-path="url(#face-clip)">
+        <ellipse cx="-24" cy="-79" rx="105" ry="36" fill="url(#reflection)" filter="url(#reflection-blur)"/>
+        <rect x="-74" y="-77" width="148" height="148" filter="url(#grain)"/>
+        <g class="sheen"><path d="M-105-140H-25L85 140H5Z" fill="url(#sheen)"/></g>
+      </g>
+      <g transform="rotate(7)">
+        <g transform="translate(-46 -51) scale(3.85)">
+          <use href="#controller" transform="translate(0 .35)" fill="#e4fac7" opacity=".48"/>
+          <use href="#controller" fill="url(#engraving)" filter="url(#recess)"/>
+          <g class="key">
+            <rect x="6.2" y="10.1" width="1.6" height="5.3" rx=".65"/>
+            <rect x="4.35" y="11.95" width="5.3" height="1.6" rx=".65"/>
+          </g>
+          <circle class="key key-two" cx="16" cy="11.3" r="1"/>
+          <circle class="key key-three" cx="18.8" cy="14.1" r="1"/>
+        </g>
+      </g>
+    </g>
+  </g>
+  <g text-anchor="middle" font-family="Inter, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif">
+    <text x="161.5" y="271" fill="url(#type-light)" font-size="27" font-weight="600" letter-spacing="3">游匣</text>
+    <text x="162" y="294" fill="#9faa98" font-size="8" font-weight="500" letter-spacing="4">MODDOCK</text>
+  </g>
+  <g fill="#b3f66b">
+    <circle class="dot" cx="149" cy="323" r="2.3"/>
+    <circle class="dot dot-two" cx="160" cy="323" r="2.3"/>
+    <circle class="dot dot-three" cx="171" cy="323" r="2.3"/>
+  </g>
+</svg>

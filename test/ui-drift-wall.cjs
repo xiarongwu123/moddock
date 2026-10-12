@@ -77,7 +77,8 @@ const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQ
   const stopped = await moving.evaluate(node => node.style.transform);
   await page.waitForTimeout(150);
   assert.equal(await moving.evaluate(node => node.style.transform), stopped);
-  await page.getByRole('button', { name: '返回登录页面', exact: true }).click();
+  await page.getByLabel('账号菜单', { exact: true }).click();
+  await page.getByRole('banner').getByRole('button', { name: '退出登录', exact: true }).click();
   await page.locator('.auth-swap[data-active="false"][data-transitioning="false"]').waitFor();
   assert.equal(await page.locator('.drift-wall').getAttribute('data-paused'), 'false');
   await page.setViewportSize({ width: 1000, height: 700 });
@@ -92,7 +93,8 @@ const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQ
   await page.getByLabel('邮箱验证码', { exact: true }).fill('246810');
   await page.locator('.auth-swap[data-active="true"][data-transitioning="false"]').waitFor();
   await page.getByRole('heading', { name: '我的游戏', exact: true }).waitFor();
-  await page.getByRole('button', { name: '返回登录页面', exact: true }).click();
+  await page.getByLabel('账号菜单', { exact: true }).click();
+  await page.getByRole('banner').getByRole('button', { name: '退出登录', exact: true }).click();
   await page.locator('.auth-swap[data-active="false"][data-transitioning="false"]').waitFor();
   const widths = await page.locator('.auth-swap > .auth-screen[data-visible="true"]').evaluate(node => ({ scroll: node.scrollWidth, client: node.clientWidth }));
   assert.equal(widths.scroll, widths.client, 'Decorative background must not create horizontal scrolling');

@@ -1,0 +1,23 @@
+.user-center-dialog{padding:0;border:1px solid #ffffff18;border-radius:24px;background:#16161e;color:#eeeef4;width:min(900px,calc(100vw - 48px));max-width:none;max-height:calc(100dvh - 48px);overflow:auto;box-shadow:0 32px 120px #0008}
+.user-center-dialog::backdrop{background:#080910b8;backdrop-filter:blur(12px)}
+.user-center{position:relative;display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);min-height:580px;background:radial-gradient(ellipse at 20% 40%,#7871be17,transparent 65%)}
+.user-center-close{position:absolute;top:20px;right:20px;z-index:2;display:grid;place-items:center;width:36px;height:36px;border:1px solid #ffffff14;border-radius:50%;background:#ffffff05;color:#a9a8b8;cursor:pointer}
+.user-center-close:hover{color:#fff;background:#ffffff12}
+.user-center-close:focus-visible{outline:2px solid #b7afff;outline-offset:4px}
+.user-center-close svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round}
+.user-center-stage{position:relative;min-width:0;height:580px}
+.user-center-card-hint{position:absolute;bottom:22px;left:0;right:0;margin:0;text-align:center;font-size:11px;letter-spacing:2px;color:#797687;pointer-events:none}
+.user-center-static-card{position:absolute;height:57%;max-width:80%;top:23%;left:50%;transform:translateX(-50%);border-radius:14px;box-shadow:0 24px 60px #0005}
+.user-center-info{min-width:0;align-self:center;padding:72px 40px 60px 8px}
+.user-center-eyebrow{font-size:10px;letter-spacing:3px;color:#8c849f}
+.user-center-info h2{margin:12px 0 30px;font-size:24px;font-weight:500;letter-spacing:2px}
+.user-center-name{margin:0 0 12px;font-size:22px;line-height:1.5;overflow-wrap:anywhere}
+.account-tier{display:inline-block;padding:6px 10px;border:1px solid #ffffff1a;border-radius:6px;color:#afabbc;font-size:11px}
+.account-tier.is-pro{color:#c8bdff;border-color:#a391ef50;background:#a391ef12}
+.user-center-info dl{display:grid;gap:24px;margin:32px 0 0}
+.user-center-info dt{margin-bottom:8px;font-size:11px;color:#878392}
+.user-center-info dd{margin:0;font-size:13px;line-height:1.6;color:#d3cfdf;overflow-wrap:anywhere;user-select:text}
+.account-feedback,.user-center-status{margin:20px 0 0;font-size:12px;line-height:1.7;color:#b7aabd;overflow-wrap:anywhere}
+.account-feedback{color:#e5b4b4}
+@media(max-width:640px){.user-center-dialog{width:calc(100vw - 24px);max-height:calc(100dvh - 24px);border-radius:18px}.user-center{grid-template-columns:minmax(0,1fr)}.user-center-stage{height:400px}.user-center-info{padding:12px 28px 32px}.user-center-info h2{margin:8px 0 18px}.user-center-info dl{gap:18px;margin-top:24px}}
+@media(min-width:641px) and (max-height:680px){.user-center{min-height:440px}.user-center-stage{height:440px}.user-center-info{padding-top:48px;padding-bottom:40px}.user-center-info h2{margin-bottom:20px}.user-center-info dl{gap:16px;margin-top:24px}}

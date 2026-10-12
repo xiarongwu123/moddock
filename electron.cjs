@@ -1,7 +1,8 @@
-const { app, BrowserWindow, shell, net, session } = require('electron');
+const { app, BrowserWindow, shell, net, session, safeStorage } = require('electron');
 const path=require('node:path');
 const { createServer } = require('./server.cjs');
 const { downloadAllowed } = require('./sources.cjs');
+const { createAccountTokenStore } = require('./account-token-store.cjs');
 let service,mainWindow,authorizationWindow,protocolRegistered=false;
 const pending=[];
 function focusMain(){if(mainWindow&&!mainWindow.isDestroyed()){if(mainWindow.isMinimized())mainWindow.restore();mainWindow.show();mainWindow.focus();}}
@@ -29,7 +30,9 @@ if (primary) app.whenReady().then(async () => {
  authSession.setPermissionRequestHandler((_webContents,_permission,callback)=>callback(false));
  const downloadSession = session.fromPartition('moddock-downloads');
  downloadSession.webRequest.onBeforeRequest({ urls: ['<all_urls>'] }, (details, callback) => callback({ cancel: !downloadAllowed(details.url) }));
- service = await createServer({ port: 0, root: process.env.MODDOCK_DATA || path.join(app.getPath('userData'), 'data'), reveal: file => shell.showItemInFolder(file), authorize, protocolStatus:()=>protocolRegistered, sources: { fetch: (url, init) => net.fetch(String(url), init) }, downloads: { fetch: (url, init) => downloadSession.fetch(String(url), { ...init, redirect: 'follow' }) } });
+ const dataRoot = process.env.MODDOCK_DATA || path.join(app.getPath('userData'), 'data');
+ const tokenStore = createAccountTokenStore(path.join(dataRoot, 'account-session.bin'), safeStorage);
+ service = await createServer({ port: 0, root: dataRoot, accounts: { tokenStore }, reveal: file => shell.showItemInFolder(file), authorize, protocolStatus:()=>protocolRegistered, sources: { fetch: (url, init) => net.fetch(String(url), init) }, downloads: { fetch: (url, init) => downloadSession.fetch(String(url), { ...init, redirect: 'follow' }) } });
  mainWindow = new BrowserWindow({ width: 1440, height: 940, minWidth: 1000, minHeight: 700, title: '游匣 · MODDOCK', titleBarStyle: 'hidden', titleBarOverlay: { color: '#00000000', symbolColor: '#eef1ee', height: 40 }, backgroundColor: '#101215', autoHideMenuBar: true, webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true } });
  mainWindow.on('closed',()=>{mainWindow=null;if(authorizationWindow&&!authorizationWindow.isDestroyed())authorizationWindow.close();});
  mainWindow.webContents.setWindowOpenHandler(({ url }) => {

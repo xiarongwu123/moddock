@@ -92,8 +92,8 @@ function createAccountClient(options = {}) {
  async function start(route, body, remember = false) {
   const data = await send(route, body);
   const state = { queue: Promise.resolve(), startedAt: now(), remember: remember && config.rememberAvailable };
-  if (!state.remember) await clearSaved();
   await apply(state, data);
+  if (!state.remember) await clearSaved();
   if (remember && !config.rememberAvailable) state.storageWarning = '当前环境不支持加密保持登录；退出程序后需要重新登录。';
   const id = crypto.randomBytes(32).toString('hex');
   sessions.set(id, state);
@@ -180,6 +180,7 @@ function createAccountClient(options = {}) {
  }
  return {
   config,
+  status(id) { const state = sessions.get(id); return { remember: state?.remember === true, storageWarning: state?.storageWarning || storageWarning }; },
   requireSession,
   requireActiveSession() { return requireSession([...sessions.keys()].at(-1)); },
   authorize,

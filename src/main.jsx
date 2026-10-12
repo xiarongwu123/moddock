@@ -7,6 +7,7 @@ import Shuffle from './components/Shuffle';
 import FuzzyText from './components/FuzzyText';
 import SteamBackdrop from './auth/SteamBackdrop';
 import BootSplash from './components/BootSplash';
+import FaultyTerminal from './components/FaultyTerminal';
 import accountClient from './auth/client.cjs';
 import { mountHome, unmountHome, suspendHome } from '../public/app.js';
 import './auth.css';
@@ -34,15 +35,17 @@ function Field({ label, id, type = 'text', icon, error, ...props }) {
   </div>
  </div>;
 }
-function AuthPanel({ onEnter, navigating, backgroundActive, initialNotice }) {
+function AuthPanel({ onEnter, navigating, backgroundActive, initialNotice, initialNoticeTone }) {
  const [mode, setMode] = useState(window.location.hash.startsWith('#register') ? 'register' : 'login');
  const [step, setStep] = useState('email');
  const [email, setEmail] = useState('');
  const [password, setPassword] = useState('');
+ const [confirmation, setConfirmation] = useState('');
  const [termsAccepted, setTermsAccepted] = useState(false);
  const [accountConfig, setAccountConfig] = useState(null);
  const [errors, setErrors] = useState({});
  const [notice, setNotice] = useState('');
+ const [noticeTone, setNoticeTone] = useState('error');
  const [busy, setBusy] = useState(false);
  const [challenge, setChallenge] = useState(null);
  const [clock, setClock] = useState(Date.now());
@@ -57,10 +60,14 @@ function AuthPanel({ onEnter, navigating, backgroundActive, initialNotice }) {
  const verifyRef = useRef(null);
  const titleRef = useRef(null);
  const pendingRef = useRef(false);
+ const codeCooldowns = useRef(new Map());
+ const steps = mode === 'reset' ? ['email', 'password', 'confirm', 'verify'] : ['email', 'password', 'verify'];
+ const totalSteps = mode === 'login' ? 2 : steps.length;
  const remaining = challenge ? Math.max(0, Math.ceil((challenge.resendAt - clock) / 1000)) : 0;
  const expired = challenge && clock >= challenge.expiresAt;
- const stepNumber = step === 'email' ? 1 : step === 'password' ? 2 : 3;
- const title = step === 'verify' ? '验证你的邮箱' : step === 'password' ? mode === 'login' ? '输入密码' : '设置密码' : mode === 'login' ? '欢迎回到游匣' : '创建你的游匣账号';
+ const stepNumber = steps.indexOf(step) + 1;
+ const title = step === 'verify' ? mode === 'reset' ? '验证邮箱并重置' : '验证你的邮箱' : step === 'confirm' ? '确认新密码' : step === 'password' ? mode === 'login' ? '输入密码' : mode === 'reset' ? '设置新密码' : '设置密码' : mode === 'login' ? '欢迎回到游匣' : mode === 'reset' ? '找回密码' : '创建你的游匣账号';
+ const successNotice = !Object.keys(errors).length && (notice ? noticeTone === 'success' : step === 'email' && !!initialNotice && initialNoticeTone === 'success');
  useEffect(() => { let live = true; auth.config().then(value => { if (live) setAccountConfig(value); }).catch(error => { if (live) setNotice(error.message); }); return () => { live = false; }; }, []);
  useEffect(() => { if (!stepAnimating) panelRef.current?.querySelector('input')?.focus(); }, [mode, step, stepAnimating]);
  useEffect(() => () => stepAnimationRef.current?.cancel(), []);
@@ -82,7 +89,7 @@ function AuthPanel({ onEnter, navigating, backgroundActive, initialNotice }) {
  const changeStep = next => {
   if (stepTransitionRef.current || next === step) return;
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) { setStep(next); return; }
-  stepDirectionRef.current = ['email', 'password', 'verify'].indexOf(next) > ['email', 'password', 'verify'].indexOf(step) ? 1 : -1;
+  stepDirectionRef.current = steps.indexOf(next) > steps.indexOf(step) ? 1 : -1;
   stepTransitionRef.current = true; setStepAnimating(true);
   const animation = panelRef.current.animate([
    { opacity: 1, transform: 'translateX(0)' },
@@ -99,15 +106,44 @@ function AuthPanel({ onEnter, navigating, backgroundActive, initialNotice }) {
   measure(); const observer = new ResizeObserver(measure); observer.observe(node);
   return () => observer.disconnect();
  }, [step]);
- useEffect(() => { if (expired) { setStatus('idle'); setNotice('验证码已过期，请重新获取。'); } }, [expired]);
+ useEffect(() => { if (expired) { setStatus('idle'); setNoticeTone('error'); setNotice('验证码已过期，请重新获取。'); } }, [expired]);
  const changeMode = next => {
   if (busy || pendingRef.current || navigating || stepTransitionRef.current || next === mode) return;
-  auth.reset(); setMode(next); setStep('email'); setErrors({}); setNotice(''); setChallenge(null); setPassword(''); setTermsAccepted(false); setStatus('idle');
+  auth.reset(); setMode(next); setStep('email'); setErrors({}); setNotice(''); setNoticeTone('error'); setChallenge(null); setPassword(''); setConfirmation(''); setTermsAccepted(false); setStatus('idle');
+ };
+ const returnToLogin = message => {
+  if (stepTransitionRef.current || navigating) return;
+  auth.reset(); setMode('login'); setStep('password'); setPassword(''); setConfirmation(''); setChallenge(null); setErrors({}); setStatus('idle');
+  setNotice(message || ''); setNoticeTone(message ? 'success' : 'error');
+ };
+ const codeKey = `${mode === 'reset' ? 'reset' : 'register'}:${normalizeEmail(email)}`;
+ const requestCode = async (force = false) => {
+  const previous = codeCooldowns.current.get(codeKey), now = Date.now();
+  if (previous && now < previous.resendAt) {
+   if (!force && now < previous.expiresAt) return previous;
+   throw new Error(`请在 ${Math.ceil((previous.resendAt - now) / 1000)} 秒后重新获取验证码。`);
+  }
+  const next = await auth.sendCode(mode === 'reset' ? { email, purpose: 'reset' } : { email, password, termsAccepted });
+  codeCooldowns.current.set(codeKey, next);
+  return next;
+ };
+ const showError = error => {
+  setNoticeTone('error'); setNotice(error.message);
+  if (mode !== 'login' && error.retryAfterSeconds) {
+   const current = codeCooldowns.current.get(codeKey) || { expiresAt: 0 };
+   const next = { ...current, resendAt: Date.now() + error.retryAfterSeconds * 1000 };
+   codeCooldowns.current.set(codeKey, next);
+   if (challenge) setChallenge(next);
+   setClock(Date.now());
+  }
  };
  const validate = () => {
   const next = {};
   if (step === 'email') {
    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeEmail(email))) next.email = '请输入有效的邮箱地址';
+  } else if (step === 'confirm') {
+   if (!confirmation) next.confirm = '请再次输入新密码';
+   else if (confirmation !== password) next.confirm = '两次输入的密码不一致';
   } else {
    if (!password) next.password = '请输入密码';
    else if (password.length < 8 || password.length > 128) next.password = '密码需为 8–128 位';
@@ -115,31 +151,29 @@ function AuthPanel({ onEnter, navigating, backgroundActive, initialNotice }) {
    if (mode === 'register' && !accountConfig) next.terms = '账号服务配置尚未加载，请稍后重试';
   }
   setErrors(next);
-  if (Object.keys(next).length) document.getElementById(next.email ? 'auth-email' : 'auth-password')?.focus();
+  if (Object.keys(next).length) document.getElementById(next.email ? 'auth-email' : next.confirm ? 'auth-confirm-password' : 'auth-password')?.focus();
   return !Object.keys(next).length;
  };
  const submit = async e => {
   e.preventDefault(); if (busy || pendingRef.current || navigating || stepTransitionRef.current || !validate()) return;
   if (step === 'email') { setEmail(normalizeEmail(email)); changeStep('password'); return; }
+  if (mode === 'reset' && step === 'password') { changeStep('confirm'); return; }
   pendingRef.current = true;
-  setBusy(true); setNotice('');
+  setBusy(true); setNotice(''); setNoticeTone('error');
   try {
    if (mode === 'login') { const user = await auth.login({ email, password }); setPassword(''); onEnter(user); }
    else {
-    const next = await auth.sendCode({ email, password, termsAccepted }); setChallenge(next); setClock(Date.now()); setSlotKey(k => k + 1); setStatus('idle'); changeStep('verify');
+    const next = await requestCode(); setChallenge(next); setClock(Date.now()); setSlotKey(k => k + 1); setStatus('idle'); changeStep('verify');
    }
-  } catch (err) { setNotice(err.message); }
+  } catch (err) { showError(err); }
   finally { pendingRef.current = false; setBusy(false); }
  };
  const resend = async () => {
   if (remaining || busy || pendingRef.current || navigating || stepTransitionRef.current) return;
   pendingRef.current = true;
   setBusy(true); setNotice('');
-  try { const next = await auth.sendCode({ email, password, termsAccepted }); setChallenge(next); setClock(Date.now()); setStatus('idle'); setSlotKey(k => k + 1); }
-  catch (err) {
-   setNotice(err.message);
-   if (err.retryAfterSeconds) { setChallenge(current => ({ ...current, resendAt: Date.now() + err.retryAfterSeconds * 1000 })); setClock(Date.now()); }
-  }
+  try { const next = await requestCode(true); setChallenge(next); setClock(Date.now()); setStatus('idle'); setSlotKey(k => k + 1); }
+  catch (err) { showError(err); }
   finally { pendingRef.current = false; setBusy(false); }
  };
  const verifyCode = async code => {
@@ -147,15 +181,21 @@ function AuthPanel({ onEnter, navigating, backgroundActive, initialNotice }) {
   pendingRef.current = true;
   setBusy(true); setNotice('');
   try {
-   const user = await auth.register({ email, password, code, termsAccepted });
-   setStatus('success'); setPassword(''); onEnter(user);
+   if (mode === 'reset') {
+    await auth.resetPassword({ email, code, newPassword: password });
+    codeCooldowns.current.set(codeKey, { ...challenge, expiresAt: 0 });
+    returnToLogin('密码已重置，请使用新密码登录。');
+   } else {
+    const user = await auth.register({ email, password, code, termsAccepted });
+    setStatus('success'); setPassword(''); onEnter(user);
+   }
   }
-  catch (err) { setNotice(err.message); setStatus('error'); }
+  catch (err) { showError(err); setStatus('error'); }
   finally { pendingRef.current = false; setBusy(false); }
  };
  const back = () => {
   if (busy || pendingRef.current || navigating || stepTransitionRef.current) return;
-  auth.reset(); changeStep(step === 'verify' ? 'password' : 'email'); setChallenge(null); setStatus('idle'); setErrors({}); setNotice('');
+  auth.reset(); changeStep(steps[steps.indexOf(step) - 1]); setChallenge(null); setStatus('idle'); setErrors({}); setNotice(''); setNoticeTone('error');
  };
  return <div className="auth-page">
   <SteamBackdrop active={backgroundActive} />
@@ -163,29 +203,29 @@ function AuthPanel({ onEnter, navigating, backgroundActive, initialNotice }) {
    <ReflectiveCard width={430} height="auto" radius={22} theme="dark" tint="#cce1bb" metalness={0.78} roughness={0.38} blurStrength={8} shine={0.4} glare={0.18} bevel={2} enableTilt={false} intro={false} webcam={false} paused={!backgroundActive} className="auth-reflective-card">
     <header className="auth-card-header"><Brand active={backgroundActive} /></header>
     <div className="auth-form-card">
-     <div className="auth-mode-row"><div className="auth-tabs" role="tablist" aria-label="账号入口" onKeyDown={e => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key) && !busy && !navigating && !stepTransitionRef.current) { e.preventDefault(); const next = e.key === 'Home' ? 'login' : e.key === 'End' ? 'register' : mode === 'login' ? 'register' : 'login'; changeMode(next); document.getElementById(`${next}-tab`)?.focus(); } }}><button id="login-tab" role="tab" tabIndex={mode === 'login' ? 0 : -1} aria-selected={mode === 'login'} aria-controls="auth-panel" disabled={busy || navigating || stepAnimating} onClick={() => changeMode('login')}>登录</button><button id="register-tab" role="tab" tabIndex={mode === 'register' ? 0 : -1} aria-selected={mode === 'register'} aria-controls="auth-panel" disabled={busy || navigating || stepAnimating} onClick={() => changeMode('register')}>注册</button></div><span className="auth-step-count" aria-label={`第 ${stepNumber} 步，共 ${mode === 'login' ? 2 : 3} 步`}>{stepNumber} / {mode === 'login' ? 2 : 3}</span></div>
-     <section id="auth-panel" ref={panelRef} className="auth-step-panel" role="tabpanel" aria-labelledby={`${mode}-tab`} aria-busy={stepAnimating} data-transitioning={stepAnimating} inert={stepAnimating}>
+     <div className="auth-mode-row">{mode === 'reset' ? <span className="auth-reset-mode">账号恢复</span> : <div className="auth-tabs" role="tablist" aria-label="账号入口" onKeyDown={e => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key) && !busy && !navigating && !stepTransitionRef.current) { e.preventDefault(); const next = e.key === 'Home' ? 'login' : e.key === 'End' ? 'register' : mode === 'login' ? 'register' : 'login'; changeMode(next); document.getElementById(`${next}-tab`)?.focus(); } }}><button id="login-tab" role="tab" tabIndex={mode === 'login' ? 0 : -1} aria-selected={mode === 'login'} aria-controls="auth-panel" disabled={busy || navigating || stepAnimating} onClick={() => changeMode('login')}>登录</button><button id="register-tab" role="tab" tabIndex={mode === 'register' ? 0 : -1} aria-selected={mode === 'register'} aria-controls="auth-panel" disabled={busy || navigating || stepAnimating} onClick={() => changeMode('register')}>注册</button></div>}<span className="auth-step-count" aria-label={`第 ${stepNumber} 步，共 ${totalSteps} 步`}>{stepNumber} / {totalSteps}</span></div>
+     <section id="auth-panel" ref={panelRef} className="auth-step-panel" role={mode === 'reset' ? 'region' : 'tabpanel'} aria-label={mode === 'reset' ? '找回密码表单' : undefined} aria-labelledby={mode === 'reset' ? undefined : `${mode}-tab`} aria-busy={stepAnimating} data-transitioning={stepAnimating} inert={stepAnimating}>
       <div className="auth-form-heading"><h2 id="auth-title" ref={titleRef} tabIndex={-1} aria-label={step === 'email' ? title : undefined} className={step === 'email' ? 'auth-pixel-title' : undefined}>{step === 'email' && backgroundActive && !stepAnimating ? <span aria-hidden="true"><Shuffle key={mode} text={title} tag="span" className="auth-title-shuffle" textAlign="left" shuffleDirection="right" duration={0.35} animationMode="evenodd" shuffleTimes={1} stagger={0.025} rootMargin="0px" triggerOnce triggerOnHover={false} respectReducedMotion /></span> : title}</h2>{step !== 'email' && <p><span className="auth-account-email" title={email}>{email}</span></p>}</div>
       {step !== 'verify' ? <form className="auth-step-form" onSubmit={submit} noValidate>
-       <div className="auth-step-input">{step === 'email' ? <Field key="email" id="auth-email" label="邮箱地址" type="email" icon="mail" placeholder="you@example.com" autoComplete="email" value={email} maxLength={254} error={errors.email} disabled={busy || navigating} onChange={e => { setEmail(e.target.value); setErrors({}); setNotice(''); }} /> : <Field key="password" id="auth-password" label={mode === 'register' ? '设置密码' : '密码'} type="password" icon="lock" autoComplete={mode === 'register' ? 'new-password' : 'current-password'} value={password} maxLength={128} error={errors.password} disabled={busy || navigating} onChange={e => { setPassword(e.target.value); setErrors({}); setNotice(''); }} />}
+       <div className="auth-step-input">{step === 'email' ? <Field key="email" id="auth-email" label="邮箱地址" type="email" icon="mail" placeholder="you@example.com" autoComplete="email" value={email} maxLength={254} error={errors.email} disabled={busy || navigating} onChange={e => { setEmail(e.target.value); setErrors({}); setNotice(''); }} /> : step === 'confirm' ? <Field key="confirmation" id="auth-confirm-password" label="确认新密码" type="password" icon="lock" autoComplete="new-password" value={confirmation} maxLength={128} error={errors.confirm} disabled={busy || navigating} onChange={e => { setConfirmation(e.target.value); setErrors({}); setNotice(''); }} /> : <Field key="password" id="auth-password" label={mode === 'register' ? '设置密码' : mode === 'reset' ? '新密码' : '密码'} type="password" icon="lock" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} value={password} maxLength={128} error={errors.password} disabled={busy || navigating} onChange={e => { setPassword(e.target.value); setConfirmation(''); setErrors({}); setNotice(''); }} />}
        {mode === 'register' && step === 'password' && <div className="auth-terms"><label><input type="checkbox" checked={termsAccepted} disabled={busy || navigating || !accountConfig} onChange={e => { setTermsAccepted(e.target.checked); setErrors({}); setNotice(''); }} />我已阅读并同意</label>{accountConfig && <><a href={accountConfig.legalUrls.terms} target="_blank" rel="noopener noreferrer">用户协议</a><span>和</span><a href={accountConfig.legalUrls.privacy} target="_blank" rel="noopener noreferrer">隐私政策</a></>}</div>}
-       <div className="auth-feedback" id="auth-step-feedback" role="alert">{errors[step] || errors.terms || notice || (step === 'email' ? initialNotice : '')}</div></div>
-       <button className="auth-primary" type="submit" disabled={busy || navigating}>{navigating ? '正在进入游戏库…' : busy ? '请稍候…' : step === 'email' ? '下一步' : mode === 'login' ? '登录' : '获取邮箱验证码'}<Icon name="arrow" /></button>
+       <div className={`auth-feedback${successNotice ? ' is-success' : ''}`} id="auth-step-feedback" role={successNotice ? 'status' : 'alert'}>{errors[step] || errors.terms || notice || (step === 'email' ? initialNotice : '')}</div></div>
+       <button className="auth-primary" type="submit" disabled={busy || navigating}>{navigating ? '正在进入游戏库…' : busy ? '请稍候…' : step === 'email' || (mode === 'reset' && step === 'password') ? '下一步' : mode === 'login' ? '登录' : '获取邮箱验证码'}<Icon name="arrow" /></button>
       </form> : <div className="verification-step" ref={verifyRef}>
-       <div className="verification-label"><span>邮箱验证码</span><details key={challenge?.id} className="verification-help" onKeyDown={e => { if (e.key === 'Escape') { e.currentTarget.open = false; e.currentTarget.querySelector('summary')?.focus(); } }}><summary aria-label="验证码帮助">?</summary><div className="verification-help-content" role="note"><p>如邮箱符合注册条件，验证码邮件已发送，请检查收件箱和垃圾邮件。</p><p>验证码 10 分钟内有效。已有 MU 账号可直接登录。</p></div></details></div>
+       <div className="verification-label"><span>邮箱验证码</span><details key={challenge?.id} className="verification-help" onKeyDown={e => { if (e.key === 'Escape') { e.currentTarget.open = false; e.currentTarget.querySelector('summary')?.focus(); } }}><summary aria-label="验证码帮助">?</summary><div className="verification-help-content" role="note"><p>如邮箱符合{mode === 'reset' ? '找回密码' : '注册'}条件，验证码邮件已发送，请检查收件箱和垃圾邮件。</p><p>验证码 10 分钟内有效。{mode === 'reset' ? '重置成功后请使用新密码登录。' : '已有 MU 账号可直接登录。'}</p></div></details></div>
        <CodeSlots key={slotKey} length={6} status={status} onChange={() => { if (status === 'error') setStatus('idle'); }} onComplete={verifyCode} accentColor="#b3f66b" inkColor="#b3f66b" slotColor="#24292d" digitColor="#142019" dangerColor="#ff7878" slotSize={slotSize} gap={8} radius={9} bounce={0.2} settle={0.3} rise={8} cascade={20} ariaLabel="邮箱验证码" autoFocus disabled={busy || navigating || expired || stepAnimating} />
        <div className="verification-resend"><button type="button" onClick={resend} disabled={remaining > 0 || busy || navigating}>{remaining > 0 ? `${remaining}s` : '重新获取'}</button></div>
        <div className="auth-feedback" role="alert">{notice}</div>
-       <div className="verification-auto" role="status">{navigating ? '正在进入…' : busy ? '正在验证…' : ''}</div>
+       <div className="verification-auto" role="status">{navigating ? '正在进入…' : busy ? mode === 'reset' ? '正在重置密码…' : '正在验证…' : ''}</div>
       </div>}
      </section>
-     <div className="auth-secondary-actions"><button className="auth-back" style={{ visibility: step === 'email' ? 'hidden' : undefined }} tabIndex={step === 'email' ? -1 : 0} onClick={back} disabled={busy || navigating || stepAnimating}><Icon name="left" />上一步</button></div>
+     <div className="auth-secondary-actions"><button className="auth-back" style={{ visibility: step === 'email' ? 'hidden' : undefined }} tabIndex={step === 'email' ? -1 : 0} onClick={back} disabled={busy || navigating || stepAnimating}><Icon name="left" />上一步</button>{mode === 'login' && step === 'password' && <button className="auth-link" type="button" onClick={() => changeMode('reset')} disabled={busy || navigating || stepAnimating}>找回密码</button>}{mode === 'reset' && <button className="auth-link" type="button" onClick={() => returnToLogin()} disabled={busy || navigating || stepAnimating}>返回登录</button>}</div>
     </div>
    </ReflectiveCard>
   </main>
  </div>;
 }
-function Home({ session, onReady }) {
+function Home({ session, onReady, backgroundActive }) {
  const host = useRef(null);
  useEffect(() => {
   if (session?.mode !== 'mu') return;
@@ -193,7 +233,12 @@ function Home({ session, onReady }) {
   mountHome(host.current, session).then(mounted => { if (live && mounted) onReady(); });
   return () => { live = false; unmountHome(); };
  }, [session, onReady]);
- return <div className="home-host" ref={host} id="app"><div className="boot">正在打开本地游戏库…</div></div>;
+ return <div className="home-page">
+  {session?.mode === 'mu' && backgroundActive && <div className="home-backdrop" aria-hidden="true">
+   <FaultyTerminal tint="#A7EF9E" glyphs="blocks" scale={1.5} digitSize={1.2} timeScale={0.14} brightness={0.45} glow={0.18} persistence={0.25} mouseStrength={0.12} mouseGlow={0.12} scanlineIntensity={0.12} glitchAmount={0.12} flickerAmount={0.15} curvature={0.1} vignette={0.35} clickEffect="none" />
+  </div>}
+  <div className="home-host" ref={host} id="app"><div className="boot">正在打开本地游戏库…</div></div>
+ </div>;
 }
 function App({ booting }) {
  const [session, setSession] = useState(null);
@@ -202,6 +247,7 @@ function App({ booting }) {
  const [formKey, setFormKey] = useState(0);
  const [checkingSession, setCheckingSession] = useState(true);
  const [initialNotice, setInitialNotice] = useState('');
+ const [initialNoticeTone, setInitialNoticeTone] = useState('error');
  const returningRef = useRef(false);
  useEffect(() => {
   let live = true;
@@ -226,7 +272,7 @@ function App({ booting }) {
   const logout = async () => {
    if (navigating || checkingSession || returningRef.current) return;
    returningRef.current = true; suspendHome();
-   setCheckingSession(true); setInitialNotice('');
+   setCheckingSession(true); setInitialNotice(''); setInitialNoticeTone('error');
    try { await auth.logout(); }
    catch (error) { setInitialNotice(error.message); }
    finally { setCheckingSession(false); setFormKey(k => k + 1); setNavigating(true); setActive(false); }
@@ -236,6 +282,7 @@ function App({ booting }) {
    returningRef.current = true;
    unmountHome(); setSession(null); setCheckingSession(false); setFormKey(k => k + 1);
    setInitialNotice(event.detail?.message || '登录已失效，请重新登录。');
+   setInitialNoticeTone(event.detail?.tone || 'error');
    setNavigating(active); setActive(false);
    if (!active) { returningRef.current = false; window.history.replaceState(null, '', '#login'); }
   };
@@ -243,7 +290,7 @@ function App({ booting }) {
   window.addEventListener('moddock:auth-required', requireLogin);
   return () => { window.removeEventListener('moddock:logout', logout); window.removeEventListener('moddock:auth-required', requireLogin); };
  }, [navigating, checkingSession, active]);
- return <GridScanTransition firstContent={<AuthPanel key={formKey} onEnter={enter} navigating={navigating || checkingSession} initialNotice={initialNotice} backgroundActive={!booting && !active && !navigating} />} secondContent={<Home session={session} onReady={ready} />} active={active} onComplete={complete} className="auth-swap" />;
+ return <GridScanTransition firstContent={<AuthPanel key={formKey} onEnter={enter} navigating={navigating || checkingSession} initialNotice={initialNotice} initialNoticeTone={initialNoticeTone} backgroundActive={!booting && !active && !navigating} />} secondContent={<Home session={session} onReady={ready} backgroundActive={active || navigating} />} active={active} onComplete={complete} className="auth-swap" />;
 }
 function DesktopChrome() {
  const overlay = navigator.windowControlsOverlay;

@@ -20,8 +20,12 @@ app = runtime / 'resources/app'
 if app.exists():
     shutil.rmtree(app)
 app.mkdir(parents=True)
-for name in ['package.json', 'electron.cjs', 'server.cjs', 'sources.cjs', 'downloads.cjs', 'scanner.cjs', 'installers.cjs', 'nxm.cjs', 'library.cjs', 'adapters.cjs', 'nexus-games.json']:
+for name in ['package.json', 'electron.cjs', 'server.cjs', 'sources.cjs', 'downloads.cjs', 'scanner.cjs', 'installers.cjs', 'nxm.cjs', 'library.cjs', 'adapters.cjs', 'account.cjs', 'account-policy.cjs', 'account-token-store.cjs', 'nexus-games.json']:
     shutil.copy2(project / name, app / name)
+for name in ['auth.js', 'auth.css']:
+    assert (project / 'public' / name).is_file(), 'Run npm run build before packaging'
+(app / 'scripts').mkdir()
+shutil.copy2(project / 'scripts/build-ui.cjs', app / 'scripts/build-ui.cjs')
 shutil.copytree(project / 'public', app / 'public')
 copied = set()
 def dependency(name):
@@ -42,7 +46,7 @@ with zipfile.ZipFile(windows_zip, 'w', zipfile.ZIP_DEFLATED, compresslevel=6) as
     for file in sorted(runtime.rglob('*')):
         if file.is_file():
             archive.write(file, Path('Moddock') / file.relative_to(runtime))
-excluded = {'node_modules', '.git', '.demo-data', '.moddock-data', 'test-results', 'playwright-report', '__pycache__'}
+excluded = {'node_modules', '.git', '.demo-data', '.moddock-data', 'test-results', 'playwright-report', '__pycache__', 'output'}
 with zipfile.ZipFile(source_zip, 'w', zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
     for file in sorted(project.rglob('*')):
         if file.is_file() and not any(part in excluded for part in file.relative_to(project).parts):
@@ -51,6 +55,8 @@ with zipfile.ZipFile(windows_zip) as archive:
     assert archive.testzip() is None
     assert json.loads(archive.read('Moddock/resources/app/package.json'))['version'] == package['version']
     assert archive.read('Moddock/resources/app/installers.cjs') == (project / 'installers.cjs').read_bytes()
+    for name in ['account.cjs', 'account-policy.cjs', 'account-token-store.cjs', 'scripts/build-ui.cjs', 'public/auth.js', 'public/auth.css']:
+        assert archive.read('Moddock/resources/app/' + name) == (project / name).read_bytes()
     assert 'Moddock/resources/app/node_modules/yauzl/index.js' in archive.namelist()
     assert 'Moddock/resources/app/node_modules/pend/index.js' in archive.namelist()
     assert not any('.moddock-data' in name or '/test/' in name or '/.git/' in name for name in archive.namelist())

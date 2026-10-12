@@ -5,6 +5,68 @@ const crypto=require('node:crypto'),{crc32}=require('node:zlib'),{spawn}=require
 const {Installers,hash,relative,smapiEvidence}=require('../installers.cjs');
 const {createServer,loginFixture}=require('./server-fixture.cjs');
 const {zip}=require('./zip-fixture.cjs');
+test('跨内容根目录的同一目标在启用和停用时都拒绝重复托管',async t=>{
+ for(const reverse of [false,true])for(const disabled of [false,true])await t.test(`${reverse?'子目录先安装':'游戏根先安装'} / ${disabled?'停用':'启用'}`,async t=>{
+  const x=await fixture(t);await fs.mkdir(path.join(x.game.installPath,'Content'));
+  const rules=[{mode:'copy',destination:'Content'},{mode:'copy',root:'Content',destination:''}];if(reverse)rules.reverse();
+  await x.engine.setProfile(x.game,rules[0]);const a=await x.job([{name:'a.txt',data:'first'}]);const plan=await x.engine.prepare(x.game,a.id);const installed=await x.engine.apply(x.game,plan.id);
+  if(disabled)await x.engine.action(x.game,installed.id,'disable');
+  const b=await x.job([{name:'a.txt',data:'second'}]);await x.engine.setProfile(x.game,rules[1]);
+  await assert.rejects(x.engine.prepare(x.game,b.id),/托管 Mod 冲突/);
+  assert.equal(x.engine.state.mods.length,1);
+  if(disabled)await x.engine.action(x.game,installed.id,'enable');
+  assert.equal(await fs.readFile(path.join(x.game.installPath,'Content/a.txt'),'utf8'),'first');
+ });
+});
+test('执行旧方案时重新检查跨根目录冲突，即使目标哈希与预览一致',async t=>{
+ const x=await fixture(t);await fs.mkdir(path.join(x.game.installPath,'Content'));const file=path.join(x.game.installPath,'Content/a.txt');await fs.writeFile(file,'original');
+ const wide={mode:'copy',destination:'Content'},narrow={mode:'copy',root:'Content',destination:''};
+ const a=await x.job([{name:'a.txt',data:'first'}]),b=await x.job([{name:'a.txt',data:'second'}]);
+ await x.engine.setProfile(x.game,wide);const firstPlan=await x.engine.prepare(x.game,a.id);
+ await x.engine.setProfile(x.game,narrow);const stalePlan=await x.engine.prepare(x.game,b.id);
+ await x.engine.setProfile(x.game,wide);const installed=await x.engine.apply(x.game,firstPlan.id,true);await x.engine.action(x.game,installed.id,'disable');
+ await x.engine.setProfile(x.game,narrow);await assert.rejects(x.engine.apply(x.game,stalePlan.id,true),/托管 Mod 冲突/);
+ assert.equal(await fs.readFile(file,'utf8'),'original');assert.equal(x.engine.state.mods.length,1);
+ await x.engine.action(x.game,installed.id,'enable');await x.engine.action(x.game,installed.id,'uninstall');assert.equal(await fs.readFile(file,'utf8'),'original');
+});
+test('安装回滚失败锁定后续操作，保留日志和备份直到重启恢复成功',async t=>{
+ const x=await fixture(t);const stableJob=await x.job([{name:'keep.txt',data:'keep'}]);const stablePlan=await x.engine.prepare(x.game,stableJob.id);const stable=await x.engine.apply(x.game,stablePlan.id);const loadout=await x.engine.saveLoadout(x.game,'Stable');
+ const file=path.join(x.game.installPath,'Mods/a.txt');await fs.writeFile(file,'original');
+ const j=await x.job([{name:'a.txt',data:'modded'},{name:'b.txt',data:'new'}]),nextJob=await x.job([{name:'next.txt',data:'next'}]);const p=await x.engine.prepare(x.game,j.id),nextPlan=await x.engine.prepare(x.game,nextJob.id);
+ x.engine.options.afterWrite=async(i,c)=>{if(i===0){await fs.writeFile(path.join(c.root,c.rel),'external');throw new Error('injected write failure');}};
+ await assert.rejects(x.engine.apply(x.game,p.id,true),/回滚检测到外部文件改动/);
+ delete x.engine.options.afterWrite;
+ const journalPath=path.join(x.engine.root,'journal.json'),journalBytes=await fs.readFile(journalPath),journal=JSON.parse(journalBytes),stateBytes=await fs.readFile(path.join(x.engine.root,'state.json'));
+ const actions=[()=>x.engine.apply(x.game,nextPlan.id),()=>x.engine.prepare(x.game,nextJob.id),()=>x.engine.action(x.game,stable.id,'disable'),()=>x.engine.action(x.game,stable.id,'uninstall'),()=>x.engine.switchLoadout(x.game,loadout.id),()=>x.engine.setProfile(x.game,{mode:'copy',destination:'Other'})];
+ for(const action of actions)await assert.rejects(action(),/事务尚未恢复/);
+ assert.deepEqual(await fs.readFile(journalPath),journalBytes);assert.deepEqual(await fs.readFile(path.join(x.engine.root,'state.json')),stateBytes);assert.equal(await fs.readFile(file,'utf8'),'external');
+ assert.equal(await fs.readFile(journal.changes[0].beforeFile,'utf8'),'original');assert.equal(await fs.readFile(journal.changes[0].afterFile,'utf8'),'modded');
+ await assert.rejects(new Installers(x.root,x.downloads).open(),/安装事务恢复失败/);assert.deepEqual(await fs.readFile(journalPath),journalBytes);
+ await fs.copyFile(journal.changes[0].afterFile,file);const recovered=await new Installers(x.root,x.downloads,{processes:async()=>[]}).open();
+ assert.equal(await fs.readFile(file,'utf8'),'original');await assert.rejects(fs.access(journalPath),/ENOENT/);await assert.rejects(fs.access(path.join(x.game.installPath,'Mods/b.txt')),/ENOENT/);assert.deepEqual(recovered.state.mods.map(m=>m.id),[stable.id]);
+ const fresh=await recovered.prepare(x.game,nextJob.id);await recovered.apply(x.game,fresh.id);assert.equal(await fs.readFile(path.join(x.game.installPath,'Mods/next.txt'),'utf8'),'next');
+});
+test('配置档案回滚失败同样锁定事务，重启恢复全部启用状态',async t=>{
+ const x=await fixture(t);const a=await x.job([{name:'a.txt',data:'A'}]);const pa=await x.engine.prepare(x.game,a.id);const first=await x.engine.apply(x.game,pa.id);const loadout=await x.engine.saveLoadout(x.game,'Only A');
+ const b=await x.job([{name:'b.txt',data:'B'}]);const pb=await x.engine.prepare(x.game,b.id);const second=await x.engine.apply(x.game,pb.id);
+ x.engine.options.afterWrite=async(_i,c)=>{await fs.writeFile(path.join(c.root,c.rel),'external');throw new Error('injected loadout failure');};
+ await assert.rejects(x.engine.switchLoadout(x.game,loadout.id),/回滚检测到外部文件改动/);
+ delete x.engine.options.afterWrite;
+ const journalPath=path.join(x.engine.root,'journal.json'),bytes=await fs.readFile(journalPath),journal=JSON.parse(bytes);
+ await assert.rejects(x.engine.action(x.game,first.id,'disable'),/事务尚未恢复/);await assert.rejects(x.engine.switchLoadout(x.game,loadout.id),/事务尚未恢复/);assert.deepEqual(await fs.readFile(journalPath),bytes);
+ await assert.rejects(new Installers(x.root,x.downloads).open(),/安装事务恢复失败/);
+ await fs.rm(path.join(journal.changes[0].root,journal.changes[0].rel));const recovered=await new Installers(x.root,x.downloads,{processes:async()=>[]}).open();
+ assert.equal(await fs.readFile(path.join(x.game.installPath,'Mods/b.txt'),'utf8'),'B');assert.ok(recovered.state.mods.every(m=>m.status==='enabled'));await assert.rejects(fs.access(journalPath),/ENOENT/);
+ await recovered.switchLoadout(x.game,loadout.id);assert.equal(recovered.state.mods.find(m=>m.id===second.id).status,'disabled');assert.equal(await fs.readFile(path.join(x.game.installPath,'Mods/a.txt'),'utf8'),'A');
+});
+test('启动恢复缺少备份时不能将 ENOENT 当成没有事务并清理载荷',async t=>{
+ const x=await fixture(t);await fs.mkdir(path.join(x.game.installPath,'Mods'));const file=path.join(x.game.installPath,'Mods/a.txt');await fs.writeFile(file,'original');
+ const j=await x.job([{name:'a.txt',data:'modded'}]);const p=await x.engine.prepare(x.game,j.id);
+ x.engine.options.afterWrite=async(_i,c)=>{await fs.writeFile(path.join(c.root,c.rel),'external');throw new Error('injected failure');};await assert.rejects(x.engine.apply(x.game,p.id,true),/回滚检测到外部文件改动/);
+ const journalPath=path.join(x.engine.root,'journal.json'),bytes=await fs.readFile(journalPath),journal=JSON.parse(bytes);await fs.copyFile(journal.changes[0].afterFile,file);await fs.rm(journal.changes[0].beforeFile);
+ const reopened=new Installers(x.root,x.downloads,{processes:async()=>[]});await assert.rejects(reopened.open(),/安装事务恢复失败/);await assert.rejects(reopened.setProfile(x.game,{mode:'copy',destination:'Other'}),/事务尚未恢复/);
+ assert.deepEqual(await fs.readFile(journalPath),bytes);assert.equal(await fs.readFile(journal.changes[0].afterFile,'utf8'),'modded');assert.equal(await fs.readFile(file,'utf8'),'modded');
+});
 async function fixture(t,options={}){const root=await fs.mkdtemp(path.join(os.tmpdir(),'moddock-install-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));const game={id:'steam-987654',appId:'987654',name:'Unknown Game',platform:'Steam',installPath:path.join(root,'game')};await fs.mkdir(game.installPath);const downloads={jobs:[],async completedFile(id){const j=this.jobs.find(j=>j.id===id);return {file:j.path,name:j.filename};}};const engine=await new Installers(root,downloads,{processes:async()=>[],...options}).open();await engine.setProfile(game,{mode:'copy',destination:'Mods',requires:[]});return {root,game,downloads,engine,async job(entries,name='mod.zip'){const id=crypto.randomUUID(),file=path.join(root,id);await fs.writeFile(file,zip(entries));const j={id,gameId:game.id,status:'completed',name:'Fixture Mod',filename:name,resourceId:'banana:1',path:file,sha256:await hash(file)};downloads.jobs.push(j);return j;}};}
 test('未知游戏规则真正部署：备份替换、停用、启用、卸载和重启持久化',async t=>{const x=await fixture(t);await fs.mkdir(path.join(x.game.installPath,'Mods'));await fs.writeFile(path.join(x.game.installPath,'Mods/a.txt'),'original');const j=await x.job([{name:'a.txt',data:'modded'},{name:'nested/b.txt',data:'new'}]);const p=await x.engine.prepare(x.game,j.id);assert.equal(p.files[0].overwrite,true);await assert.rejects(x.engine.apply(x.game,p.id),/备份和替换/);const m=await x.engine.apply(x.game,p.id,true);assert.equal(await fs.readFile(path.join(x.game.installPath,'Mods/a.txt'),'utf8'),'modded');assert.equal(m.verification.status,'deployed');const next=await new Installers(x.root,x.downloads,{processes:async()=>[]}).open();assert.equal(next.state.mods.length,1);await next.action(x.game,m.id,'disable');assert.equal(await fs.readFile(path.join(x.game.installPath,'Mods/a.txt'),'utf8'),'original');await assert.rejects(fs.stat(path.join(x.game.installPath,'Mods/nested/b.txt')),/ENOENT/);await next.action(x.game,m.id,'enable');assert.equal(await fs.readFile(path.join(x.game.installPath,'Mods/a.txt'),'utf8'),'modded');await fs.writeFile(path.join(x.game.installPath,'Mods/nested/generated.json'),'user config');await next.action(x.game,m.id,'uninstall');assert.equal(await fs.readFile(path.join(x.game.installPath,'Mods/a.txt'),'utf8'),'original');assert.equal(await fs.readFile(path.join(x.game.installPath,'Mods/nested/generated.json'),'utf8'),'user config');assert.equal(next.state.mods.length,0);});
 test('保护外部修改、托管冲突、过期方案、游戏路径变化与下载篡改',async t=>{const x=await fixture(t),j=await x.job([{name:'a.txt'}]);let p=await x.engine.prepare(x.game,j.id);const m=await x.engine.apply(x.game,p.id);await fs.writeFile(path.join(x.game.installPath,'Mods/a.txt'),'external');await assert.rejects(x.engine.action(x.game,m.id,'uninstall'),/外部修改/);assert.equal((await x.engine.action(x.game,m.id,'verify')).verification.status,'changed');const another=await x.job([{name:'a.txt',data:'other'}]);await assert.rejects(x.engine.prepare(x.game,another.id),/冲突/);await assert.rejects(x.engine.action({...x.game,installPath:x.root},m.id,'disable'),/路径已变化/);const fresh=await x.job([{name:'b.txt'}]);p=await x.engine.prepare(x.game,fresh.id);x.engine.plans.get(p.id).created=0;await assert.rejects(x.engine.apply(x.game,p.id),/过期/);await fs.appendFile(fresh.path,'corrupt');await assert.rejects(x.engine.prepare(x.game,fresh.id),/SHA-256/);});
