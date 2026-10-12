@@ -6,6 +6,7 @@ const crypto = require('node:crypto');
 const { scan } = require('./scanner.cjs');
 const { Sources, sourceGames, providers } = require('./sources.cjs');
 const { Downloads } = require('./downloads.cjs');
+const { Installers } = require('./installers.cjs');
 async function createServer(options = {}) {
  const root = path.resolve(options.root || process.env.MODDOCK_DATA || path.join(__dirname, '.moddock-data')); await fs.mkdir(root, { recursive: true });
  const configPath = path.join(root, 'settings.json'); let config = { scanPaths: [], mappings: {} };
@@ -13,6 +14,7 @@ async function createServer(options = {}) {
  const saveConfig = async () => { await fs.writeFile(configPath + '.tmp', JSON.stringify(config, null, 2)); await fs.rename(configPath + '.tmp', configPath); };
  const doScan = options.scan || scan; let scanResult = await doScan(config.scanPaths);
  const token = crypto.randomBytes(32).toString('hex'); const sources = new Sources(options.sources || {}); const downloads = await new Downloads(root, sources, options.downloads).open();
+ const installers = await new Installers(root, downloads, options.installers).open();
  function onlineGames() { return scanResult.games.map(g => { const known = sourceGames.find(s => (g.appId && s.appId === g.appId) || [s.name, s.searchName].some(n => n.toLowerCase() === g.name.toLowerCase())); return { ...known, ...g, searchName: known?.searchName || g.name, ...config.mappings[g.id] }; }); }
  const server = http.createServer(async (req, res) => {
   res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('Cache-Control', 'no-store');
@@ -21,10 +23,18 @@ async function createServer(options = {}) {
    if (req.headers.host !== `127.0.0.1:${server.address().port}`) return send({ error: '非法访问地址' }, 403);
    const url = new URL(req.url, `http://${req.headers.host}`);
    if (url.pathname.startsWith('/api/')) {
-    if (req.method === 'GET' && url.pathname === '/api/state') return send({ scan: scanResult, token, games: scanResult.games, sourceGames: onlineGames(), providers, connections: sources.status(), jobs: downloads.view(), scanPaths: config.scanPaths, mappings: config.mappings, downloadPath: downloads.root });
+    if (req.method === 'GET' && url.pathname === '/api/state') return send({ scan: scanResult, token, games: scanResult.games, sourceGames: onlineGames(), providers, connections: sources.status(), jobs: downloads.view(), installations: installers.view(onlineGames()), scanPaths: config.scanPaths, mappings: config.mappings, downloadPath: downloads.root });
     if (req.method !== 'POST' || req.headers['x-moddock-token'] !== token) return send({ error: '请求未授权' }, 403);
     let raw = ''; for await (const chunk of req) { raw += chunk; if (raw.length > 16384) return send({ error: '请求过大' }, 413); } const body = JSON.parse(raw || '{}');
     const game = () => { const g = onlineGames().find(g => g.id === body.gameId); if (!g) throw new Error('请先扫描并选择本机安装的游戏'); return g; };
+    if (url.pathname === '/api/installations/profile') return send(await installers.setProfile(game(), body.rule));
+    if (url.pathname === '/api/installations/inspect') return send(await installers.inspect(game(), body.jobId));
+    if (url.pathname === '/api/installations/plan') return send(await installers.prepare(game(), body.jobId));
+    if (url.pathname === '/api/installations/discard') return send(await installers.discard(body.id));
+    if (url.pathname === '/api/installations/apply') return send(await installers.apply(game(), body.id, body.allowOverwrite === true));
+    if (url.pathname === '/api/installations/action') return send(await installers.action(game(), body.id, body.action));
+    if (url.pathname === '/api/installations/launch') return send(await installers.launch(game()));
+    if (url.pathname === '/api/installations/run') return send(await installers.checkRun(game(), body.id));
     if (url.pathname === '/api/sources/list') { if (body.force === true) sources.cache.clear(); return send(await sources.list(body.source, game(), body.query || '', body.page ?? 1)); }
     if (url.pathname === '/api/sources/detail') { const detail = await sources.detail(game(), body.id); return send({ ...detail, files: detail.files.map(({ _url, md5, ...f }) => f) }); }
     if (url.pathname === '/api/sources/connection') return send(sources.connect(body.source, body.key));
@@ -48,7 +58,7 @@ async function createServer(options = {}) {
   } catch (e) { if (!res.headersSent) send({ error: e.message }, 400); else res.destroy(); }
  });
  await new Promise(resolve => server.listen(options.port ?? Number(process.env.PORT || 4173), '127.0.0.1', resolve));
- return { server, sources, downloads, url: `http://127.0.0.1:${server.address().port}` };
+ return { server, sources, downloads, installers, url: `http://127.0.0.1:${server.address().port}` };
 }
 if (require.main === module) createServer().then(({ url }) => console.log(`游匣已启动：${url}`)).catch(e => { console.error(e.message); process.exit(1); });
 module.exports = { createServer };
