@@ -10,7 +10,9 @@ const { Installers } = require('./installers.cjs');
 const {ModLibrary}=require('./library.cjs');
 const {parseNxm,authorizationPage}=require('./nxm.cjs');
 const {recipes}=require('./adapters.cjs');
+const { ensureUi } = require('./scripts/build-ui.cjs');
 async function createServer(options = {}) {
+ await ensureUi();
  const root = path.resolve(options.root || process.env.MODDOCK_DATA || path.join(__dirname, '.moddock-data')); await fs.mkdir(root, { recursive: true });
  const configPath = path.join(root, 'settings.json'); let config = { scanPaths: [], mappings: {}, autoImport:true };
  try { config = { ...config, ...JSON.parse(await fs.readFile(configPath, 'utf8')) }; } catch (e) { if (e.code !== 'ENOENT') throw e; }

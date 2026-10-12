@@ -91,7 +91,7 @@ React 入口为 `src/main.jsx`，组件位于 `src/components/`。`src/auth/prev
 
 进入首页和返回登录使用 `GridScanTransition`：约 1.3 秒的绿色网格扫描，完全覆盖页面后交接，再显露目标页面。页面保留原始 DOM 和画布，结束后卸载扫描并释放 WebGL 资源；开启系统减少动效时直接交接，WebGL 不可用时使用 CSS 网格。摄像头、陀螺仪和人脸模型加载均关闭。依赖包括附件源码使用的 `three`、`face-api.js` 和 `postprocessing`。检查：`node test/ui-grid-scan.cjs`。
 
-`npm run build` 使用 esbuild 生成本地 `public/auth.js` / `public/auth.css`；`npm start` 与 `npm run preview` 会先自动构建。直接运行 `node server.cjs` 或 Windows 打包前，也需要先运行 `npm run build`。构建产物已加入 Git 忽略。
+`npm run build` 使用 esbuild 生成本地 `public/auth.js` / `public/auth.css`；`npm start` 与 `npm run preview` 会先自动构建。直接运行 `node server.cjs` 时，服务会在监听端口前自动补建缺失的前端文件；修改前端源码后需要重新构建，Windows 打包前也需要运行 `npm run build`。构建产物已加入 Git 忽略。
 
 需要 Node.js 22.15 及以上（使用内置 ZIP CRC 校验）。
 
