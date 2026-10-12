@@ -20,7 +20,7 @@ app = runtime / 'resources/app'
 if app.exists():
     shutil.rmtree(app)
 app.mkdir(parents=True)
-for name in ['package.json', 'electron.cjs', 'server.cjs', 'sources.cjs', 'downloads.cjs', 'scanner.cjs', 'installers.cjs', 'nexus-games.json']:
+for name in ['package.json', 'electron.cjs', 'server.cjs', 'sources.cjs', 'downloads.cjs', 'scanner.cjs', 'installers.cjs', 'nxm.cjs', 'library.cjs', 'adapters.cjs', 'nexus-games.json']:
     shutil.copy2(project / name, app / name)
 shutil.copytree(project / 'public', app / 'public')
 copied = set()

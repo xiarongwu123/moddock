@@ -5,7 +5,7 @@ const { downloadAllowed } = require('./sources.cjs');
 const MAX_BYTES = 5 * 1024 ** 3;
 function filename(value) { const name = String(value || 'mod.zip').split(/[\\/]/).pop().replace(/[<>:"|?*\x00-\x1f]/g, '_').replace(/[. ]+$/g, '').slice(0, 150); return !name || /^(con|prn|aux|nul|com\d|lpt\d)(\.|$)/i.test(name) ? 'mod-' + (name || 'file.zip') : name; }
 class Downloads {
- constructor(root, sources, options = {}) { this.root = path.resolve(root, 'downloads'); this.sources = sources; this.fetch = options.fetch || globalThis.fetch; this.jobs = []; this.controllers = new Map(); this.persist = Promise.resolve(); }
+ constructor(root, sources, options = {}) { this.root = path.resolve(root, 'downloads'); this.sources = sources; this.fetch = options.fetch || globalThis.fetch; this.jobs = []; this.controllers = new Map(); this.persist = Promise.resolve(); this.authorizations=new Map(); this.onCompleted=options.onCompleted; }
  async open() {
   await fs.mkdir(this.root, { recursive: true });
   try { this.jobs = JSON.parse(await fs.readFile(path.join(this.root, 'history.json'), 'utf8')); } catch (e) { if (e.code !== 'ENOENT') throw e; }
@@ -13,12 +13,20 @@ class Downloads {
   await this.save(); return this;
  }
  save() { const state = JSON.stringify(this.jobs); this.persist = this.persist.catch(() => {}).then(async () => { await fs.writeFile(path.join(this.root, 'history.tmp'), state); await fs.rename(path.join(this.root, 'history.tmp'), path.join(this.root, 'history.json')); }); return this.persist; }
- start(game, resourceId, fileId, name) {
+ start(game, resourceId, fileId, name, authorization) {
   this.sources.resource(game, resourceId); if (!/^\d+$/.test(String(fileId))) throw new Error('文件 ID 无效');
   if (this.jobs.filter(j => ['queued','running'].includes(j.status)).length >= 20) throw new Error('下载队列已满');
   if (this.jobs.some(j => j.gameId === game.id && j.resourceId === resourceId && j.fileId === String(fileId) && ['queued','running'].includes(j.status))) throw new Error('这个文件已经在下载队列中');
   const job = { id: crypto.randomUUID(), name: String(name || 'Mod 文件').slice(0, 180), gameId: game.id, gameName: game.name, resourceId, fileId: String(fileId), source: resourceId.split(':')[0], status: 'queued', bytes: 0, total: null, progress: 0, message: '等待下载', created: new Date().toISOString(), game };
-  this.jobs.unshift(job); this.save(); this.pump(); return this.view().find(j => j.id === job.id);
+  if(authorization)this.authorizations.set(job.id,authorization); this.jobs.unshift(job); this.save(); this.pump(); return this.view().find(j => j.id === job.id);
+ }
+ resumeAuthorization(game, resourceId, fileId, authorization) {
+  const active=this.jobs.find(j=>j.gameId===game.id&&j.resourceId===resourceId&&j.fileId===String(fileId)&&['queued','running'].includes(j.status));if(active){this.authorizations.set(active.id,authorization);return this.view().find(j=>j.id===active.id);}
+  const existing=this.jobs.find(j=>j.gameId===game.id&&j.resourceId===resourceId&&j.fileId===String(fileId)&&['authorization_required','failed'].includes(j.status));
+  if(!existing)return this.start(game,resourceId,fileId,'Nexus Mod '+resourceId.split(':').at(-1),authorization);
+  if(this.controllers.has(existing.id))throw new Error('下载正在结束，请稍后重新接收授权');
+  if(this.jobs.filter(j=>['queued','running'].includes(j.status)).length>=20)throw new Error('下载队列已满');
+  Object.assign(existing,{game,status:'queued',bytes:0,total:null,progress:0,code:null,message:'已收到 NXM 文件授权'});this.authorizations.set(existing.id,authorization);this.save();this.pump();return this.view().find(j=>j.id===existing.id);
  }
  view() { return this.jobs.map(({ game, ...j }) => j); }
  cancel(id) { const job = this.jobs.find(j => j.id === id); if (!job || !['queued','running'].includes(job.status)) throw new Error('任务不能取消'); job.status = 'cancelled'; job.message = '下载已取消'; this.controllers.get(id)?.abort(); this.save(); }
@@ -42,10 +50,10 @@ class Downloads {
   }
  }
  async run(j, ctrl) {
-  const partial = path.join(this.root, j.id + '.part'); let handle, idleTimer; const resetIdle = () => { clearTimeout(idleTimer); idleTimer = setTimeout(() => ctrl.abort(new Error('下载超过 60 秒没有返回数据，请重试')), 60000); };
+  const partial = path.join(this.root, j.id + '.part'); let handle, idleTimer, usedAuthorization; const resetIdle = () => { clearTimeout(idleTimer); idleTimer = setTimeout(() => ctrl.abort(new Error('下载超过 60 秒没有返回数据，请重试')), 60000); };
   try {
    j.status = 'running'; j.message = '获取来源下载授权'; await this.save();
-   const file = await this.sources.downloadFile(j.game, j.resourceId, j.fileId);
+   usedAuthorization=this.authorizations.get(j.id); const file = await this.sources.downloadFile(j.game, j.resourceId, j.fileId, usedAuthorization); j.version=file.version||'';
    if (ctrl.signal.aborted) throw new Error('cancelled');
    if (file.size > MAX_BYTES) throw new Error('文件超过当前 5 GB 下载限制');
    j.filename = filename(file.name); j.name = file.label || file.name || j.name;
@@ -68,8 +76,9 @@ class Downloads {
    j.path = path.join(dir, j.filename); j.progress = 100; j.status = 'completed'; j.message = file.md5 ? '下载完成 · 大小与来源 MD5 校验通过' : '下载完成 · 大小校验通过，已记录 SHA-256'; j.finished = new Date().toISOString();
   } catch (e) {
    await handle?.close().catch(() => {}); await fs.rm(partial, { force: true });
-   const cancelled = j.status === 'cancelled'; j.status = cancelled ? 'cancelled' : 'failed'; j.message = cancelled ? '下载已取消' : (ctrl.signal.reason?.message || (e.message === 'fetch failed' ? '无法连接下载服务器，请重试' : e.message));
-  } finally { clearTimeout(idleTimer); await this.save(); }
+   const cancelled = j.status === 'cancelled'; const freshGrant=this.authorizations.get(j.id);const retryWithGrant=e.code==='NEXUS_NXM_REQUIRED'&&freshGrant&&freshGrant!==usedAuthorization&&!cancelled; j.code=e.code||null; j.status = retryWithGrant?'queued': cancelled ? 'cancelled' : e.code==='NEXUS_NXM_REQUIRED'?'authorization_required':'failed'; j.message = cancelled ? '下载已取消' : (ctrl.signal.reason?.message || (e.message === 'fetch failed' ? '无法连接下载服务器，请重试' : e.message));
+  } finally { clearTimeout(idleTimer); if(j.status!=='queued')this.authorizations.delete(j.id); await this.save(); }
+  if(j.status==='completed'&&this.onCompleted){try{await this.onCompleted(j);}catch(e){j.import={status:'failed',message:e.message};await this.save();}}
  }
  async completedFile(id) { const j = this.jobs.find(j => j.id === id && j.status === 'completed'); if (!j) throw new Error('文件尚未下载完成'); const file = path.join(this.root, j.id, filename(j.filename)); await fs.access(file); return { file, name: filename(j.filename) }; }
 }

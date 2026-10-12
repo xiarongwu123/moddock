@@ -164,7 +164,7 @@ class Sources {
       if (r.domain !== await this.nexusGame(game)) throw new Error('此 Mod 不属于当前游戏');
       const g = await this.gql('query($domain:String){game(domainName:$domain){id}}', { domain: r.domain });
       const raw = await this.gql('query($mod:ID!,$game:ID!){mod(modId:$mod,gameId:$game){description modRequirements{nexusRequirements{nodes{modName notes}}}} modFiles(modId:$mod,gameId:$game){fileId name uri detectedFileExtension sizeInBytes size version category description}}', { mod: r.id, game: String(g.game.id) });
-      return { description: text(raw.mod.description), requirements: (raw.mod.modRequirements?.nexusRequirements?.nodes || []).map(m => text(`${m.modName} ${m.notes || ''}`)), notice: this.keys.nexus ? 'API Key 已配置，下载时由 N 网验证。普通账号还需站点签发的文件授权；本版尚未接入该签发流程。' : '公开列表可浏览，下载需连接 Nexus API Key。Key 仅保存在本次运行内存中，重启后需重新填写。普通账号下载授权流程尚未接入。', files: raw.modFiles.filter(f => !['REMOVED', 'ARCHIVED', 'OLD_VERSION'].includes(f.category)).map(f => ({ id: String(f.fileId), name: text(`${f.name}.${f.detectedFileExtension || 'zip'}`), label: text(f.name), size: Number(f.sizeInBytes || f.size * 1024), version: f.version, category: f.category, available: !!this.keys.nexus, downloadCode:this.keys.nexus?'NEXUS_PERMISSION_CHECK':'NEXUS_KEY_REQUIRED',downloadReason:this.keys.nexus?'已配置 API Key，点击后向 N 网申请下载链接；尚未确认账号和此文件权限':'未连接 Nexus API Key；请在设置中连接。重启软件后授权会清除。' })) };
+      return { description: text(raw.mod.description), requirements: (raw.mod.modRequirements?.nexusRequirements?.nodes || []).map(m => text(`${m.modName} ${m.notes || ''}`)), notice: this.keys.nexus ? 'API Key 已配置，下载时由 N 网验证。普通账号可在软件内授权窗口点击 Mod Manager Download，软件收到 NXM 链接后自动继续下载。' : '公开列表可浏览，下载需连接 Nexus API Key。Key 仅保存在本次运行内存中，重启后需重新填写。普通账号需在 Nexus 授权窗口签发 NXM 文件授权。', files: raw.modFiles.filter(f => !['REMOVED', 'ARCHIVED', 'OLD_VERSION'].includes(f.category)).map(f => ({ id: String(f.fileId), name: text(`${f.name}.${f.detectedFileExtension || 'zip'}`), label: text(f.name), size: Number(f.sizeInBytes || f.size * 1024), version: f.version, category: f.category, available: !!this.keys.nexus, downloadCode:this.keys.nexus?'NEXUS_PERMISSION_CHECK':'NEXUS_KEY_REQUIRED',downloadReason:this.keys.nexus?'已配置 API Key，点击后向 N 网申请下载链接；尚未确认账号和此文件权限':'未连接 Nexus API Key；请在设置中连接。重启软件后授权会清除。' })) };
     }
     if (!game.appId || game.workshop === false) throw new Error('该游戏不支持 Steam 工坊');
     const raw = await this.request('https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ itemcount: '1', 'publishedfileids[0]': r.id }).toString() });
@@ -174,15 +174,16 @@ class Sources {
     const access=fileAccess(m.file_url,'workshop');
     return { description: text(m.description), requirements: [], notice: access.downloadReason, files: [{ id: r.id, name: text(m.filename || `workshop-${r.id}.bin`), size: Number(m.file_size), ...access, _url: allowed }] };
   }
-  async downloadFile(game, id, fileId) {
+  async downloadFile(game, id, fileId, authorization) {
     if (!/^\d+$/.test(String(fileId))) throw new Error('文件 ID 无效');
     const detail = await this.detail(game, id); const file = detail.files.find(f => f.id === String(fileId));
     if (!file) throw new Error('该文件已下架或不属于此 Mod');
     if (!file.available) throw Object.assign(new Error(file.downloadReason || detail.notice || '该来源尚未开放直接下载'),{code:file.downloadCode});
     const resource = this.resource(game, id);
     if (resource.source === 'nexus') {
-      const url = `https://api.nexusmods.com/v1/games/${resource.domain}/mods/${resource.id}/files/${fileId}/download_link.json`;
-      let links; try { links = await this.request(url, { headers: { apikey: this.keys.nexus, 'Application-Name': 'Moddock', 'Application-Version': require('./package.json').version } }); } catch(e) {const message=e.code==='HTTP_401'?'N 网拒绝了 API Key，请在设置中重新连接有效授权':e.code==='HTTP_403'?'N 网拒绝签发文件下载链接。普通账号需站点签发的文件授权，该流程尚未接入；已有 Premium 时请核对账号与文件权限':`获取 N 网下载链接失败：${e.message}`;throw Object.assign(new Error(message),{code:e.code,host:e.host}); }
+      const url = new URL(`https://api.nexusmods.com/v1/games/${resource.domain}/mods/${resource.id}/files/${fileId}/download_link.json`);
+      if(authorization){if(authorization.domain!==resource.domain||authorization.modId!==resource.id||authorization.fileId!==String(fileId))throw new Error('文件授权与当前下载不匹配');if(Number(authorization.expires)*1000<=Date.now())throw new Error('NXM 文件授权已过期，请重新授权');url.searchParams.set('key',authorization.key);url.searchParams.set('expires',authorization.expires);if(authorization.userId){const account=await this.request('https://api.nexusmods.com/v1/users/validate.json',{headers:{apikey:this.keys.nexus}});if(String(account.user_id)!==authorization.userId)throw new Error('NXM 授权账号与 API Key 账号不一致，请使用同一个 Nexus 账号');}}
+      let links; try { links = await this.request(url, { headers: { apikey: this.keys.nexus, 'Application-Name': 'Moddock', 'Application-Version': require('./package.json').version } }); } catch(e) {const message=e.code==='HTTP_401'?'N 网拒绝了 API Key，请在设置中重新连接有效授权':e.code==='HTTP_403'?(authorization?'N 网拒绝此文件授权，请重新授权并确认 API Key 与网页登录为同一账号':'此文件需要 NXM 授权，请点击“在软件内授权”，在 Nexus 中选择 Mod Manager Download'):`获取 N 网下载链接失败：${e.message}`;throw Object.assign(new Error(message),{code:e.code==='HTTP_403'?'NEXUS_NXM_REQUIRED':e.code,host:e.host}); }
       file._url = links?.find(l => downloadAllowed(l.URI))?.URI;
     }
     if (!downloadAllowed(file._url)) throw new Error('来源未提供受支持的直接下载地址');

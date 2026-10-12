@@ -9,6 +9,7 @@ const { execFile, spawn } = require('node:child_process');
 const { promisify } = require('node:util');
 const yauzl = require('yauzl');
 const { crc32 } = require('node:zlib');
+const {defaultRecipe}=require('./adapters.cjs');
 const MAX = 4 * 1024 ** 3;
 const hash = async file => { const h = crypto.createHash('sha256'); for await (const b of createReadStream(file)) h.update(b); return h.digest('hex'); };
 const digest = value => crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -56,7 +57,7 @@ const presets = {
  '1091500': { mode: 'archive', destination: 'archive/pc/mod', executable: 'bin/x64/Cyberpunk2077.exe', requires: ['bin/x64/Cyberpunk2077.exe'] }
 };
 function profile(input) {
- if (!input || !['copy','smapi','archive','pak','bepinex'].includes(input.mode)) throw new Error('请设置该游戏的安装规则');
+ if (!input || !['copy','smapi','archive','pak','bepinex','bethesda'].includes(input.mode)) throw new Error('请设置该游戏的安装规则');
  const p = { mode: input.mode, root: relative(input.root || '', true), sourcePrefix: relative(input.sourcePrefix || '', true), destination: relative(input.destination || '', true), executable: relative(input.executable || '', true), arguments: input.arguments || [], requires: [], log: relative(input.log || '', true), marker: String(input.marker || '').trim() };
  if(!Array.isArray(p.arguments)||p.arguments.length>30||p.arguments.some(a=>typeof a!=='string'||a.length>500||/[\x00\r\n]/.test(a)))throw new Error('启动参数无效，每行一个参数，最多 30 个');
  if (!Array.isArray(input.requires || []) || (input.requires || []).length > 30 || p.marker.length > 160) throw new Error('前置或日志规则无效');
@@ -94,14 +95,14 @@ class Installers {
   for(const r of this.state.runs)if(r.status==='running'){r.status='interrupted';r.message='软件上次退出，无法确认当前游戏进程；请重新验证';} await this.save(); return this;
  }
  save(){return atomic(path.join(this.root,'state.json'),this.state);}
- view(games) { return {profiles:games.map(g=>({gameId:g.id,...this.getProfile(g)})),mods:this.state.mods,runs:this.state.runs.slice(0,30).map(r=>this.runView(r)),busy:this.busy}; }
- getProfile(game){ const p=this.state.profiles[game.id] || (presets[String(game.appId)] ? profile({...presets[String(game.appId)], root:process.platform==='darwin' && String(game.appId)==='413150'?'Contents/MacOS':''}) : null); return {configured:!!p,preset:!this.state.profiles[game.id]&&!!p,rule:p}; }
+ view(games) { return {profiles:games.map(g=>({gameId:g.id,...this.getProfile(g)})),mods:this.state.mods,runs:this.state.runs.slice(0,30).map(r=>this.runView(r)),loadouts:this.state.loadouts||[],busy:this.busy}; }
+ getProfile(game){ const p=this.state.profiles[game.id] || (presets[String(game.appId)] ? profile({...presets[String(game.appId)], root:process.platform==='darwin' && String(game.appId)==='413150'?'Contents/MacOS':''}) : defaultRecipe(game)?profile(defaultRecipe(game)):null); return {configured:!!p,preset:!this.state.profiles[game.id]&&!!p,rule:p}; }
  async exclusive(fn) { if(this.busy)throw new Error('正在处理安装任务，请稍后'); this.busy=true; try{return await fn();}finally{this.busy=false;} }
  async setProfile(game,input) { return this.exclusive(async()=>{const p=profile(input); await this.gameRoot(game,p); this.state.profiles[game.id]=p; await this.save(); return this.getProfile(game);}); }
  async gameRoot(game,p) { if(!game.installPath)throw new Error('游戏安装路径缺失'); const root=await fs.realpath(game.installPath); if(!p.root)return root; const sub=await target(root,p.root); if(!(await fs.stat(sub)).isDirectory())throw new Error('游戏根目录不是文件夹');return sub; }
  async guard(root,p) { const rows=await (this.options.processes || processes)(); const executable=p.executable && path.basename(p.executable).toLowerCase();for(const r of rows){if(r.pid===process.pid)continue;let real=r.path; if(real&&path.isAbsolute(real))try{real=await fs.realpath(real);}catch{try{real=path.join(await fs.realpath(path.dirname(real)),path.basename(real));}catch{}}if((real&&key(real).startsWith(key(root+path.sep)))||(executable&&String(r.name).toLowerCase()===executable))throw new Error('请先退出游戏及加载器，再修改 Mod 文件');} }
  async prerequisites(root,p) { for(const rel of p.requires)if(!await fileHash(await target(root,rel)))throw new Error('缺少前置文件：'+rel); }
- async checkSmapi(root,p,units){const existing=await manifests(await target(root,p.destination||'Mods'));for(const u of units){if(existing.some(e=>key(e.manifest.UniqueID||'')===key(u.id)))throw new Error('游戏中已存在同 UniqueID Mod：'+u.id);for(const dep of u.requirements||[]){const found=[...units.map(u=>({UniqueID:u.id,Version:u.version})),...existing.map(e=>e.manifest)].find(a=>key(a.UniqueID||'')===key(dep.UniqueID||''));if(!found||dep.MinimumVersion&&!versionAtLeast(found.Version,dep.MinimumVersion))throw new Error('缺少依赖或版本不足：'+dep.UniqueID);}for(const [required,file,library]of [[u.minimumApiVersion,'StardewModdingAPI.deps.json','SMAPI'],[u.minimumGameVersion,'Stardew Valley.deps.json','Stardew Valley']])if(required){let ver;try{const d=await json(await target(root,file));const name=Object.keys(d.libraries||{}).find(k=>k.startsWith(library+'/')||k.startsWith((library==='SMAPI'?'StardewModdingAPI':library)+'/'));ver=name?.split('/').at(-1);}catch{}if(!versionAtLeast(ver,required))throw new Error('无法确认满足最低版本：'+library+' ≥ '+required);}}}
+ async checkSmapi(root,p,units,ignoreIds=[]){const ignored=new Set(ignoreIds.map(key));const existing=(await manifests(await target(root,p.destination||'Mods'))).filter(e=>!ignored.has(key(e.manifest.UniqueID||'')));for(const u of units){if(existing.some(e=>key(e.manifest.UniqueID||'')===key(u.id)))throw new Error('游戏中已存在同 UniqueID Mod：'+u.id);for(const dep of u.requirements||[]){const found=[...units.map(u=>({UniqueID:u.id,Version:u.version})),...existing.map(e=>e.manifest)].find(a=>key(a.UniqueID||'')===key(dep.UniqueID||''));if(!found||dep.MinimumVersion&&!versionAtLeast(found.Version,dep.MinimumVersion))throw new Error('缺少依赖或版本不足：'+dep.UniqueID);}for(const [required,file,library]of [[u.minimumApiVersion,'StardewModdingAPI.deps.json','SMAPI'],[u.minimumGameVersion,'Stardew Valley.deps.json','Stardew Valley']])if(required){let ver;try{const d=await json(await target(root,file));const name=Object.keys(d.libraries||{}).find(k=>k.startsWith(library+'/')||k.startsWith((library==='SMAPI'?'StardewModdingAPI':library)+'/'));ver=name?.split('/').at(-1);}catch{}if(!versionAtLeast(ver,required))throw new Error('无法确认满足最低版本：'+library+' ≥ '+required);}}}
  async inspect(game,jobId){return this.exclusive(async()=>{const job=this.downloads.jobs.find(j=>j.id===jobId&&j.gameId===game.id&&j.status==='completed');if(!job)throw new Error('请选择该游戏下载完成的文件');const f=await this.downloads.completedFile(jobId);if(!job.sha256||await hash(f.file)!==job.sha256)throw new Error('下载文件校验失败');const dir=path.join(this.root,'inspect',crypto.randomUUID());try{if(/\.zip$/i.test(f.name))return (await extract(f.file,dir)).map(f=>({path:f.source,size:f.size}));if(/\.(archive|pak|utoc|ucas)$/i.test(f.name))return [{path:relative(f.name),size:(await fs.stat(f.file)).size}];throw new Error('此压缩格式需要专用适配，当前支持 ZIP 或原始 archive/pak/utoc/ucas 文件');}finally{await fs.rm(dir,{recursive:true,force:true});}});}
  async prepare(game,jobId) { return this.exclusive(async()=>{
   for(const [id,p] of this.plans)if(Date.now()-p.created>15*60000){await fs.rm(p.stage,{recursive:true,force:true});this.plans.delete(id);} if(this.plans.size>=10)throw new Error('待安装方案过多，请完成或关闭旧方案');
@@ -137,7 +138,14 @@ class Installers {
     if(p.mode==='archive')for(const f of files){const h=await fs.open(path.join(stage,f.source),'r');const b=Buffer.alloc(4);try{await h.read(b,0,4,0);}finally{await h.close();}if(b.toString()!=='RDAR')throw new Error('archive 文件头无效：'+f.source);}
     warnings.push('包内无法可靠声明全部框架前置或游戏版本要求，请核对作者说明。');
    }else{
-    files=files.map(f=>({...f,destination:[p.destination,p.sourcePrefix?f.source.slice(p.sourcePrefix.length+1):f.source].filter(Boolean).join('/')}));warnings.push('按你为该游戏配置的规则部署。软件不会执行压缩包内的安装脚本；须核对作者目录、依赖及版本要求。');
+    if(p.mode==='bethesda'){
+     if(archiveFiles.some(f=>/(^|\/)fomod\//i.test(f.path)))throw new Error('此包需要 FOMOD 选项安装，不能按 Data 包部署');
+     const content=files.filter(f=>! /\.(txt|md|pdf|png|jpe?g|webp)$/i.test(f.source));
+     if(!content.some(f=>/\.(esp|esm|esl|bsa|ba2)$/i.test(f.source)))throw new Error('未发现 Bethesda 插件或资源档案');
+     if(content.some(f=>/\.(exe|bat|cmd|ps1|dll)$/i.test(f.source)))throw new Error('Data 包含加载器或可执行文件，请按作者说明配置独立规则');
+     files=content;warnings.push('插件部署不等于启用：需在游戏或相应加载器中确认插件启用与排序。');
+    }
+    files=files.map(f=>({...f,destination:[p.destination,p.sourcePrefix?f.source.slice(p.sourcePrefix.length+1):p.mode==='bethesda'?f.source.replace(/^Data\//i,''):f.source].filter(Boolean).join('/')}));warnings.push('按你为该游戏配置的规则部署。软件不会执行压缩包内的安装脚本；须核对作者目录、依赖及版本要求。');
    }
    const names=new Set();for(const f of files){f.destination=relative(f.destination);if(names.has(key(f.destination)))throw new Error('安装目标重复：'+f.destination);names.add(key(f.destination));
     const owner=this.state.mods.find(m=>key(m.root)===key(root)&&m.files.some(other=>key(other.destination)===key(f.destination)));if(owner)throw new Error('与已托管 Mod 冲突：'+owner.name+' / '+f.destination);
@@ -159,7 +167,7 @@ class Installers {
    if(this.state.mods.some(m=>key(m.root)===key(p.root)&&m.files.some(a=>key(a.destination)===key(f.destination))))throw new Error('安装方案已与其他托管 Mod 冲突，请重新生成');
    if(await hash(path.join(p.stage,f.source))!==f.sha256)throw new Error('暂存文件校验失败');await fs.copyFile(path.join(p.stage,f.source),path.join(dir,'payload',String(i)));if(f.originalHash)await fs.copyFile(dest,path.join(dir,'original',String(i)));files.push({...f,index:i});
   }
-  const record={id,gameId:game.id,gameName:game.name,name:p.name,resourceId:p.resourceId,jobId:p.jobId,root:p.root,profile:p.profile,files,units:p.units,status:'enabled',created:new Date().toISOString(),verification:{status:'deployed',message:'文件已部署并校验；尚未验证游戏内生效'}};
+  const record={id,gameId:game.id,gameName:game.name,name:p.name,resourceId:p.resourceId,jobId:p.jobId,version:this.downloads.jobs.find(j=>j.id===p.jobId)?.version||'',root:p.root,profile:p.profile,files,units:p.units,status:'enabled',created:new Date().toISOString(),verification:{status:'deployed',message:'文件已部署并校验；尚未验证游戏内生效'}};
   await this.transaction(record,'install');this.plans.delete(id);await fs.rm(p.stage,{recursive:true,force:true});return record;
  });}
  async action(game,id,action){return this.exclusive(async()=>{if(!['enable','disable','uninstall','verify'].includes(action))throw new Error('未知安装操作');const m=this.state.mods.find(m=>m.id===id&&m.gameId===game.id);if(!m)throw new Error('未找到该游戏的安装记录');if(await this.gameRoot(game,m.profile)!==m.root)throw new Error('游戏安装路径已变化，请恢复原目录后管理旧 Mod');
@@ -191,6 +199,38 @@ class Installers {
  async writeChange(c,h,source,expected){const dest=await target(c.root,c.rel);if(await fileHash(dest)!==expected)throw new Error('目标文件发生变化：'+c.rel);if(!h){await fs.rm(dest,{force:true});return;}await fs.mkdir(path.dirname(dest),{recursive:true});const tmp=path.join(path.dirname(dest),'.moddock-'+crypto.randomUUID()+'.tmp');try{await fs.copyFile(source,tmp);if(await hash(tmp)!==h)throw new Error('写入校验失败');await target(c.root,c.rel);if(await fileHash(dest)!==expected)throw new Error('写入前目标文件发生变化');await fs.rename(tmp,dest);if(await hash(dest)!==h)throw new Error('目标校验失败');}finally{await fs.rm(tmp,{force:true});}}
  async cleanDirs(dirs){for(const {root,rel}of [...dirs].sort((a,b)=>b.rel.length-a.rel.length)){try{await fs.rmdir(await target(root,rel));}catch{ /* Retain directories containing unowned/generated files. */ }}}
  async rollback(journal){for(const c of [...journal.changes].reverse()){const h=await fileHash(await target(c.root,c.rel));if(h===c.before)continue;if(h!==c.after)throw new Error('回滚检测到外部文件改动，保留恢复日志：'+c.rel);await this.writeChange(c,c.before,c.beforeFile,c.after);}await this.cleanDirs(journal.createdDirs||[]);}
+ async saveLoadout(game,name){return this.exclusive(async()=>{
+  if(typeof name!=='string'||!name.trim()||name.length>80)throw new Error('配置档案名称应为 1–80 个字符');
+  const loadout={id:crypto.randomUUID(),gameId:game.id,name:name.trim(),rule:this.getProfile(game).rule,mods:this.state.mods.filter(m=>m.gameId===game.id).map(m=>({id:m.id,status:m.status,jobId:m.jobId})),created:new Date().toISOString()};
+  this.state.loadouts ||= [];if(this.state.loadouts.filter(l=>l.gameId===game.id).length>=30)throw new Error('每款游戏最多保存 30 个档案');this.state.loadouts.push(loadout);await this.save();return loadout;
+ });}
+ async deleteLoadout(game,id){return this.exclusive(async()=>{this.state.loadouts=(this.state.loadouts||[]).filter(l=>!(l.id===id&&l.gameId===game.id));await this.save();return {ok:true};});}
+ async switchLoadout(game,id){return this.exclusive(async()=>{
+  const l=(this.state.loadouts||[]).find(l=>l.id===id&&l.gameId===game.id);if(!l)throw new Error('配置档案不存在');
+  const mods=this.state.mods.filter(m=>m.gameId===game.id);for(const entry of l.mods)if(!mods.some(m=>m.id===entry.id&&m.jobId===entry.jobId))throw new Error('档案中的 Mod 已卸载或替换，请重新保存档案');
+  const desired=new Map(l.mods.map(m=>[m.id,m.status]));const enabled=mods.filter(m=>desired.get(m.id)==='enabled');
+  const allIds=new Set(mods.flatMap(m=>m.units.map(u=>key(u.id))));const units=enabled.flatMap(m=>m.units);if(new Set(units.map(u=>key(u.id))).size!==units.length)throw new Error('档案有重复的 SMAPI UniqueID');
+  const roots=new Map();for(const m of mods){if(await this.gameRoot(game,m.profile)!==m.root)throw new Error('游戏安装路径已变化');await this.guard(m.root,m.profile);if(enabled.includes(m))await this.prerequisites(m.root,m.profile);if(m.profile.mode==='smapi')roots.set(m.root+'\0'+m.profile.destination,m);}
+  for(const m of roots.values()){
+   const group=mods.filter(a=>a.root===m.root&&a.profile.mode==='smapi'&&a.profile.destination===m.profile.destination);const ignored=group.flatMap(a=>a.units.map(u=>key(u.id)));const chosen=enabled.filter(a=>group.includes(a)).flatMap(a=>a.units);
+   await this.checkSmapi(m.root,m.profile,chosen,ignored);
+   const external=(await manifests(await target(m.root,m.profile.destination||'Mods'))).map(e=>e.manifest).filter(e=>!ignored.includes(key(e.UniqueID||'')));
+   const available=[...chosen.map(u=>({UniqueID:u.id,Version:u.version})),...external];
+   for(const x of external){const dependencies=[...(x.Dependencies||[]).filter(d=>d.IsRequired!==false),...(x.ContentPackFor?[x.ContentPackFor]:[])];for(const d of dependencies.filter(d=>ignored.includes(key(d.UniqueID||'')))){const found=available.find(a=>key(a.UniqueID||'')===key(d.UniqueID||''));if(!found||d.MinimumVersion&&!versionAtLeast(found.Version,d.MinimumVersion))throw new Error('游戏中另一个 Mod 依赖档案将停用的项：'+x.Name);}}
+  }
+  if(l.rule)await this.gameRoot(game,l.rule);
+  const changes=[];for(const m of mods){const next=desired.get(m.id)||'disabled';const dir=path.join(this.root,'mods',m.id);
+   for(const f of m.files){const before=m.status==='enabled'?f.sha256:f.originalHash;const after=next==='enabled'?f.sha256:f.originalHash;if(await fileHash(await target(m.root,f.destination))!==before)throw new Error('文件被外部修改，档案切换已停止：'+f.destination);
+    if(before===after)continue;const src=h=>h===f.sha256?path.join(dir,'payload',String(f.index)):h?path.join(dir,'original',String(f.index)):null;
+    for(const h of [before,after])if(h&&await hash(src(h))!==h)throw new Error('档案载荷或备份校验失败');changes.push({root:m.root,rel:f.destination,before,after,beforeFile:src(before),afterFile:src(after)});
+   }
+  }
+  const createdDirs=[];for(const c of changes){let rel=path.posix.dirname(c.rel);while(rel!=='.'){try{await fs.lstat(await target(c.root,rel));break;}catch(e){if(e.code!=='ENOENT')throw e;}createdDirs.push({root:c.root,rel});rel=path.posix.dirname(rel);}}
+  const journal={before:structuredClone(this.state),changes,createdDirs,phase:'writing'};await atomic(path.join(this.root,'journal.json'),journal);
+  try{for(let i=0;i<changes.length;i++){const c=changes[i];await this.writeChange(c,c.after,c.afterFile,c.before);if(this.options.afterWrite)await this.options.afterWrite(i,c);}for(const m of mods){m.status=desired.get(m.id)||'disabled';m.verification={status:'deployed',message:'已切换配置档案，需重新验证运行'};}if(l.rule)this.state.profiles[game.id]=l.rule;await this.save();journal.phase='committed';await atomic(path.join(this.root,'journal.json'),journal);
+  }catch(e){await this.rollback(journal);this.state=journal.before;await this.save();await fs.rm(path.join(this.root,'journal.json'));throw new Error('档案切换失败，已回滚：'+e.message);}
+  await fs.rm(path.join(this.root,'journal.json'));for(const m of mods.filter(m=>m.status==='disabled'))await this.cleanDirs(m.createdDirs||[]);return {ok:true};
+ });}
  async logPath(root,p){if(p.log)return target(root,p.log);if(p.mode==='smapi')return path.join(process.platform==='win32'?path.join(process.env.APPDATA||'','StardewValley'):path.join(os.homedir(),'.config','StardewValley'),'ErrorLogs','SMAPI-latest.txt');return null;}
  async readLog(file){try{const st=await fs.stat(file);if(!st.isFile()||st.size>8*1024**2)throw new Error('运行日志体积超过限制');const text=await fs.readFile(file,'utf8');return {text,hash:digest(text),mtime:st.mtimeMs};}catch(e){if(e.code==='ENOENT')return {text:'',hash:null,mtime:0};throw e;}}
  async launch(game){return this.exclusive(async()=>{const p=this.getProfile(game).rule;if(!p||!p.executable)throw new Error('请在安装规则中设置游戏或加载器可执行文件');const root=await this.gameRoot(game,p);await this.guard(root,p);await this.prerequisites(root,p);const file=await target(root,p.executable);const h=await fs.open(file,'r');const b=Buffer.alloc(4);try{await h.read(b,0,4,0);}finally{await h.close();}if(!(b.subarray(0,2).toString()==='MZ'||b.toString()==='\x7fELF'||[0xfeedface,0xfeedfacf,0xcefaedfe,0xcffaedfe,0xcafebabe].includes(b.readUInt32BE())))throw new Error('启动入口必须是游戏原生可执行文件；不执行脚本或安装器');

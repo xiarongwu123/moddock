@@ -1,6 +1,6 @@
 {
   "name": "moddock",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "private": true,
   "description": "游匣 — 本机游戏库、社区 Mod 下载与按游戏规则安装管理",
   "main": "electron.cjs",
