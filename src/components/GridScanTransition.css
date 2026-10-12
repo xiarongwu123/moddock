@@ -1,0 +1,4 @@
+.grid-scan-transition{position:relative;width:100%;height:100dvh;overflow:hidden;isolation:isolate;background:#101713}
+.grid-scan-transition .auth-screen{position:absolute;inset:0;z-index:0;isolation:isolate;overflow:auto;background:#111517}
+.grid-scan-transition .auth-screen[data-visible='false']{visibility:hidden}
+.grid-scan-transition__overlay{position:absolute;inset:0;z-index:3;background:#080f0c;overflow:hidden}

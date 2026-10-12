@@ -8,7 +8,7 @@ const cover = id => `https://cdn.akamai.steamstatic.com/steam/apps/${encodeURICo
 let data, view='library', selected=null, query='', scanning=false, modal=null, previousFocus, toastTimer, pollBusy=false;
 let lastNxm=null;
 let onlineProvider='all', onlineQuery='', onlineDraft='', onlineResults={}, generation=0, requests={};
-const app=document.getElementById('app');
+let app,homeProfile;
 async function api(route,body){const r=await fetch(`/api/${route}`,body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json','X-Moddock-Token':data.token},body:JSON.stringify(body)});const result=await r.json();if(!r.ok)throw new Error(result.error||'请求失败');return result;}
 function toast(message){const el=document.getElementById('toast');el.textContent=message;el.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove('show'),4500);}
 const size=n=>n==null?'大小未知':n<1024?`${n} B`:n<1024**2?`${(n/1024).toFixed(1)} KB`:n<1024**3?`${(n/1024**2).toFixed(1)} MB`:`${(n/1024**3).toFixed(2)} GB`;
@@ -17,11 +17,18 @@ const currentGame=()=>data.sourceGames.find(g=>g.id===selected);
 const provider=id=>data.providers.find(p=>p.id===id);
 const empty=(head,text,action='')=>`<div class="empty">${icon('gamepad')}<h3>${esc(head)}</h3><p>${esc(text)}</p>${action}</div>`;
 function render(){
+ if(!app?.isConnected)return;
  const f=document.activeElement, id=f?.id, caret=f?.selectionStart;
+ const headingFocused=f===app.querySelector('h1');
  const title=view==='detail'?currentGame()?.name:({library:'我的游戏',tasks:'下载管理',installed:'Mod 管理',settings:'设置'})[view];
  app.innerHTML=`<div class="shell"><aside class="sidebar"><div class="brand"><div class="brand-symbol">${icon('gamepad')}</div><div class="brand-name">游匣<small>MODDOCK</small></div></div><div class="nav-label">你的游戏世界</div><nav class="nav">${[['library','library','我的游戏'],['tasks','download','下载管理'],['installed','box','Mod 管理']].map(([v,i,label])=>`<button data-nav="${v}" class="${view===v||(v==='library'&&view==='detail')?'active':''}">${icon(i)}<span>${label}</span>${v==='tasks'&&data.jobs.some(active)?'<span class="tiny-dot"></span>':''}</button>`).join('')}</nav><div class="side-rule"></div><div class="nav-label">偏好设置</div><nav class="nav"><button data-nav="settings" class="${view==='settings'?'active':''}">${icon('settings')}<span>设置</span></button></nav><div class="side-bottom"><div class="demo-note"><strong><span class="tiny-dot"></span>本机游戏库 · v0.5.0</strong><p>扫描你的游戏<br>下载、安装与管理，都在游匣。</p></div><div class="profile"><div class="avatar">游</div><div class="profile-text">本地玩家<small>文件保存到本机</small></div></div></div></aside><div class="workspace"><header class="topbar"><div class="breadcrumb">工作空间 ${icon('chevron')}<b>${esc(title||'我的游戏')}</b></div><span class="right local-badge"><span class="tiny-dot"></span>本地工作空间</span></header><main class="content">${({library,detail,tasks,installed,settings})[view]()}</main></div></div>`;
+ const profile=app.querySelector('.profile');
+ profile.querySelector('.profile-text').innerHTML=`${esc(homeProfile?.name||'本地玩家')}<small>${homeProfile?.mode==='preview'?'界面预览账号':'文件保存到本机'}</small>`;
+ profile.insertAdjacentHTML('beforeend',`<button data-auth-logout class="icon-button" aria-label="返回登录页面" title="返回登录页面">${icon('left')}</button>`);
+ if(homeProfile?.mode==='preview')app.querySelector('.local-badge').innerHTML='<span class="tiny-dot"></span>账号界面预览 · 本地游戏库';
  app.querySelectorAll('img').forEach(img=>img.addEventListener('error',()=>{img.style.opacity=0;img.parentElement.classList.add('media-unavailable');}));
  if(['library-search','online-search'].includes(id)){const el=document.getElementById(id);if(el){el.focus();el.setSelectionRange(caret,caret);}}
+ if(headingFocused){const heading=app.querySelector('h1');heading?.setAttribute('tabindex','-1');heading?.focus({preventScroll:true});}
 }
 function footer(){return `<footer class="page-foot"><span>${icon('folder')}Mod 文件下载到本机 · 安装状态单独管理</span><span>MODDOCK / LOCAL LIBRARY</span></footer>`;}
 function library(){
@@ -81,8 +88,10 @@ function renderModal(){
 function openModal(value){previousFocus=document.activeElement;modal=value;renderModal();document.querySelector('.modal [data-close]')?.focus();}
 async function loadDetail(item){openModal({kind:'resource',item,loading:true});const current=modal;try{const d=await api('sources/detail',{gameId:item.gameId,id:item.id});if(modal!==current)return;modal.detail=d;}catch(e){if(modal!==current)return;modal.error=e.message;}if(modal===current){modal.loading=false;renderModal();}}
 document.addEventListener('click',async e=>{
+ if(!app?.isConnected||app.closest('[inert]'))return;
  const b=e.target.closest('button');if(!b||b.disabled)return;const d=b.dataset;
  try{
+ if('authLogout'in d){window.dispatchEvent(new CustomEvent('moddock:logout'));return;}
  if(d.nav){if(view==='detail')generation++;view=d.nav;query='';render();}
  if('close'in d)closeModal();
  if(d.game)await openGame(d.game);
@@ -128,5 +137,14 @@ document.addEventListener('click',async e=>{
 document.addEventListener('change',async e=>{try{if(e.target.id==='auto-import'){await api('library/auto-import',{enabled:e.target.checked});await refresh();}if(e.target.id==='rule-template'){const r=data.recipes.find(r=>r.id===e.target.value);if(r&&modal?.kind==='rule'){const recommended=modal.suggestions?.find(s=>s.id===r.id);modal.rule={...r,...recommended,root:'',executable:r.executable||'',requires:r.requires||[],arguments:[],log:'',marker:''};renderModal();}}}catch(err){toast(err.message);}});
 document.addEventListener('input',e=>{if(e.target.id==='library-search'){query=e.target.value;render();}if(e.target.id==='online-search')onlineDraft=e.target.value;});
 document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal();if(e.key==='Enter'&&e.target.id==='online-search'){onlineQuery=onlineDraft.trim();loadSources();}if(e.key==='Tab'&&modal){const els=[...document.querySelectorAll('.modal button:not([disabled]),.modal input')];if(!els.length)return;const first=els[0],last=els.at(-1);if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}}});
-async function boot(){try{data=await api('state');render();setInterval(async()=>{if(pollBusy)return;pollBusy=true;try{const next=await api('state');data=next;if(view!=='settings'&&!['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName))render();notifyNxm();}catch{}finally{pollBusy=false;}},700);}catch(e){app.innerHTML=`<div class="boot">无法连接本地服务：${esc(e.message)}</div>`;}}
-boot();
+let pollTimer;
+let homeEpoch=0;
+export async function mountHome(element,profile){
+ const epoch=++homeEpoch;
+ app=element;homeProfile=profile;view='library';selected=null;query='';
+ clearInterval(pollTimer);
+ try{const next=await api('state');if(epoch!==homeEpoch)return;data=next;render();pollTimer=setInterval(async()=>{if(pollBusy||!app?.isConnected)return;pollBusy=true;try{const next=await api('state');if(epoch!==homeEpoch)return;data=next;if(view!=='settings'&&!['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName))render();notifyNxm();}catch{}finally{pollBusy=false;}},700);}
+ catch(e){if(epoch===homeEpoch)app.innerHTML=`<div class="boot">无法连接本地服务：${esc(e.message)} <button data-home-retry>重试</button></div>`;}
+}
+document.addEventListener('click',e=>{if(e.target.closest('[data-home-retry]'))mountHome(app,homeProfile);});
+export function unmountHome(){homeEpoch++;generation++;clearInterval(pollTimer);closeModal();app=null;}

@@ -1,0 +1,66 @@
+const { chromium } = require('@playwright/test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs/promises');
+const os = require('node:os');
+const path = require('node:path');
+const { createServer } = require('../server.cjs');
+const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jLz0AAAAASUVORK5CYII=', 'base64');
+
+(async () => {
+ const root = await fs.mkdtemp(path.join(os.tmpdir(), 'moddock-drift-wall-'));
+ const service = await createServer({ root, port: 0, scan: async () => ({ games: [], roots: [], diagnostics: [] }) });
+ let browser;
+ try {
+  browser = await chromium.launch({ channel: 'chrome', headless: true });
+  const page = await browser.newPage({ viewport: { width: 1100, height: 800 } });
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.route('https://cdn.akamai.steamstatic.com/steam/apps/**', route => route.fulfill({ contentType: 'image/png', body: image }));
+  await page.goto(service.url);
+  const moving = page.locator('.drift-wall__track').first();
+  const start = await moving.evaluate(node => node.style.transform);
+  await page.waitForFunction(value => document.querySelector('.drift-wall__track').style.transform !== value, start);
+  assert.equal(await page.locator('.auth-backdrop [tabindex="0"]').count(), 0);
+  assert.equal(await page.locator('.auth-backdrop').getAttribute('aria-hidden'), 'true');
+  assert.equal(await page.locator('.drift-wall').getAttribute('data-paused'), 'false');
+  assert.equal(await page.locator('.drift-wall img').evaluateAll(images => new Set(images.map(img => img.src)).size), 18);
+  await page.getByRole('button', { name: '本地游戏库', exact: true }).click();
+  await page.locator('.auth-swap[data-active="true"][data-transitioning="false"]').waitFor();
+  assert.equal(await page.locator('.drift-wall').getAttribute('data-paused'), 'true');
+  const stopped = await moving.evaluate(node => node.style.transform);
+  await page.waitForTimeout(150);
+  assert.equal(await moving.evaluate(node => node.style.transform), stopped);
+  await page.getByRole('button', { name: '返回登录页面', exact: true }).click();
+  await page.locator('.auth-swap[data-active="false"][data-transitioning="false"]').waitFor();
+  assert.equal(await page.locator('.drift-wall').getAttribute('data-paused'), 'false');
+  await page.setViewportSize({ width: 1000, height: 700 });
+  await page.getByRole('tab', { name: '注册', exact: true }).click();
+  await page.getByLabel('邮箱地址', { exact: true }).fill('wall@example.com');
+  await page.getByRole('button', { name: '下一步', exact: true }).click();
+  await page.locator('#auth-panel[data-transitioning="false"]').waitFor();
+  await page.getByLabel('设置密码', { exact: true }).fill('player123');
+  await page.getByRole('button', { name: '获取邮箱验证码', exact: true }).click();
+  await page.locator('#auth-panel[data-transitioning="false"]').waitFor();
+  await page.getByLabel('邮箱验证码', { exact: true }).fill('246810');
+  await page.locator('.auth-swap[data-active="true"][data-transitioning="false"]').waitFor();
+  await page.getByRole('heading', { name: '我的游戏', exact: true }).waitFor();
+  await page.getByRole('button', { name: '返回登录页面', exact: true }).click();
+  await page.locator('.auth-swap[data-active="false"][data-transitioning="false"]').waitFor();
+  const widths = await page.locator('.auth-swap > .auth-screen[data-visible="true"]').evaluate(node => ({ scroll: node.scrollWidth, client: node.clientWidth }));
+  assert.equal(widths.scroll, widths.client, 'Decorative background must not create horizontal scrolling');
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.waitForFunction(() => document.querySelector('.drift-wall').dataset.paused === 'true');
+  const still = await moving.evaluate(node => node.style.transform);
+  await page.waitForTimeout(150);
+  assert.equal(await moving.evaluate(node => node.style.transform), still);
+  await page.route('**/library_600x900.jpg', route => route.fulfill({ status: 404, body: '' }));
+  await page.reload();
+  await page.waitForFunction(() => [...document.querySelectorAll('.drift-wall img')].every(img => img.dataset.fallback === 'true' && img.complete && img.naturalWidth > 0));
+  assert.deepEqual(errors, []);
+  console.log('DriftWall UI passed: 18 cover sources, motion and hidden-page pause, no decorative focus targets, desktop registration at 1000x700, reduced motion and header-image fallback.');
+ } finally {
+  await browser?.close();
+  await new Promise(resolve => service.server.close(resolve));
+  await fs.rm(root, { recursive: true, force: true });
+ }
+})().catch(error => { console.error(error); process.exitCode = 1; });

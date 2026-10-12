@@ -77,9 +77,9 @@ async function createServer(options = {}) {
     }
     return send({ error: '接口不存在' }, 404);
    }
-   const files = { '/': 'index.html', '/app.js': 'app.js', '/style.css': 'style.css' }; const name = files[url.pathname]; if (!name) { res.writeHead(404); return res.end('Not found'); }
+   const files = { '/': 'index.html', '/app.js': 'app.js', '/style.css': 'style.css', '/auth.js': 'auth.js', '/auth.css': 'auth.css', '/splash.svg': 'splash.svg', '/splash-preview.html': 'splash-preview.html', '/splash-preview.css': 'splash-preview.css', '/splash-preview.js': 'splash-preview.js', '/fonts/fusion-pixel-12px-proportional-zh_hans.woff2': 'fonts/fusion-pixel-12px-proportional-zh_hans.woff2' }; const name = files[url.pathname]; if (!name) { res.writeHead(404); return res.end('Not found'); }
    res.setHeader('Content-Security-Policy', "default-src 'self'; img-src 'self' https://cdn.akamai.steamstatic.com https://shared.akamai.steamstatic.com https://staticdelivery.nexusmods.com https://images.gamebanana.com https://images.steamusercontent.com https://steamuserimages-a.akamaihd.net data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'");
-   res.writeHead(200, { 'Content-Type': name.endsWith('.html') ? 'text/html; charset=utf-8' : name.endsWith('.js') ? 'text/javascript; charset=utf-8' : 'text/css; charset=utf-8' }); res.end(await fs.readFile(path.join(__dirname, 'public', name)));
+   res.writeHead(200, { 'Content-Type': name.endsWith('.woff2') ? 'font/woff2' : name.endsWith('.svg') ? 'image/svg+xml' : name.endsWith('.html') ? 'text/html; charset=utf-8' : name.endsWith('.js') ? 'text/javascript; charset=utf-8' : 'text/css; charset=utf-8' }); res.end(await fs.readFile(path.join(__dirname, 'public', name)));
   } catch (e) { if (!res.headersSent) send({ error: e.message }, 400); else res.destroy(); }
  });
  await new Promise(resolve => server.listen(options.port ?? Number(process.env.PORT || 4173), '127.0.0.1', resolve));

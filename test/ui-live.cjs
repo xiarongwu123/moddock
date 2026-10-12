@@ -6,7 +6,7 @@ const {createServer}=require('../server.cjs');const {scan}=require('../scanner.c
  const service=await createServer({root:path.join(root,'data'),port:0,scan:()=>scan([steam])});let browser;
  try{
   browser=await chromium.launch({channel:'chrome',headless:true});const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];page.on('pageerror',e=>errors.push(e.message));
-  await page.goto(service.url);await page.locator('[data-game="steam-413150"]').waitFor();assert.equal(await page.locator('[data-nav="sources"]').count(),0);assert.equal(await page.locator('[data-nav="discover"]').count(),0);
+  await openHome(page,service.url);await page.locator('[data-game="steam-413150"]').waitFor();assert.equal(await page.locator('[data-nav="sources"]').count(),0);assert.equal(await page.locator('[data-nav="discover"]').count(),0);
   await page.locator('[data-game="steam-413150"]').click();await page.waitForFunction(()=>document.querySelectorAll('.online-card').length>=20,{timeout:35000});
   await page.locator('#online-search').fill('sword');await page.locator('[data-online-search]').click();await page.waitForFunction(()=>document.querySelector('.source-messages').textContent.includes('有可展示的 Mod')&&!document.querySelector('.source-messages').textContent.includes('查询中'),{timeout:35000});
   await page.locator('[data-provider="banana"]').click();await page.locator('.online-card').first().waitFor();await page.locator('.online-card [data-mod]').first().click();await page.locator('[data-download-file="1693151"]').waitFor({timeout:30000});assert.equal(await page.locator('.modal a').count(),0);
@@ -18,3 +18,4 @@ const {createServer}=require('../server.cjs');const {scan}=require('../scanner.c
   console.log('通过：扫描安装记录、移除演示入口、N 网全库搜索与分页、香蕉网软件内真实 ZIP 下载（3223 B，MD5 与 SHA-256 校验）、详情无外跳、移动布局。');
  }finally{await browser?.close();await new Promise(r=>service.server.close(r));await fs.rm(root,{recursive:true,force:true});}
 })().catch(e=>{console.error(e);process.exitCode=1;});
+const { openHome } = require('./ui-open.cjs');

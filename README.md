@@ -71,6 +71,28 @@ Windows 本机游戏库、社区 Mod 浏览下载与按游戏规则安装管理�
 
 ## 源码运行
 
+### 登录与注册界面预览
+
+启动后先展示登录页。登录按“邮箱 → 密码”分两步，注册按“邮箱 → 密码 → 邮箱验证码”分三步，每步只有一个输入框，可返回上一步修改。步骤切换使用约 330 毫秒的滑动和淡入淡出，返回时反向播放；动画期间阻止重复提交，结束后聚焦当前输入框，系统减少动效时直接切换。登录与注册在同一卡片内切换，保持页面地址、卡片尺寸和背景；保留密码显隐、验证码错误清空和重发倒计时。完整验证码验证通过后自动注册，并用 React Bits `GridScan` 进入首页，无需再点击确认。可选择“本地游戏库”直接使用现有本机功能；首页侧栏的返回按钮可回到登录页。
+
+账号界面不常驻展示解释文案、口号或密码占位说明；只在输入错误、验证码过期或处理中显示当前提示。验证码步骤的 `?` 可主动展开帮助（含演示码和有效期），再次点击或按 Escape 收起，帮助不会改变卡片尺寸。
+
+**当前账号服务未接入，不发送邮件、不创建真实账号、不保存密码或登录会话。** 登录填写有效邮箱与非空密码可预览首页切换；注册密码需 8–64 位并包含字母和数字，演示验证码为 `246810`。刷新后返回账号入口。此界面不是服务端鉴权边界。
+
+React 入口为 `src/main.jsx`，组件位于 `src/components/`。`src/auth/preview.cjs` 隔离了 `login`、`sendCode`、`verifyCode` 和 `register`；接入账号服务时替换适配器并移除演示提示与验证码。原生游戏库由 `public/app.js` 提供挂载/卸载入口。
+
+登录与注册背景使用 React Bits `DriftWall`。`src/auth/steam-covers.js` 保存按 2026-10-12 Steam 官方 [Most Played](https://store.steampowered.com/charts/mostplayed) 榜选取的 18 款游戏，使用 Steam 官方 CDN 的竖版封面；这是静态精选，不会在启动时请求榜单。封面加载失败时尝试横版图，再保留游戏名称作为背景兜底。背景不参与键盘焦点；进入首页、页面隐藏或启用系统减少动效时停止逐帧动画。检查：`node test/ui-drift-wall.cjs`。
+
+登录区域使用 React Bits `ReflectiveCard` 居中展示，保留整屏游戏封面背景，针对 Windows 桌面窗口验证布局。品牌放大居中，首步不展示介绍文案和预览标记。卡片通过 `children` 承载登录与验证码注册，使用默认灯光反射，不启用摄像头或视频。WebGL 不可用时保留渐变金属表面；表单不随鼠标倾斜。检查：`node test/ui-reflective-card.cjs`。
+
+“欢迎回到游匣”和“创建你的游匣账号”使用 React Bits `Shuffle` 字符滚动，标题出现或切换登录、注册时播放一次。字体使用本地打包的 [Fusion Pixel Font](https://github.com/TakWolf/fusion-pixel-font) 简体中文版本，24px 为原生像素尺寸的两倍；字形授权及来源保存在 `public/fonts/`。启动动画结束后才播放，返回邮箱步骤时重播，减少动效时展示静态标题。拆分字符不会改变屏幕阅读器读取的标题或表单尺寸。
+
+登录卡片的“游匣” Logo 文字使用 React Bits `FuzzyText`，保留手柄图标和 MODDOCK 字标。默认轻微抖动，悬停增强，以 30fps 绘制并适配最高 2 倍屏幕像素比。进入首页、页面隐藏或启用减少动效时展示静态字形；Canvas 不可用时保留原文字。
+
+进入首页和返回登录使用 `GridScanTransition`：约 1.3 秒的绿色网格扫描，完全覆盖页面后交接，再显露目标页面。页面保留原始 DOM 和画布，结束后卸载扫描并释放 WebGL 资源；开启系统减少动效时直接交接，WebGL 不可用时使用 CSS 网格。摄像头、陀螺仪和人脸模型加载均关闭。依赖包括附件源码使用的 `three`、`face-api.js` 和 `postprocessing`。检查：`node test/ui-grid-scan.cjs`。
+
+`npm run build` 使用 esbuild 生成本地 `public/auth.js` / `public/auth.css`；`npm start` 与 `npm run preview` 会先自动构建。直接运行 `node server.cjs` 或 Windows 打包前，也需要先运行 `npm run build`。构建产物已加入 Git 忽略。
+
 需要 Node.js 22.15 及以上（使用内置 ZIP CRC 校验）。
 
 ```sh

@@ -4,3 +4,6 @@ test-results/
 playwright-report/
 
 .moddock-data/
+public/auth.js
+public/auth.css
+output/playwright/

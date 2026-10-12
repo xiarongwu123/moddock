@@ -1,0 +1,9 @@
+.boot-splash{position:fixed;inset:0;z-index:1000;display:grid;place-items:center;overflow:hidden;background:#101713;animation:boot-splash-exit .4s 2.4s both}
+.boot-splash__art{display:block;width:100%;height:100dvh;object-fit:contain}
+.boot-splash__skip{position:absolute;right:32px;bottom:24px;display:flex;align-items:center;gap:12px;padding:8px 0;color:#91a191;font-size:11px;letter-spacing:1px}
+.boot-splash__skip span{font-size:16px;color:#b3f66b}
+.boot-splash__skip:hover{color:#eef1ee}
+.boot-splash__skip:focus-visible{outline:2px solid #b3f66b;outline-offset:6px;border-radius:2px}
+@keyframes boot-splash-exit{to{opacity:0}}
+@media(max-width:600px){.boot-splash__art{width:160%;max-width:none}.boot-splash__skip{right:24px}}
+@media(prefers-reduced-motion:reduce){.boot-splash{animation:none}}
