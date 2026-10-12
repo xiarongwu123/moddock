@@ -1,6 +1,6 @@
 const {chromium}=require('@playwright/test');
 const fs=require('node:fs/promises'),os=require('node:os'),path=require('node:path'),assert=require('node:assert/strict');
-const {createServer}=require('../server.cjs');const {scan}=require('../scanner.cjs');
+const {createServer}=require('./server-fixture.cjs');const {scan}=require('../scanner.cjs');
 (async()=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'moddock-live-'));const steam=path.join(root,'Steam');await fs.mkdir(path.join(steam,'steamapps/common/Stardew Valley'),{recursive:true});await fs.writeFile(path.join(steam,'steamapps/appmanifest_413150.acf'),'"AppState" { "appid" "413150" "name" "Stardew Valley" "installdir" "Stardew Valley" }');
  const service=await createServer({root:path.join(root,'data'),port:0,scan:()=>scan([steam])});let browser;

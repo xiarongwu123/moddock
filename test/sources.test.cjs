@@ -6,7 +6,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { Sources, sourceGames, downloadAllowed } = require('../sources.cjs');
 const { Downloads, filename } = require('../downloads.cjs');
-const { createServer } = require('../server.cjs');
+const { createServer, loginFixture } = require('./server-fixture.cjs');
 const game = { ...sourceGames[0], id:'steam-413150',platform:'Steam',installPath:'D:\\SteamLibrary\\Stardew Valley',real:true };
 const wait = async d => { for(let n=0;n<200&&(d.controllers.size||d.jobs.some(j=>['running','queued'].includes(j.status)));n++)await new Promise(r=>setTimeout(r,10)); };
 const temp = async t => {const root=await fs.mkdtemp(path.join(os.tmpdir(),'moddock-v3-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));return root;};
@@ -48,10 +48,10 @@ test('拒绝非来源重定向、网页伪装和取消下载，清理临时文�
 });
 test('接口只暴露本机游戏、不暴露密钥和下载直链、下载必须鉴权',async t=>{
  const root=await temp(t);const service=await createServer({root,port:0,scan:async()=>({games:[game],roots:[],diagnostics:[]})});t.after(()=>new Promise(r=>service.server.close(r)));
- const state=await(await fetch(service.url+'/api/state')).json();assert.deepEqual(state.games,[game]);assert.equal(state.sourceGames.length,1);assert.ok(!('mods'in state));
- const post=(route,body,auth=true)=>fetch(service.url+'/api/'+route,{method:'POST',headers:auth?{'X-Moddock-Token':state.token}:{},body:JSON.stringify(body)});
+ const authenticated=await loginFixture(service),state=authenticated.state;assert.deepEqual(state.games,[game]);assert.equal(state.sourceGames.length,1);assert.ok(!('mods'in state));
+ const post=(route,body,auth=true)=>authenticated.fetch(service.url+'/api/'+route,{method:'POST',headers:auth?{'X-Moddock-Token':state.token}:{},body:JSON.stringify(body)});
  assert.equal((await post('downloads/start',{},false)).status,403);assert.equal((await post('downloads/start',{gameId:'stardew',id:'banana:1',fileId:'1'})).status,400);assert.equal((await post('action',{action:'install'})).status,404);
- await post('sources/connection',{source:'workshop',key:'a'.repeat(32)});assert.ok(!(await(await fetch(service.url+'/api/state')).text()).includes('a'.repeat(32)));
+ await post('sources/connection',{source:'workshop',key:'a'.repeat(32)});assert.ok(!(await(await authenticated.fetch(service.url+'/api/state')).text()).includes('a'.repeat(32)));
  assert.equal((await post('mapping',{gameId:game.id,mapping:{searchName:'Stardew Valley',appId:'1'}})).status,400);
 });
 test('空列表不显示获取成功，有原始记录但全被过滤时明确报告解析问题',async()=>{

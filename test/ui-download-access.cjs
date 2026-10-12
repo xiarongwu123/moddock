@@ -1,6 +1,6 @@
 const {chromium}=require('@playwright/test');
 const fs=require('node:fs/promises'),path=require('node:path'),os=require('node:os'),assert=require('node:assert/strict');
-const {createServer}=require('../server.cjs');
+const {createServer}=require('./server-fixture.cjs');
 (async()=>{const root=await fs.mkdtemp(path.join(os.tmpdir(),'moddock-download-ui-'));const g={id:'steam-294100',name:'RimWorld',appId:'294100',banana:'5937',platform:'Steam',installPath:root};const service=await createServer({root,port:0,scan:async()=>({games:[g],roots:[],diagnostics:[]}),sources:{fetch:async(url,opts)=>{
  if(String(url).includes('nexusmods')){const q=JSON.parse(opts.body).query;if(q.includes('modFiles'))return Response.json({data:{mod:{description:'Scoped Nexus fixture'},modFiles:[{fileId:5,name:'File',category:'MAIN'}]}});if(q.includes('game(domainName'))return Response.json({data:{game:{id:130}}});return Response.json({data:{mods:{totalCount:1,nodes:[{modId:1,name:'Nexus fixture'}]}}});}
  if(String(url).includes('gamebanana')){if(String(url).includes('/Mod/'))return Response.json({_aGame:{_idRow:5937},_aFiles:[{_idRow:6,_sFile:'direct.zip',_sDownloadUrl:'https://gamebanana.com/dl/6'}]});return Response.json({_aMetadata:{_nRecordCount:1,_nPerpage:15},_aRecords:[{_idRow:2,_sName:'Banana fixture',_sModelName:'Mod',_sProfileUrl:'https://gamebanana.com/mods/2',_aGame:{_idRow:5937}}]});}

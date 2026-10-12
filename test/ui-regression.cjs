@@ -1,6 +1,6 @@
 const {chromium}=require('@playwright/test');
 const fs=require('node:fs/promises'),os=require('node:os'),path=require('node:path'),assert=require('node:assert/strict');
-const {createServer}=require('../server.cjs');
+const {createServer}=require('./server-fixture.cjs');
 (async()=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'moddock-empty-regression-'));const g={id:'steam-413150',appId:'413150',name:'Stardew Valley',platform:'Steam',installPath:root,real:true};
  const service=await createServer({root,port:0,scan:async()=>({games:[g],roots:[],diagnostics:[]}),sources:{fetch:async(url,init)=>{

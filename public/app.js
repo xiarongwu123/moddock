@@ -9,7 +9,8 @@ let data, view='library', selected=null, query='', scanning=false, modal=null, p
 let lastNxm=null;
 let onlineProvider='all', onlineQuery='', onlineDraft='', onlineResults={}, generation=0, requests={};
 let app,homeProfile;
-async function api(route,body){const r=await fetch(`/api/${route}`,body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json','X-Moddock-Token':data.token},body:JSON.stringify(body)});const result=await r.json();if(!r.ok)throw new Error(result.error||'请求失败');return result;}
+function requestError(response,result,epoch=homeEpoch){const message=result.message||result.error||'请求失败';if(epoch===homeEpoch&&(response.status===401||result.code==='account_disabled')){window.dispatchEvent(new CustomEvent('moddock:auth-required',{detail:{message}}));}return new Error(message);}
+async function api(route,body){const epoch=homeEpoch;const r=await fetch(`/api/${route}`,body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json','X-Moddock-Token':data.token},body:JSON.stringify(body)});const result=await r.json();if(!r.ok)throw requestError(r,result,epoch);return result;}
 function toast(message){const el=document.getElementById('toast');el.textContent=message;el.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove('show'),4500);}
 const size=n=>n==null?'大小未知':n<1024?`${n} B`:n<1024**2?`${(n/1024).toFixed(1)} KB`:n<1024**3?`${(n/1024**2).toFixed(1)} MB`:`${(n/1024**3).toFixed(2)} GB`;
 const active=j=>['queued','running'].includes(j.status);
@@ -23,9 +24,9 @@ function render(){
  const title=view==='detail'?currentGame()?.name:({library:'我的游戏',tasks:'下载管理',installed:'Mod 管理',settings:'设置'})[view];
  app.innerHTML=`<div class="shell"><aside class="sidebar"><div class="brand"><div class="brand-symbol">${icon('gamepad')}</div><div class="brand-name">游匣<small>MODDOCK</small></div></div><div class="nav-label">你的游戏世界</div><nav class="nav">${[['library','library','我的游戏'],['tasks','download','下载管理'],['installed','box','Mod 管理']].map(([v,i,label])=>`<button data-nav="${v}" class="${view===v||(v==='library'&&view==='detail')?'active':''}">${icon(i)}<span>${label}</span>${v==='tasks'&&data.jobs.some(active)?'<span class="tiny-dot"></span>':''}</button>`).join('')}</nav><div class="side-rule"></div><div class="nav-label">偏好设置</div><nav class="nav"><button data-nav="settings" class="${view==='settings'?'active':''}">${icon('settings')}<span>设置</span></button></nav><div class="side-bottom"><div class="demo-note"><strong><span class="tiny-dot"></span>本机游戏库 · v0.5.0</strong><p>扫描你的游戏<br>下载、安装与管理，都在游匣。</p></div><div class="profile"><div class="avatar">游</div><div class="profile-text">本地玩家<small>文件保存到本机</small></div></div></div></aside><div class="workspace"><header class="topbar"><div class="breadcrumb">工作空间 ${icon('chevron')}<b>${esc(title||'我的游戏')}</b></div><span class="right local-badge"><span class="tiny-dot"></span>本地工作空间</span></header><main class="content">${({library,detail,tasks,installed,settings})[view]()}</main></div></div>`;
  const profile=app.querySelector('.profile');
- profile.querySelector('.profile-text').innerHTML=`${esc(homeProfile?.name||'本地玩家')}<small>${homeProfile?.mode==='preview'?'界面预览账号':'文件保存到本机'}</small>`;
+ profile.querySelector('.profile-text').innerHTML=`${esc(homeProfile?.name||'本地玩家')}<small>${homeProfile?.mode==='mu'?esc(homeProfile.email):'文件保存到本机'}</small>`;
  profile.insertAdjacentHTML('beforeend',`<button data-auth-logout class="icon-button" aria-label="返回登录页面" title="返回登录页面">${icon('left')}</button>`);
- if(homeProfile?.mode==='preview')app.querySelector('.local-badge').innerHTML='<span class="tiny-dot"></span>账号界面预览 · 本地游戏库';
+ if(homeProfile?.mode==='mu')app.querySelector('.local-badge').innerHTML='<span class="tiny-dot"></span>MU 账号 · 本地游戏库';
  app.querySelectorAll('img').forEach(img=>img.addEventListener('error',()=>{img.style.opacity=0;img.parentElement.classList.add('media-unavailable');}));
  if(['library-search','online-search'].includes(id)){const el=document.getElementById(id);if(el){el.focus();el.setSelectionRange(caret,caret);}}
  if(headingFocused){const heading=app.querySelector('h1');heading?.setAttribute('tabindex','-1');heading?.focus({preventScroll:true});}
@@ -130,7 +131,7 @@ document.addEventListener('click',async e=>{
  if('applyPlan'in d){if(!document.getElementById('plan-author').checked)throw new Error('请先核对作者的目录、前置和版本要求');const p=modal.plan;b.disabled=true;try{await api('installations/apply',{gameId:p.gameId,id:p.id,allowOverwrite:document.getElementById('plan-overwrite')?.checked===true});closeModal();view='installed';await refresh();toast('文件安装完成；可校验文件或运行验证');}finally{b.disabled=false;}}
  if('confirmUninstall'in d){const m=modal.record;b.disabled=true;try{await api('installations/action',{gameId:m.gameId,id:m.id,action:'uninstall'});closeModal();await refresh();toast('已卸载，已替换的原文件已还原');}finally{b.disabled=false;}}
  if(d.reveal)await api('downloads/reveal',{id:d.reveal});
- if(d.saveFile){const r=await fetch('/api/downloads/file',{method:'POST',headers:{'X-Moddock-Token':data.token,'Content-Type':'application/json'},body:JSON.stringify({id:d.saveFile})});if(!r.ok)throw new Error((await r.json()).error);const url=URL.createObjectURL(await r.blob());const a=document.createElement('a');a.href=url;a.download=data.jobs.find(j=>j.id===d.saveFile).filename;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+ if(d.saveFile){const r=await fetch('/api/downloads/file',{method:'POST',headers:{'X-Moddock-Token':data.token,'Content-Type':'application/json'},body:JSON.stringify({id:d.saveFile})});if(!r.ok)throw requestError(r,await r.json());const url=URL.createObjectURL(await r.blob());const a=document.createElement('a');a.href=url;a.download=data.jobs.find(j=>j.id===d.saveFile).filename;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
  if(d.connect||d.disconnect){const source=d.connect||d.disconnect;const key=d.disconnect?'':document.getElementById(`${source}-api-key`).value.trim();if(d.connect&&!key)throw new Error('请先输入 API Key');await api('sources/connection',{source,key});await refresh();onlineResults={};toast('授权设置已更新；返回游戏后重新查询');}
  }catch(e){toast(e.message);}
 });
@@ -143,8 +144,9 @@ export async function mountHome(element,profile){
  const epoch=++homeEpoch;
  app=element;homeProfile=profile;view='library';selected=null;query='';
  clearInterval(pollTimer);
- try{const next=await api('state');if(epoch!==homeEpoch)return;data=next;render();pollTimer=setInterval(async()=>{if(pollBusy||!app?.isConnected)return;pollBusy=true;try{const next=await api('state');if(epoch!==homeEpoch)return;data=next;if(view!=='settings'&&!['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName))render();notifyNxm();}catch{}finally{pollBusy=false;}},700);}
- catch(e){if(epoch===homeEpoch)app.innerHTML=`<div class="boot">无法连接本地服务：${esc(e.message)} <button data-home-retry>重试</button></div>`;}
+ try{const next=await api('state');if(epoch!==homeEpoch)return false;data=next;render();pollTimer=setInterval(async()=>{if(pollBusy||!app?.isConnected)return;pollBusy=true;try{const next=await api('state');if(epoch!==homeEpoch)return;data=next;if(view!=='settings'&&!['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName))render();notifyNxm();}catch{}finally{pollBusy=false;}},700);return true;}
+ catch(e){if(epoch===homeEpoch)app.innerHTML=`<div class="boot">无法连接本地服务：${esc(e.message)} <button data-home-retry>重试</button></div>`;return false;}
 }
 document.addEventListener('click',e=>{if(e.target.closest('[data-home-retry]'))mountHome(app,homeProfile);});
-export function unmountHome(){homeEpoch++;generation++;clearInterval(pollTimer);closeModal();app=null;}
+export function suspendHome(){homeEpoch++;generation++;clearInterval(pollTimer);}
+export function unmountHome(){suspendHome();closeModal();app?.replaceChildren();app=null;homeProfile=null;}

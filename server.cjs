@@ -11,8 +11,10 @@ const {ModLibrary}=require('./library.cjs');
 const {parseNxm,authorizationPage}=require('./nxm.cjs');
 const {recipes}=require('./adapters.cjs');
 const { ensureUi } = require('./scripts/build-ui.cjs');
+const { createAccountClient, AccountError } = require('./account.cjs');
 async function createServer(options = {}) {
  await ensureUi();
+ const accounts = createAccountClient(options.accounts);
  const root = path.resolve(options.root || process.env.MODDOCK_DATA || path.join(__dirname, '.moddock-data')); await fs.mkdir(root, { recursive: true });
  const configPath = path.join(root, 'settings.json'); let config = { scanPaths: [], mappings: {}, autoImport:true };
  try { config = { ...config, ...JSON.parse(await fs.readFile(configPath, 'utf8')) }; } catch (e) { if (e.code !== 'ENOENT') throw e; }
@@ -24,9 +26,9 @@ async function createServer(options = {}) {
  downloads.onCompleted=async job=>{if(config.autoImport!==false)await library.import(job.game,job.id);};
  let nxmStatus=null; const pendingNxm=new Map();
  let nxmQueue=Promise.resolve();
- function receiveNxm(value,gameId){const action=()=>acceptNxm(value,gameId);const p=nxmQueue.catch(()=>{}).then(action);nxmQueue=p;return p;}
- async function acceptNxm(value,gameId){
-  try{const auth=parseNxm(value);let games=onlineGames();if(gameId)games=games.filter(g=>g.id===gameId);const matches=[];for(const g of games){try{if(await sources.nexusGame(g)===auth.domain)matches.push(g);}catch{}}
+ function receiveNxm(value,gameId,sessionId){const action=()=>acceptNxm(value,gameId,sessionId);const p=nxmQueue.catch(()=>{}).then(action);nxmQueue=p;return p;}
+ async function acceptNxm(value,gameId,sessionId){
+  try{if(sessionId)await accounts.requireSession(sessionId);else await accounts.requireActiveSession();const auth=parseNxm(value);let games=onlineGames();if(gameId)games=games.filter(g=>g.id===gameId);const matches=[];for(const g of games){try{if(await sources.nexusGame(g)===auth.domain)matches.push(g);}catch{}}
    if(matches.length!==1)throw new Error(matches.length?'多个本机游戏匹配此专区，请在设置中选择目标游戏后接收链接':'此 NXM 游戏不在本机游戏库中，请扫描游戏并匹配 Nexus 专区');const g=matches[0];
    const resourceId=`nexus:${auth.domain}:${auth.modId}`;
    if(!sources.keys.nexus){if(pendingNxm.size>=20)throw new Error('待授权链接过多');pendingNxm.set(`${g.id}:${resourceId}:${auth.fileId}`,{auth,gameId:g.id});nxmStatus={id:crypto.randomUUID(),status:'needs_key',gameId:g.id,message:'已收到文件授权，请先在设置中连接同一账号的 Nexus API Key'};return nxmStatus;}
@@ -40,10 +42,36 @@ async function createServer(options = {}) {
   try {
    if (req.headers.host !== `127.0.0.1:${server.address().port}`) return send({ error: '非法访问地址' }, 403);
    const url = new URL(req.url, `http://${req.headers.host}`);
+   const cookieName = `moddock-account-${server.address().port}`;
+   const sessionId = req.headers.cookie?.split(';').map(value => value.trim()).find(value => value.startsWith(cookieName + '='))?.slice(cookieName.length + 1);
+   const sessionCookie = id => res.setHeader('Set-Cookie', [
+    `${cookieName}=${id || ''}; HttpOnly; SameSite=Strict; Path=/api${id ? '' : '; Max-Age=0'}`,
+    `${cookieName}=; HttpOnly; SameSite=Strict; Path=/api/auth; Max-Age=0`,
+   ]);
    if (url.pathname.startsWith('/api/')) {
+    if (req.method === 'GET' && url.pathname === '/api/auth/config') return send({ ...accounts.config, token });
+    if (req.method === 'GET' && url.pathname === '/api/auth/session') {
+     const profile = await accounts.session(sessionId);
+     if (!profile) sessionCookie(null);
+     return send({ profile });
+    }
+    if (!url.pathname.startsWith('/api/auth/')) await accounts.requireSession(sessionId);
     if (req.method === 'GET' && url.pathname === '/api/state') return send({ scan: scanResult, token, games: scanResult.games, sourceGames: onlineGames(), providers, connections: sources.status(), jobs: downloads.view(), installations: installers.view(onlineGames()), scanPaths: config.scanPaths, mappings: config.mappings, downloadPath: downloads.root, autoImport:config.autoImport!==false, recipes, nxmStatus, nexusAuthorizationWindow:!!options.authorize, nxmProtocol:options.protocolStatus?.()||false });
     if (req.method !== 'POST' || req.headers['x-moddock-token'] !== token) return send({ error: '请求未授权' }, 403);
+    if (url.pathname.startsWith('/api/auth/') && req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) return send({ error: '请求来源无效' }, 403);
     let raw = ''; for await (const chunk of req) { raw += chunk; if (raw.length > 16384) return send({ error: '请求过大' }, 413); } const body = JSON.parse(raw || '{}');
+    if (url.pathname === '/api/auth/code') return send(await accounts.sendCode(body));
+    if (url.pathname === '/api/auth/login' || url.pathname === '/api/auth/register') {
+     const session = await accounts[url.pathname.endsWith('/login') ? 'login' : 'register'](body);
+     if (sessionId) { await accounts.logout(sessionId).catch(() => {}); }
+     sessionCookie(session.id);
+     return send({ profile: session.profile });
+    }
+    if (url.pathname === '/api/auth/logout') {
+     sessionCookie(null);
+     await accounts.logout(sessionId);
+     return send({ ok: true });
+    }
     const game = () => { const g = onlineGames().find(g => g.id === body.gameId); if (!g) throw new Error('请先扫描并选择本机安装的游戏'); return g; };
     if(url.pathname==='/api/library/import')return send(await library.import(game(),body.jobId));
     if(url.pathname==='/api/library/auto-import'){if(typeof body.enabled!=='boolean')throw new Error('自动导入设置无效');config.autoImport=body.enabled;await saveConfig();return send({ok:true});}
@@ -52,7 +80,7 @@ async function createServer(options = {}) {
     if(url.pathname==='/api/loadouts/save')return send(await installers.saveLoadout(game(),body.name));
     if(url.pathname==='/api/loadouts/switch')return send(await installers.switchLoadout(game(),body.id));
     if(url.pathname==='/api/loadouts/delete')return send(await installers.deleteLoadout(game(),body.id));
-    if(url.pathname==='/api/nexus/receive')return send(await receiveNxm(body.url,body.gameId));
+    if(url.pathname==='/api/nexus/receive')return send(await receiveNxm(body.url,body.gameId,sessionId));
     if(url.pathname==='/api/nexus/authorize'){const g=game();const r=sources.resource(g,body.id);if(r.source!=='nexus'||r.domain!==await sources.nexusGame(g))throw new Error('文件不属于当前游戏');const page=authorizationPage(body.id,body.fileId);if(!options.authorize)throw new Error('软件内授权窗口需要桌面版；网页预览可在设置中粘贴 NXM 链接');await options.authorize(page);return send({ok:true});}
     if (url.pathname === '/api/installations/profile') return send(await installers.setProfile(game(), body.rule));
     if (url.pathname === '/api/installations/inspect') return send(await installers.inspect(game(), body.jobId));
@@ -79,13 +107,22 @@ async function createServer(options = {}) {
     }
     return send({ error: '接口不存在' }, 404);
    }
-   const files = { '/': 'index.html', '/app.js': 'app.js', '/style.css': 'style.css', '/auth.js': 'auth.js', '/auth.css': 'auth.css', '/splash.svg': 'splash.svg', '/splash-preview.html': 'splash-preview.html', '/splash-preview.css': 'splash-preview.css', '/splash-preview.js': 'splash-preview.js', '/fonts/fusion-pixel-12px-proportional-zh_hans.woff2': 'fonts/fusion-pixel-12px-proportional-zh_hans.woff2' }; const name = files[url.pathname]; if (!name) { res.writeHead(404); return res.end('Not found'); }
+   const files = { '/': 'index.html', '/app.js': 'app.js', '/style.css': 'style.css', '/auth.js': 'auth.js', '/auth.css': 'auth.css', '/splash.svg': 'splash.svg', '/splash-preview.html': 'splash-preview.html', '/splash-preview.css': 'splash-preview.css', '/splash-preview.js': 'splash-preview.js', '/fonts/fusion-pixel-12px-proportional-zh_hans.woff2': 'fonts/fusion-pixel-12px-proportional-zh_hans.woff2' }; const name = files[url.pathname] || (/^\/covers\/\d+\.jpg$/.test(url.pathname) ? url.pathname.slice(1) : undefined); if (!name) { res.writeHead(404); return res.end('Not found'); }
    res.setHeader('Content-Security-Policy', "default-src 'self'; img-src 'self' https://cdn.akamai.steamstatic.com https://shared.akamai.steamstatic.com https://staticdelivery.nexusmods.com https://images.gamebanana.com https://images.steamusercontent.com https://steamuserimages-a.akamaihd.net data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'");
-   res.writeHead(200, { 'Content-Type': name.endsWith('.woff2') ? 'font/woff2' : name.endsWith('.svg') ? 'image/svg+xml' : name.endsWith('.html') ? 'text/html; charset=utf-8' : name.endsWith('.js') ? 'text/javascript; charset=utf-8' : 'text/css; charset=utf-8' }); res.end(await fs.readFile(path.join(__dirname, 'public', name)));
-  } catch (e) { if (!res.headersSent) send({ error: e.message }, 400); else res.destroy(); }
+   const content = await fs.readFile(path.join(__dirname, 'public', name));
+   res.writeHead(200, { 'Content-Type': name.endsWith('.jpg') ? 'image/jpeg' : name.endsWith('.woff2') ? 'font/woff2' : name.endsWith('.svg') ? 'image/svg+xml' : name.endsWith('.html') ? 'text/html; charset=utf-8' : name.endsWith('.js') ? 'text/javascript; charset=utf-8' : 'text/css; charset=utf-8' }); res.end(content);
+  } catch (e) {
+   if (e instanceof AccountError) {
+    if (e.status === 401 || e.code === 'account_disabled') res.setHeader('Set-Cookie', ['/api', '/api/auth'].map(cookiePath => `moddock-account-${server.address().port}=; HttpOnly; SameSite=Strict; Path=${cookiePath}; Max-Age=0`));
+    if (e.retryAfterSeconds) res.setHeader('Retry-After', String(e.retryAfterSeconds));
+    return send({ code: e.code, message: e.message, retryAfterSeconds: e.retryAfterSeconds }, e.status);
+   }
+   if (!res.headersSent) send({ error: e.message }, 400); else res.destroy();
+  }
  });
  await new Promise(resolve => server.listen(options.port ?? Number(process.env.PORT || 4173), '127.0.0.1', resolve));
- return { server, sources, downloads, installers, library, receiveNxm, url: `http://127.0.0.1:${server.address().port}` };
+ server.on('close', () => accounts.clear());
+ return { server, sources, downloads, installers, library, receiveNxm, accountLegalUrls: accounts.config.legalUrls, url: `http://127.0.0.1:${server.address().port}` };
 }
 if (require.main === module) createServer().then(({ url }) => console.log(`游匣已启动：${url}`)).catch(e => { console.error(e.message); process.exit(1); });
 module.exports = { createServer };

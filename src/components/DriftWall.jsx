@@ -60,7 +60,8 @@ const DriftWall = ({
   const pointerDampedRef = useRef({ x: 0, y: 0 });
   const lastTsRef = useRef(null);
 
-  const [containerHeight, setContainerHeight] = useState(600);
+  const [containerSize, setContainerSize] = useState({ width: 800, height: 600 });
+  const planeHeight = Math.ceil(Math.hypot(containerSize.width, containerSize.height) * 1.4);
   const [activeId, setActiveId] = useState(null);
   const activeIdRef = useRef(null);
   const [reduced, setReduced] = useState(prefersReducedMotion);
@@ -86,15 +87,16 @@ const DriftWall = ({
     const unit = tileHeight + gap;
     return columnItems.map(col => {
       const copyHeight = Math.max(unit, col.length * unit);
-      const copies = Math.max(2, Math.ceil((containerHeight * 1.6) / copyHeight) + 1);
+      const copies = Math.max(2, Math.ceil(planeHeight / copyHeight) + 2);
       return { copyHeight, copies };
     });
-  }, [columnItems, tileHeight, gap, containerHeight]);
+  }, [columnItems, tileHeight, gap, planeHeight]);
 
   useLayoutEffect(() => {
     if (!containerRef.current) return;
     const ro = new ResizeObserver(([entry]) => {
-      setContainerHeight(entry.contentRect.height || 600);
+      const { width, height } = entry.contentRect;
+      setContainerSize(size => size.width === width && size.height === height ? size : { width, height });
     });
     ro.observe(containerRef.current);
     return () => ro.disconnect();
@@ -108,9 +110,10 @@ const DriftWall = ({
     });
   }, [columnItems, speed, direction, variance]);
 
-  useEffect(() => {
-    offsetsRef.current = columnMeta.map((meta, c) => meta.copyHeight * ((c * 0.37) % 1));
-    velocitiesRef.current = columnItems.map(() => 0);
+  useLayoutEffect(() => {
+    offsetsRef.current = columnMeta.map((meta, c) => (offsetsRef.current[c] ?? meta.copyHeight * ((c * 0.37) % 1)) % meta.copyHeight);
+    velocitiesRef.current = columnItems.map((_, c) => velocitiesRef.current[c] ?? 0);
+    trackRefs.current.forEach((el, c) => { if (el) el.style.transform = `translate3d(0, ${-offsetsRef.current[c]}px, 0)`; });
   }, [columnMeta, columnItems]);
 
   const applyPlaneTransform = useCallback(
@@ -223,6 +226,7 @@ const DriftWall = ({
     () => ({
       '--dw-tile-w': `${tileWidth}px`,
       '--dw-tile-h': `${tileHeight}px`,
+      '--dw-plane-h': `${planeHeight}px`,
       '--dw-gap': `${gap}px`,
       '--dw-radius': `${radius}px`,
       '--dw-perspective': `${perspective}px`,
@@ -233,7 +237,7 @@ const DriftWall = ({
       '--dw-edge': `${Math.max(0, (1 - fade) * 100)}%`,
       ...style
     }),
-    [tileWidth, tileHeight, gap, radius, perspective, lift, dim, grayscale, overlayColor, fade, style]
+    [tileWidth, tileHeight, planeHeight, gap, radius, perspective, lift, dim, grayscale, overlayColor, fade, style]
   );
 
   const renderTile = (item, id, colIndex) => {

@@ -30,6 +30,7 @@
   left: 50%;
   display: flex;
   flex-direction: row;
+  height: var(--dw-plane-h);
   transform-style: preserve-3d;
   cursor: pointer;
   transform-origin: 50% 50%;
@@ -39,6 +40,8 @@
 .drift-wall__col {
   position: relative;
   width: calc(var(--dw-tile-w) + var(--dw-gap));
+  height: 100%;
+  overflow: hidden;
   transform-style: preserve-3d;
 }
 

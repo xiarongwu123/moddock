@@ -4,11 +4,14 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { createServer } = require('../server.cjs');
+const { accountFixture } = require('./account-fixture.cjs');
+const { submitLogin } = require('./ui-open.cjs');
 const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jLz0AAAAASUVORK5CYII=', 'base64');
 
 (async () => {
  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'moddock-reflective-card-'));
- const service = await createServer({ root, port: 0, scan: async () => ({ games: [], roots: [], diagnostics: [] }) });
+ const account = accountFixture();
+ const service = await createServer({ root, port: 0, scan: async () => ({ games: [], roots: [], diagnostics: [] }), accounts: account.options });
  let browser;
  try {
   browser = await chromium.launch({ channel: 'chrome', headless: true });
@@ -29,7 +32,7 @@ const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQ
    };
    const animate = Element.prototype.animate;
    Element.prototype.animate = function (frames, options) {
-    if (this.id === 'auth-panel') window.authStepAnimations.push({ frames, duration: options.duration, inputs: this.querySelectorAll('input').length });
+    if (this.id === 'auth-panel') window.authStepAnimations.push({ frames, duration: options.duration, inputs: this.querySelectorAll('input:not([type="checkbox"])').length });
     return animate.call(this, frames, options);
    };
    const replaceState = history.replaceState;
@@ -152,7 +155,7 @@ const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQ
   const singleStep = async label => {
    await page.getByLabel(label, { exact: true }).waitFor();
    await page.locator('#auth-panel[data-transitioning="false"]').waitFor();
-   assert.equal(await page.locator('#auth-panel input:visible').count(), 1, 'Every step must show exactly one input');
+   assert.equal(await page.locator('#auth-panel input:not([type="checkbox"]):visible').count(), 1, 'Every step must show exactly one text input');
    assert.equal(await page.getByLabel(label, { exact: true }).evaluate(node => document.activeElement === node), true);
    await centered();
    const height = await card.evaluate(node => node.getBoundingClientRect().height);
@@ -167,7 +170,7 @@ const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQ
   await page.getByLabel('邮箱地址', { exact: true }).press('Enter');
   await page.locator('#auth-panel[data-transitioning="true"]').waitFor();
   assert.equal(await page.locator('#auth-panel').getAttribute('inert'), '');
-  assert.equal(await page.getByRole('button', { name: '本地游戏库', exact: true }).isEnabled(), false);
+  assert.equal(await page.getByRole('button', { name: '本地游戏库', exact: true }).count(), 0);
   await page.locator('#auth-panel form').dispatchEvent('submit');
   await singleStep('密码');
   assert.equal(await page.locator('.auth-title-shuffle').count(), 0, 'Password heading should retain its normal text');
@@ -200,8 +203,9 @@ const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQ
   await singleStep('设置密码');
   await page.getByLabel('设置密码', { exact: true }).fill('123');
   await page.getByRole('button', { name: '获取邮箱验证码', exact: true }).click();
-  await page.getByText('密码需为 8–64 位，包含字母和数字', { exact: true }).waitFor();
+  await page.getByText('密码需为 8–128 位', { exact: true }).waitFor();
   await page.getByLabel('设置密码', { exact: true }).fill('player123');
+  await page.getByRole('checkbox').check();
   await page.getByRole('button', { name: '获取邮箱验证码', exact: true }).click();
   await singleStep('邮箱验证码');
   assert.equal(await page.getByText('输入完整验证码后自动注册', { exact: true }).count(), 0);
@@ -209,14 +213,15 @@ const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQ
   const help = page.getByLabel('验证码帮助', { exact: true });
   await help.click();
   assert.equal(await page.getByRole('note').isVisible(), true);
-  assert.match(await page.getByRole('note').innerText(), /246810/);
+  assert.match(await page.getByRole('note').innerText(), /10 分钟/);
+  assert.doesNotMatch(await page.getByRole('note').innerText(), /246810|演示/);
   await centered();
   assert.equal(await card.evaluate(node => node.getBoundingClientRect().height), await page.evaluate(() => window.inlineBaseline.bounds.height), 'Help must not resize the card');
   await help.press('Escape');
   assert.equal(await page.getByRole('note').isVisible(), false);
   assert.equal(new URL(page.url()).hash, '#login', 'Verification stays inside the same account page');
   await page.getByLabel('邮箱验证码', { exact: true }).fill('111111');
-  await page.getByText('验证码不正确，请重新输入', { exact: true }).waitFor();
+  await page.getByText('验证码无效、已使用或已过期。', { exact: true }).waitFor();
   await page.waitForFunction(() => document.querySelectorAll('.code-slots__slot[data-filled]').length === 0);
   assert.equal(await page.locator('.auth-swap').getAttribute('data-active'), 'false');
   await page.getByRole('button', { name: '上一步', exact: true }).click();
@@ -244,6 +249,12 @@ const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQ
   assert.equal(await page.evaluate(() => window.cameraRequests), 0);
   const resizeAlphas = await page.evaluate(() => window.resizeAlphas);
   assert.ok(resizeAlphas.every(alpha => alpha > 0), `Resizing must repaint before presentation: ${resizeAlphas}`);
+  await page.reload();
+  await page.locator('.boot-splash').waitFor({ state: 'hidden' });
+  await page.locator('.auth-swap[data-active="true"][data-transitioning="false"]').waitFor();
+  assert.match(await page.locator('.profile-text').innerText(), /register@example.com/, 'Reload must restore the verified MU session');
+  await page.getByRole('button', { name: '返回登录页面', exact: true }).click();
+  await page.locator('.auth-swap[data-active="false"][data-transitioning="false"]').waitFor();
   await page.addInitScript(() => {
    const getContext = HTMLCanvasElement.prototype.getContext;
    HTMLCanvasElement.prototype.getContext = function (type, ...args) { return type === 'webgl2' ? null : getContext.call(this, type, ...args); };
@@ -267,6 +278,22 @@ const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQ
   await page.locator('.auth-title-shuffle[data-shuffle-state="complete"]').waitFor();
   assert.equal(await page.locator('.auth-title-shuffle .shuffle-char').count(), 0, 'Reduced motion leaves the title unsplit');
   assert.equal(await page.getByRole('heading', { name: '创建你的游匣账号', exact: true }).isVisible(), true);
+  await page.goto(service.url + '/#home');
+  await page.reload();
+  await page.getByRole('heading', { name: '欢迎回到游匣', exact: true }).waitFor();
+  await page.locator('.boot-splash').waitFor({ state: 'hidden' });
+  assert.equal(new URL(page.url()).hash, '#login', 'Changing the hash cannot bypass login');
+  assert.equal(await page.getByRole('button', { name: '本地游戏库', exact: true }).count(), 0);
+  assert.equal((await page.request.get(service.url + '/api/state')).status(), 401);
+  await submitLogin(page);
+  await page.locator('.auth-swap[data-active="true"][data-transitioning="false"]').waitFor();
+  assert.equal((await page.request.get(service.url + '/api/state')).status(), 200, 'Browser cookie must authorize business routes');
+  account.advance(31000); account.revoke();
+  await page.locator('.auth-swap[data-active="false"][data-transitioning="false"]').waitFor();
+  await page.getByText('登录已失效', { exact: true }).waitFor();
+  assert.equal(await page.locator('.profile-text').count(), 0, 'Expired session must clear the mounted library');
+  assert.equal((await page.request.get(service.url + '/api/state')).status(), 401);
+  assert.equal(await page.getByRole('button', { name: '下一步', exact: true }).isEnabled(), true);
   assert.deepEqual(errors, []);
   console.log('Auth UI passed: FuzzyText logo motion, hover intensity, 2x rendering, pause/resume and reduced motion; Shuffle titles, stable steps, automatic registration and WebGL fallback.');
  } finally {

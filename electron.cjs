@@ -30,9 +30,12 @@ if (primary) app.whenReady().then(async () => {
  const downloadSession = session.fromPartition('moddock-downloads');
  downloadSession.webRequest.onBeforeRequest({ urls: ['<all_urls>'] }, (details, callback) => callback({ cancel: !downloadAllowed(details.url) }));
  service = await createServer({ port: 0, root: process.env.MODDOCK_DATA || path.join(app.getPath('userData'), 'data'), reveal: file => shell.showItemInFolder(file), authorize, protocolStatus:()=>protocolRegistered, sources: { fetch: (url, init) => net.fetch(String(url), init) }, downloads: { fetch: (url, init) => downloadSession.fetch(String(url), { ...init, redirect: 'follow' }) } });
- mainWindow = new BrowserWindow({ width: 1440, height: 940, minWidth: 1000, minHeight: 700, title: '游匣 · MODDOCK', backgroundColor: '#101215', autoHideMenuBar: true, webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true } });
+ mainWindow = new BrowserWindow({ width: 1440, height: 940, minWidth: 1000, minHeight: 700, title: '游匣 · MODDOCK', titleBarStyle: 'hidden', titleBarOverlay: { color: '#00000000', symbolColor: '#eef1ee', height: 40 }, backgroundColor: '#101215', autoHideMenuBar: true, webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true } });
  mainWindow.on('closed',()=>{mainWindow=null;if(authorizationWindow&&!authorizationWindow.isDestroyed())authorizationWindow.close();});
- mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+ mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+  if (Object.values(service.accountLegalUrls).includes(url)) void shell.openExternal(url).catch(() => {});
+  return { action: 'deny' };
+ });
  mainWindow.webContents.on('will-navigate', (event, target) => { target=event.url||target; if (!target.startsWith(service.url + '/')) event.preventDefault(); });
  await mainWindow.loadURL(service.url);
  for(const arg of process.argv)if(/^nxm:\/\//i.test(arg))pending.push(arg);

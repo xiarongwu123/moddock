@@ -3,7 +3,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { createServer } = require('../server.cjs');
+const { createServer } = require('./server-fixture.cjs');
+const { submitLogin } = require('./ui-open.cjs');
 const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jLz0AAAAASUVORK5CYII=', 'base64');
 
 (async () => {
@@ -46,7 +47,7 @@ const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQ
   await page.goto(service.url);
   assert.equal(await page.locator('.gridscan').count(), 0, 'Do not run the scan before entering home');
   for (let cycle = 0; cycle < 3; cycle++) {
-   await page.getByRole('button', { name: '本地游戏库', exact: true }).click();
+   await submitLogin(page);
    await page.locator('.grid-scan-transition__overlay[data-phase="scan"]').waitFor();
    assert.ok(await page.evaluate(() => [[40, 40], [innerWidth - 40, 40], [innerWidth / 2, innerHeight / 2]].every(([x, y]) => document.elementFromPoint(x, y)?.closest('.grid-scan-transition__overlay'))), 'Scan must cover fixed sidebars and all page content');
    assert.equal(await page.locator('.gridscan').getAttribute('data-renderer'), 'webgl');
@@ -71,17 +72,19 @@ const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQ
   assert.equal(evidence.completions.length, 6);
   for (const state of evidence.completions) assert.deepEqual(state, { hash: state.active === 'true' ? '#home' : '#login', active: state.active, transitioning: 'false', overlays: 0 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.getByRole('button', { name: '本地游戏库', exact: true }).click();
+  await submitLogin(page);
   await page.locator('.auth-swap[data-active="true"][data-transitioning="false"]').waitFor();
   assert.equal(await page.locator('.gridscan').count(), 0);
   assert.equal(await page.evaluate(() => window.scanEvidence.contexts.length), 6);
   await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.getByRole('button', { name: '返回登录页面', exact: true }).click();
+  await page.locator('.auth-swap[data-active="false"][data-transitioning="false"]').waitFor();
   await page.addInitScript(() => {
    const getContext = HTMLCanvasElement.prototype.getContext;
    HTMLCanvasElement.prototype.getContext = function (type, ...args) { return type === 'webgl2' ? null : getContext.call(this, type, ...args); };
   });
   await page.reload();
-  await page.getByRole('button', { name: '本地游戏库', exact: true }).click();
+  await submitLogin(page);
   await page.locator('.gridscan[data-renderer="fallback"]').waitFor();
   await page.locator('.auth-swap[data-active="true"][data-transitioning="false"]').waitFor();
   assert.equal(await page.locator('.gridscan').count(), 0);

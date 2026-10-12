@@ -22,6 +22,6 @@ export const steamCovers = [
 ].map(([appId, title]) => ({
  appId,
  title,
- image: `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/library_600x900.jpg`,
+ image: `/covers/${appId}.jpg`,
  fallback: `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/header.jpg`,
 }));

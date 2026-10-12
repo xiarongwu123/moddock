@@ -1,7 +1,7 @@
 // Isolated QA fixture only: writes real files in a temporary game directory.
 const {chromium}=require('@playwright/test');
 const fs=require('node:fs/promises'),os=require('node:os'),path=require('node:path'),assert=require('node:assert/strict');
-const {createServer}=require('../server.cjs'),{hash}=require('../installers.cjs'),{zip}=require('./zip-fixture.cjs');
+const {createServer}=require('./server-fixture.cjs'),{hash}=require('../installers.cjs'),{zip}=require('./zip-fixture.cjs');
 (async()=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'moddock-ui-install-'));const g={id:'steam-987654',appId:'987654',name:'安装流程测试（临时目录）',platform:'Steam',installPath:path.join(root,'game'),real:true};await fs.mkdir(path.join(g.installPath,'Content'),{recursive:true});await fs.writeFile(path.join(g.installPath,'Content/config.ini'),'original');
  const service=await createServer({root:path.join(root,'data'),port:0,scan:async()=>({games:[g],roots:[],diagnostics:[]}),installers:{processes:async()=>[]},sources:{fetch:async()=>Response.json({_aMetadata:{_nRecordCount:0},_aRecords:[]})}});let browser;
