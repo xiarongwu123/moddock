@@ -38,6 +38,11 @@ function externalAllowed(value) {
 }
 function text(value) { return String(value || '').replace(/<[^>]*>/g, '').replace(/\[(?:\/?[a-z]+)(?:=[^\]]*)?\]/gi, '').replace(/\s+/g, ' ').trim().slice(0, 50000); }
 function normalize(value) { return String(value || '').replace(/[™®©]/g, '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, ''); }
+function fileAccess(url, source) {
+ if(downloadAllowed(url))return {available:true,downloadCode:'DIRECT_DOWNLOAD',downloadReason:'来源提供公开文件地址，可以在软件内下载'};
+ if(url)return {available:false,downloadCode:'UNSUPPORTED_DOWNLOAD_ADDRESS',downloadReason:'来源返回的下载地址不在当前支持的 HTTPS 文件域名范围内；这不是账号授权问题'};
+ return {available:false,downloadCode:source==='workshop'?'STEAM_CHANNEL_NOT_IMPLEMENTED':'NO_DOWNLOAD_ADDRESS',downloadReason:source==='workshop'?'此工坊文件没有公开直链。软件尚未接入 Steam 客户端下载通道，填写 Steam Web API Key 也不能解决此下载问题':'来源没有提供此文件的直接下载地址；这不是缺少 API Key'};
+}
 function sourceLinks(game, query = '') {
   const banana = new URL('https://gamebanana.com/search'); banana.searchParams.set('query', query || game.searchName || game.name);
   const workshop = new URL('https://steamcommunity.com/workshop/browse/'); if (game.appId) workshop.searchParams.set('appid', game.appId); if (query) workshop.searchParams.set('searchtext', query);
@@ -153,30 +158,31 @@ class Sources {
       const gameId = await this.bananaGame(game);
       if (!gameId || String(raw._aGame?._idRow) !== String(gameId)) throw new Error('此 Mod 不属于当前游戏');
       if (raw._bIsWithheld || raw._bIsTrashed || raw._bIsPrivate) throw new Error('该资源目前不对外开放');
-      return { description: text(raw._sText || raw._sDescription), requirements: [], files: (raw._aFiles || []).filter(f => !f._bIsArchived).map(f => ({ id: String(f._idRow), name: text(f._sFile), size: Number(f._nFilesize), version: '', available: !!downloadAllowed(f._sDownloadUrl), _url: f._sDownloadUrl, md5: /^[a-f0-9]{32}$/i.test(f._sMd5Checksum || '') ? f._sMd5Checksum : null })) };
+      return { description: text(raw._sText || raw._sDescription), requirements: [], notice:'香蕉网公开直链文件可直接下载，不需要 Nexus 或 Steam API Key。', files: (raw._aFiles || []).filter(f => !f._bIsArchived).map(f => ({ id: String(f._idRow), name: text(f._sFile), size: Number(f._nFilesize), version: '', ...fileAccess(f._sDownloadUrl,'banana'), _url: f._sDownloadUrl, md5: /^[a-f0-9]{32}$/i.test(f._sMd5Checksum || '') ? f._sMd5Checksum : null })) };
     }
     if (r.source === 'nexus') {
       if (r.domain !== await this.nexusGame(game)) throw new Error('此 Mod 不属于当前游戏');
       const g = await this.gql('query($domain:String){game(domainName:$domain){id}}', { domain: r.domain });
       const raw = await this.gql('query($mod:ID!,$game:ID!){mod(modId:$mod,gameId:$game){description modRequirements{nexusRequirements{nodes{modName notes}}}} modFiles(modId:$mod,gameId:$game){fileId name uri detectedFileExtension sizeInBytes size version category description}}', { mod: r.id, game: String(g.game.id) });
-      return { description: text(raw.mod.description), requirements: (raw.mod.modRequirements?.nexusRequirements?.nodes || []).map(m => text(`${m.modName} ${m.notes || ''}`)), notice: this.keys.nexus ? '下载由 N 网账号权限决定；普通账号的文件可能需要站点签发的下载授权' : '请先在设置中连接 Nexus API Key，下载权限由账号决定', files: raw.modFiles.filter(f => !['REMOVED', 'ARCHIVED', 'OLD_VERSION'].includes(f.category)).map(f => ({ id: String(f.fileId), name: text(`${f.name}.${f.detectedFileExtension || 'zip'}`), label: text(f.name), size: Number(f.sizeInBytes || f.size * 1024), version: f.version, category: f.category, available: !!this.keys.nexus })) };
+      return { description: text(raw.mod.description), requirements: (raw.mod.modRequirements?.nexusRequirements?.nodes || []).map(m => text(`${m.modName} ${m.notes || ''}`)), notice: this.keys.nexus ? 'API Key 已配置，下载时由 N 网验证。普通账号还需站点签发的文件授权；本版尚未接入该签发流程。' : '公开列表可浏览，下载需连接 Nexus API Key。Key 仅保存在本次运行内存中，重启后需重新填写。普通账号下载授权流程尚未接入。', files: raw.modFiles.filter(f => !['REMOVED', 'ARCHIVED', 'OLD_VERSION'].includes(f.category)).map(f => ({ id: String(f.fileId), name: text(`${f.name}.${f.detectedFileExtension || 'zip'}`), label: text(f.name), size: Number(f.sizeInBytes || f.size * 1024), version: f.version, category: f.category, available: !!this.keys.nexus, downloadCode:this.keys.nexus?'NEXUS_PERMISSION_CHECK':'NEXUS_KEY_REQUIRED',downloadReason:this.keys.nexus?'已配置 API Key，点击后向 N 网申请下载链接；尚未确认账号和此文件权限':'未连接 Nexus API Key；请在设置中连接。重启软件后授权会清除。' })) };
     }
     if (!game.appId || game.workshop === false) throw new Error('该游戏不支持 Steam 工坊');
     const raw = await this.request('https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ itemcount: '1', 'publishedfileids[0]': r.id }).toString() });
     const m = raw.response?.publishedfiledetails?.[0];
     if (!m || m.result !== 1 || String(m.consumer_app_id) !== String(game.appId) || m.file_type === 1) throw new Error('无法读取当前游戏的工坊文件');
     const allowed = downloadAllowed(m.file_url);
-    return { description: text(m.description), requirements: [], notice: allowed ? '公开文件可以在软件内下载' : '此资源没有公开下载地址，需要 Steam 客户端授权下载；当前版本尚未接入该下载通道', files: [{ id: r.id, name: text(m.filename || `workshop-${r.id}.bin`), size: Number(m.file_size), available: !!allowed, _url: allowed }] };
+    const access=fileAccess(m.file_url,'workshop');
+    return { description: text(m.description), requirements: [], notice: access.downloadReason, files: [{ id: r.id, name: text(m.filename || `workshop-${r.id}.bin`), size: Number(m.file_size), ...access, _url: allowed }] };
   }
   async downloadFile(game, id, fileId) {
     if (!/^\d+$/.test(String(fileId))) throw new Error('文件 ID 无效');
     const detail = await this.detail(game, id); const file = detail.files.find(f => f.id === String(fileId));
     if (!file) throw new Error('该文件已下架或不属于此 Mod');
-    if (!file.available) throw new Error(detail.notice || '该来源尚未开放直接下载');
+    if (!file.available) throw Object.assign(new Error(file.downloadReason || detail.notice || '该来源尚未开放直接下载'),{code:file.downloadCode});
     const resource = this.resource(game, id);
     if (resource.source === 'nexus') {
       const url = `https://api.nexusmods.com/v1/games/${resource.domain}/mods/${resource.id}/files/${fileId}/download_link.json`;
-      let links; try { links = await this.request(url, { headers: { apikey: this.keys.nexus, 'Application-Name': 'Moddock', 'Application-Version': '0.3.0' } }); } catch { throw new Error('N 网未签发下载链接：请检查 API Key、账号 Premium 权限及该文件的下载限制'); }
+      let links; try { links = await this.request(url, { headers: { apikey: this.keys.nexus, 'Application-Name': 'Moddock', 'Application-Version': require('./package.json').version } }); } catch(e) {const message=e.code==='HTTP_401'?'N 网拒绝了 API Key，请在设置中重新连接有效授权':e.code==='HTTP_403'?'N 网拒绝签发文件下载链接。普通账号需站点签发的文件授权，该流程尚未接入；已有 Premium 时请核对账号与文件权限':`获取 N 网下载链接失败：${e.message}`;throw Object.assign(new Error(message),{code:e.code,host:e.host}); }
       file._url = links?.find(l => downloadAllowed(l.URI))?.URI;
     }
     if (!downloadAllowed(file._url)) throw new Error('来源未提供受支持的直接下载地址');
@@ -251,7 +257,7 @@ class Sources {
 module.exports = { Sources, sourceGames, providers, sourceLinks, normalizeNexus, normalizeBanana, normalizeWorkshop, parseWorkshopHtml, externalAllowed };
 
 function downloadAllowed(value) {
-  try { const u = new URL(value); return u.protocol === 'https:' && !u.username && !u.password && (!u.port || u.port === '443') && (/^filecache\d+\.gamebanana\.com$/.test(u.hostname) || ['gamebanana.com','files.gamebanana.com','nexusmods.com','steamusercontent.com','steamcontent.com','steampowered.com'].some(host => u.hostname === host || (host !== 'gamebanana.com' && host !== 'steampowered.com' && u.hostname.endsWith('.' + host)))) ? u.href : null; } catch { return null; }
+  try { const u = new URL(value); return u.protocol === 'https:' && !u.username && !u.password && (!u.port || u.port === '443') && (/^filecache\d+\.gamebanana\.com$/.test(u.hostname) || ['gamebanana.com','files.gamebanana.com','nexusmods.com','nexus-cdn.com','steamusercontent.com','steamcontent.com','steampowered.com'].some(host => u.hostname === host || (host !== 'gamebanana.com' && host !== 'steampowered.com' && u.hostname.endsWith('.' + host)))) ? u.href : null; } catch { return null; }
 }
 module.exports.downloadAllowed = downloadAllowed;
 

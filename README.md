@@ -1,4 +1,4 @@
-# 游匣 Moddock v0.4.0
+# 游匣 Moddock v0.4.1
 
 Windows 本机游戏库、社区 Mod 浏览下载与按游戏规则安装管理应用。
 
@@ -58,7 +58,7 @@ Windows 本机游戏库、社区 Mod 浏览下载与按游戏规则安装管理�
 - Windows 用系统进程列表检查游戏路径和已配置入口，无法读取部分受保护进程的路径时可能漏检；请退出游戏再部署。需管理员权限的游戏目录会报告权限错误，不自动提权。
 - 安装记录、载荷和原文件备份在数据目录 installations 中，启用/停用和重启后保留。正常卸载后移除该项载荷/备份；不删除未托管文件或非空游戏目录。
 
-验证：24 项自动检查（临时目录实际文件操作）及 `node test/ui-installations.cjs` 完整界面流程通过。**尚未在 Windows 实机或实际游戏中验证 Mod 效果**。这些检查证明部署与恢复逻辑，不代表所有游戏和 Mod 兼容。
+验证：自动检查（临时目录实际文件操作）及 `node test/ui-installations.cjs` 完整界面流程通过。**尚未在 Windows 实机或实际游戏中验证 Mod 效果**。这些检查证明部署与恢复逻辑，不代表所有游戏和 Mod 兼容。
 
 ## 数据与下载
 
@@ -118,3 +118,10 @@ python3 scripts/package-windows.py --runtime /path/to/Moddock --output /path/to/
 ```
 
 脚本包含生产 ZIP 解包依赖，输出 Windows / 源码 ZIP 及 SHA-256 校验文件；排除 Git、用户数据和 node_modules 开发依赖。Windows 实机验证仍需另行进行。
+
+## v0.4.1 下载提示与 CDN 修复
+
+- 每个文件显示具体原因：Nexus 未连接 API Key、工坊下载通道未接入、来源未提供地址、地址暂不支持。Nexus 缺少 Key 时提供软件内“连接 N 网”设置入口。
+- 授权按钮和设置说明明确 Key 仅保存本次运行。登录 Nexus 账号，在其账号设置 API Access 创建 Personal API Key，再填入软件。请不要把 Key 发到聊天或提交进仓库。普通账号的文件授权签发流程仍未接入，不承诺填 Key 后一定可下载。
+- 放行官方下载服务返回的 nexus-cdn.com 域名；继续验证 HTTPS、重定向与域名边界。网络故障、限流不再统一归为 Premium/授权问题。
+- 香蕉网公开直链不需要 Nexus Key；实时读取 Stardew Valley 资源 674090 的公开文件地址，下载字节验证另行进行。
