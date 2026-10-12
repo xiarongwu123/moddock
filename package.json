@@ -1,0 +1,13 @@
+{
+  "name": "moddock",
+  "version": "0.3.1",
+  "private": true,
+  "description": "游匣 — 本机游戏库与社区 Mod 下载桌面应用",
+  "main": "electron.cjs",
+  "scripts": {
+    "start": "electron .",
+    "preview": "node server.cjs",
+    "test": "node --test test/*.test.cjs"
+  },
+  "devDependencies": { "electron": "44.7.0", "@playwright/test": "1.64.0" }
+}
