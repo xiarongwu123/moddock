@@ -1,0 +1,20 @@
+:root {
+ --motion-fast: 160ms;
+ --motion-panel: 240ms;
+ --motion-ease: cubic-bezier(.22, 1, .36, 1);
+}
+.auth-step-panel {
+ opacity: 1;
+ transform: translateX(0);
+ transition: opacity var(--motion-fast) ease, transform var(--motion-fast) var(--motion-ease);
+}
+.auth-step-panel[data-stage='from'] { opacity: 0; transform: translateX(calc(var(--step-direction, 1) * 12px)); transition: none; }
+.auth-step-panel[data-stage='leave'] { opacity: 0; transform: translateX(calc(var(--step-direction, 1) * -8px)); }
+.motion-collapse { display: grid; grid-template-rows: 1fr; opacity: 1; transition: grid-template-rows var(--motion-panel) var(--motion-ease), opacity var(--motion-fast) ease; }
+.motion-collapse[data-stage='from'], .motion-collapse[data-stage='leave'] { grid-template-rows: 0fr; opacity: 0; }
+.motion-collapse-inner { min-height: 0; overflow: clip; overflow-clip-margin: 5px; }
+.home-host .game-card, .home-host .btn, .home-host .primary-nav button, .home-host .header-action { transition-timing-function: var(--motion-ease); }
+@media (prefers-reduced-motion: reduce) {
+ .auth-step-panel, .motion-collapse { transition: none !important; transform: none !important; }
+ .home-host *, #modal-root *, #toast { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: 0s !important; scroll-behavior: auto !important; }
+}

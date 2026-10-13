@@ -32,6 +32,22 @@ test('Steam 工坊查询分页，详情无直链时不能假装下载',async()=>
  const s=new Sources({fetch:async(url,opts)=>{u=new URL(url);if(opts.method==='POST')return Response.json({response:{publishedfiledetails:[{result:1,consumer_app_id:294100,publishedfileid:'99',title:'Mod',file_url:'',file_size:20}]}});return Response.json({response:{result:1,total:40,publishedfiledetails:[{publishedfileid:'99',consumer_app_id:294100,title:'Mod'}]}});}});
  s.connect('workshop','a'.repeat(32));const r=await s.list('workshop',g,'test',2);assert.equal(JSON.parse(u.searchParams.get('input_json')).page,2);assert.equal(r.hasNext,true);const d=await s.detail(g,'workshop:99');assert.equal(d.files[0].available,false);await assert.rejects(s.downloadFile(g,'workshop:99','99'),/下载通道/);
 });
+test('Steam 新版公开 SSR 列表保留分页、分类与总数，过滤其他游戏及合集', async () => {
+ const game = { ...sourceGames.find(g => g.id === 'rimworld') };
+ let data = { eresult: 1, current_page: 2, total_pages: 3, total_count: 70, results: [
+  { publishedfileid: '42', consumer_appid: 294100, title: 'Public mod', tags: [{ tag: 'Mod' }], subscriptions: 300, time_updated: 1791582767 },
+  { publishedfileid: '43', consumer_appid: 999, title: 'Other game' },
+  { publishedfileid: '44', consumer_appid: 294100, title: 'Collection', file_type: 1 }
+ ] };
+ const source = new Sources({ fetch: async () => new Response(`<script type="application/json" id="valve-ssr-data">${JSON.stringify({ renderContext: { queryData: JSON.stringify({ queries: [{ queryKey: ['workshop_browse', { appid: 294100 }], state: { data } }] }) } })}</script>`) });
+ const result = await source.list('workshop', game, '', 2);
+ assert.equal(result.status, 'ready'); assert.equal(result.items.length, 1); assert.equal(result.total, 70); assert.equal(result.hasNext, true);
+ assert.equal(result.items[0].category, 'Mod'); assert.equal(result.items[0].metric, 300); assert.ok(result.items[0].updated);
+ data = { ...data, current_page: 1, total_pages: 0, total_count: 0, results: [] };
+ assert.equal((await source.list('workshop', game, 'nothing')).status, 'empty');
+ source.cache.clear();
+ assert.equal((await source.list('workshop', game, '', 2)).status, 'error');
+});
 test('真实字节下载、来源 MD5 与大小校验、重启记录恢复',async t=>{
  const root=await temp(t),bytes=Buffer.from('real fixture content');
  const sources={resource:()=>({source:'banana'}),downloadFile:async()=>({name:'../mod.zip',size:bytes.length,md5:crypto.createHash('md5').update(bytes).digest('hex'),_url:'https://files.gamebanana.com/mod.zip'})};

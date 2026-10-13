@@ -28,7 +28,14 @@
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "three": "^0.186.1",
+    "transition-hook": "1.5.2",
     "yauzl": "3.4.0"
+  },
+  "overrides": {
+    "transition-hook": {
+      "react": "$react",
+      "react-dom": "$react-dom"
+    }
   },
   "engines": {
     "node": ">=22.15.0"

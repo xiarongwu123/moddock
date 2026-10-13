@@ -8,6 +8,7 @@ module.exports = {
   '*.cjs',
   'package.json',
   'nexus-games.json',
+  'nexus-app.json',
   'public/**/*',
   'scripts/build-ui.cjs',
   'README.md',

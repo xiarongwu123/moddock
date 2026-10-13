@@ -1,0 +1,54 @@
+.source-onboarding{width:min(560px,calc(100vw - 40px));max-height:calc(100dvh - 72px);margin:auto;padding:34px;border:1px solid #75866d40;border-radius:20px;background:linear-gradient(155deg,#232b26,#171e1a 65%);color:#eef3ed;box-shadow:0 30px 100px #0009;font-family:inherit;overflow:auto;overscroll-behavior:contain;-webkit-app-region:no-drag;animation:source-onboarding-enter .22s ease-out}
+.source-onboarding::backdrop{background:#070d0bb8;backdrop-filter:blur(7px);opacity:1;transition:opacity var(--motion-panel) ease}
+.source-onboarding[data-stage]{animation:none;opacity:1;transform:translateY(0) scale(1);transition:opacity var(--motion-panel) ease,transform var(--motion-panel) var(--motion-ease)}
+.source-onboarding[data-stage=from],.source-onboarding[data-stage=leave]{opacity:0;transform:translateY(12px) scale(.985)}
+.source-onboarding[data-stage=from]::backdrop,.source-onboarding[data-stage=leave]::backdrop{opacity:0}
+.source-onboarding button,.source-onboarding input,.source-onboarding a{font:inherit}
+.source-onboarding button{cursor:pointer}
+.source-onboarding button:disabled{cursor:default;opacity:.5}
+.source-onboarding button:focus-visible,.source-onboarding input:focus-visible,.source-onboarding a:focus-visible{outline:2px solid #b3f66b;outline-offset:3px}
+.source-onboarding-close{position:absolute;right:20px;top:20px;display:grid;place-items:center;width:30px;height:30px;padding:6px;background:transparent;border:0;border-radius:8px;color:#8d9a90}
+.source-onboarding-close:hover{color:#eaf2e8;background:#ffffff0a}
+.source-onboarding svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.source-onboarding-welcome{display:inline-flex;gap:7px;align-items:center;color:#b3f66b;font-size:11px;letter-spacing:.5px}
+.source-onboarding-welcome svg{width:15px;height:15px}
+.source-onboarding-header h2{font-size:25px;letter-spacing:-.5px;margin:15px 0 9px;font-weight:650;outline:0}
+.source-onboarding-header p{font-size:12px;color:#94a096;line-height:1.8;margin:0}
+.source-onboarding-providers{display:grid;gap:12px;margin:27px 0 25px}
+.source-onboarding-provider{padding:18px 16px;border:1px solid #ffffff10;border-radius:12px;background:#0b120e40;transition:border-color .2s}
+.source-onboarding-provider[data-connected=true]{border-color:#b3f66b35}
+.source-onboarding-provider-head{display:flex;gap:13px;align-items:center}
+.source-onboarding-mark{display:grid;place-items:center;width:38px;height:38px;border:1px solid #ffffff0b;border-radius:11px;font-size:19px;font-weight:750;flex:none}
+.source-onboarding-mark.is-nexus{color:#f1b166;background:#ed9a3312}
+.source-onboarding-mark.is-workshop{color:#8dc5ed;background:#62ace512}
+.source-onboarding-provider-copy{min-width:0;flex:1}
+.source-onboarding-provider h3{font-size:14px;font-weight:600;margin:0 0 6px}
+.source-onboarding-provider-copy p{font-size:10px;color:#95a198;line-height:1.6;margin:0}
+.source-onboarding-connect{flex:none;padding:8px 14px;border:1px solid #b3f66b45;border-radius:8px;background:#b3f66b0b;color:#c4e9a9;font-size:11px!important;min-width:56px;transition:background .15s}
+.source-onboarding-connect:hover:not(:disabled){background:#b3f66b20}
+.source-onboarding-connected{display:flex;align-items:center;gap:4px;color:#b3f66b;font-size:11px;white-space:nowrap}
+.source-onboarding-connected svg{width:15px;height:15px}
+.source-onboarding-form{padding-top:17px;margin-top:17px;border-top:1px solid #ffffff0a}
+.source-onboarding-field-title{display:flex;justify-content:space-between;gap:12px;font-size:11px;color:#becbbd;margin-bottom:10px}
+.source-onboarding-field-title a{font-size:10px;color:#abc98c;text-decoration:none}
+.source-onboarding-field-title a:hover{text-decoration:underline}
+.source-onboarding-field{display:flex;gap:8px}
+.source-onboarding-field input{min-width:0;flex:1;width:100%;background:#0f1612;border:1px solid #75866d45;border-radius:8px;padding:11px 12px;font-size:12px;color:#e1eade}
+.source-onboarding-field input::placeholder{color:#67776a}
+.source-onboarding-field input[aria-invalid=true]{border-color:#e38b795e}
+.source-onboarding-field button{border:0;border-radius:8px;background:#b3f66b;color:#19220e;padding:10px 12px;white-space:nowrap;font-size:11px;font-weight:600}
+.source-onboarding-progress{display:flex;align-items:center;gap:8px;color:#b2c6a3;font-size:11px;line-height:1.7;margin:15px 0 0}
+.source-onboarding-spinner{width:12px;height:12px;flex:none;border:1.5px solid #b3f66b35;border-top-color:#b3f66b;border-radius:50%;animation:source-onboarding-spin 1s linear infinite}
+.source-onboarding-error{color:#f0a795;font-size:11px;line-height:1.7;margin:12px 0 0;overflow-wrap:anywhere}
+.source-onboarding-error button{font-size:11px;color:#c4e9a9;background:none;border:0;padding:0;margin-left:10px;text-decoration:underline}
+.source-onboarding-loading{color:#9fae9f;font-size:12px;padding:30px 0}
+.source-onboarding-storage{font-size:11px;color:#b3a78a;line-height:1.7;margin:0 0 18px}
+.source-onboarding-footer{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:24px}
+.source-onboarding-footer>span{font-size:11px;color:#7e8b80}
+.source-onboarding-footer>button{border:1px solid #ffffff1c;border-radius:9px;background:#ffffff05;color:#c5cec3;padding:11px 20px;font-size:12px;font-weight:550;white-space:nowrap}
+.source-onboarding-footer>button:hover{border-color:#b3f66b55;color:#d1edb3}
+.source-onboarding-footer>button.is-ready{background:#b3f66b;border-color:#b3f66b;color:#16210f}
+@keyframes source-onboarding-enter{from{opacity:0;transform:translateY(10px) scale(.98)}to{opacity:1;transform:translateY(0) scale(1)}}
+@keyframes source-onboarding-spin{to{transform:rotate(360deg)}}
+@media(max-width:540px){.source-onboarding{padding:27px 20px}.source-onboarding-provider{padding:15px 12px}.source-onboarding-provider-head{gap:10px}.source-onboarding-mark{width:32px;height:32px}.source-onboarding-header h2{font-size:22px}.source-onboarding-connect{padding:8px 11px}}
+@media(prefers-reduced-motion:reduce){.source-onboarding,.source-onboarding-spinner{animation:none}.source-onboarding[data-stage],.source-onboarding::backdrop,.source-onboarding-provider,.source-onboarding-connect{transition:none;transform:none}}

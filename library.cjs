@@ -17,6 +17,6 @@ class ModLibrary {
   }catch(e){m.update={status:'error',message:e.message,checked:new Date().toISOString()};}}
   await this.installers.save();return mods.map(m=>({id:m.id,...m.update}));
  });}
- async downloadUpdate(game,id,fileId){const m=this.installers.state.mods.find(m=>m.id===id&&m.gameId===game.id);if(!m?.update?.files.some(f=>f.id===String(fileId)))throw new Error('请先检查并选择此 Mod 的更新文件');return this.downloads.start(game,m.resourceId,fileId,m.name+' · 更新');}
+ async downloadUpdate(game,id,fileId){const m=this.installers.state.mods.find(m=>m.id===id&&m.gameId===game.id);if(!m?.update?.files.some(f=>f.id===String(fileId)))throw new Error('请先检查并选择此 Mod 的更新文件');return this.downloads.start(game,m.resourceId,fileId,m.name+' · 更新',undefined,this.sources);}
 }
 module.exports={ModLibrary};

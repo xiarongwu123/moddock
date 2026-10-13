@@ -38,6 +38,17 @@ function externalAllowed(value) {
 }
 function text(value) { return String(value || '').replace(/<[^>]*>/g, '').replace(/\[(?:\/?[a-z]+)(?:=[^\]]*)?\]/gi, '').replace(/\s+/g, ' ').trim().slice(0, 50000); }
 function normalize(value) { return String(value || '').replace(/[™®©]/g, '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, ''); }
+function bananaGameRecords(raw) {
+  if (raw?._sErrorCode) {
+    const code = String(raw._sErrorCode).replace(/[^a-z0-9_]/gi, '').slice(0, 80) || 'API_ERROR';
+    const reason = typeof raw._sErrorMessage === 'string' ? text(raw._sErrorMessage).slice(0, 300) : '游戏索引服务暂不可用';
+    throw Object.assign(new Error(`GameBanana：${reason}`), { code: `GAMEBANANA_${code}`, host: 'gamebanana.com' });
+  }
+  if (!Array.isArray(raw?._aRecords) || raw._aRecords.some(g => !g || !/^[1-9]\d*$/.test(String(g._idRow)) || typeof g._sName !== 'string' || !g._sName.trim() || (g._sModelName && g._sModelName !== 'Game'))) {
+    throw Object.assign(new Error('GameBanana 游戏索引返回异常'), { code: 'INVALID_SCHEMA', host: 'gamebanana.com' });
+  }
+  return raw._aRecords;
+}
 function fileAccess(url, source) {
  if(downloadAllowed(url))return {available:true,downloadCode:'DIRECT_DOWNLOAD',downloadReason:'来源提供公开文件地址，可以在软件内下载'};
  if(url)return {available:false,downloadCode:'UNSUPPORTED_DOWNLOAD_ADDRESS',downloadReason:'来源返回的下载地址不在当前支持的 HTTPS 文件域名范围内；这不是账号授权问题'};
@@ -52,7 +63,7 @@ function normalizeNexus(raw, game) {
   return raw.map(m => {
     const url = safeUrl(m.mod_page_url || `https://www.nexusmods.com/${game.nexus}/mods/${m.mod_id}`, ['www.nexusmods.com']); if (!url) return null;
     const id = url.match(/\/mods\/(\d+)/)?.[1]; if (!id) return null;
-    return { id: `nexus:${game.nexus}:${id}`, source: 'nexus', name: text(m.name), author: text(m.author || m.uploaded_by), summary: text(m.summary), url, image: safeUrl(m.picture_url, ['staticdelivery.nexusmods.com']), category: 'Mod', version: m.version || null, metric: m.mod_downloads ?? null, metricLabel: '下载', updated: m.updated_timestamp ? new Date(m.updated_timestamp * 1000).toISOString() : null, gameId: game.id, gameName: game.name, installable: false };
+    return { id: `nexus:${game.nexus}:${id}`, source: 'nexus', name: text(m.name), author: text(m.author || m.uploaded_by), summary: text(m.summary), url, image: safeUrl(m.picture_url, ['staticdelivery.nexusmods.com']), category: text(m.category || 'Mod'), version: m.version || null, metric: m.mod_downloads ?? null, metricLabel: '下载', updated: m.updatedAt || (m.updated_timestamp ? new Date(m.updated_timestamp * 1000).toISOString() : null), gameId: game.id, gameName: game.name, installable: false };
   }).filter(Boolean);
 }
 function normalizeBanana(raw, game, bananaId) {
@@ -63,19 +74,31 @@ function normalizeBanana(raw, game, bananaId) {
   }).filter(Boolean);
 }
 function normalizeWorkshop(raw, game) {
-  return raw.filter(m => (!m.consumer_app_id || String(m.consumer_app_id) === game.appId) && m.result !== 9 && m.file_type !== 1).map(m => {
+  return raw.filter(m => (!(m.consumer_app_id || m.consumer_appid) || String(m.consumer_app_id || m.consumer_appid) === String(game.appId)) && m.result !== 9 && m.file_type !== 1).map(m => {
     const id = String(m.publishedfileid || ''); if (!/^\d+$/.test(id)) return null;
     return { id: `workshop:${id}`, source: 'workshop', name: text(m.title), author: m.creator ? `Steam · ${m.creator}` : 'Steam 创作者', summary: text(m.short_description || m.description), url: `https://steamcommunity.com/sharedfiles/filedetails/?id=${id}`, steamUrl: `steam://url/CommunityFilePage/${id}`, image: safeUrl(m.preview_url, ['images.steamusercontent.com', 'steamuserimages-a.akamaihd.net', 'shared.akamai.steamstatic.com']), category: text(m.tags?.[0]?.tag || '创意工坊'), version: null, metric: m.subscriptions ?? null, metricLabel: '订阅', updated: m.time_updated ? new Date(m.time_updated * 1000).toISOString() : null, gameId: game.id, gameName: game.name, installable: false };
   }).filter(Boolean);
 }
-function parseWorkshopHtml(html, game) {
+function parseWorkshopPage(html, game) {
+  const embedded = html.match(/<script\b[^>]*\bid=["']valve-ssr-data["'][^>]*>([\s\S]*?)<\/script>/)?.[1];
+  if (embedded) {
+    try {
+      const state = JSON.parse(embedded);
+      const queries = JSON.parse(state.renderContext.queryData).queries;
+      const query = queries.find(q => q.queryKey?.[0] === 'workshop_browse' && String(q.queryKey[1]?.appid) === String(game.appId));
+      const data = query?.state?.data;
+      if (data?.eresult === 1 && Array.isArray(data.results)) return { items: normalizeWorkshop(data.results, game), rawCount: data.results.length, total: data.total_count, page: data.current_page, hasNext: data.current_page < data.total_pages };
+    } catch { /* Older pages use the HTML cards below. */ }
+  }
   const records = []; const blocks = html.split(/class=["']workshopItem["']/).slice(1);
   for (const block of blocks) {
     const id = block.match(/sharedfiles\/filedetails\/\?id=(\d+)/)?.[1]; const title = block.match(/class=["']workshopItemTitle["'][^>]*>([^<]+)/)?.[1]; const picture = block.match(/class=["']workshopItemPreviewImage["'][^>]*src=["']([^"']+)/)?.[1];
     if (id && title) records.push({ publishedfileid: id, title: title.replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'"), preview_url: picture });
   }
-  return normalizeWorkshop(records, game);
+  const items = normalizeWorkshop(records, game);
+  return { items, rawCount: records.length, total: null, hasNext: /(?:下一页|Next|&gt;|›)<\/a>/.test(html) || items.length >= 12 };
 }
+function parseWorkshopHtml(html, game) { return parseWorkshopPage(html, game).items; }
 class Sources {
   constructor(options = {}) { this.fetch = options.fetch || globalThis.fetch; this.timeout = options.timeout || 10000; this.keys = { nexus: '', workshop: '' }; this.cache = new Map(); this.inflight = new Map(); this.gameIds = new Map(); this.identities = new Map(); this.matches = new Map(); }
   status() { return { nexusConnected: !!this.keys.nexus, workshopConnected: !!this.keys.workshop }; }
@@ -89,7 +112,7 @@ class Sources {
     const host = new URL(url).hostname;
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const response = await this.fetch(String(url), { ...init, redirect: 'error', signal: AbortSignal.timeout(timeout), headers: { 'User-Agent': 'Moddock/0.3.1', ...init.headers } });
+        const response = await this.fetch(String(url), { ...init, redirect: 'error', signal: AbortSignal.timeout(timeout), headers: { 'User-Agent': 'Moddock/' + require('./package.json').version, ...(host === 'api.nexusmods.com' ? { 'Application-Name': 'Moddock', 'Application-Version': require('./package.json').version } : {}), ...init.headers } });
         if (!response.ok) {
           const status = response.status;
           if (status >= 500 && attempt === 0) continue;
@@ -164,7 +187,7 @@ class Sources {
       if (r.domain !== await this.nexusGame(game)) throw new Error('此 Mod 不属于当前游戏');
       const g = await this.gql('query($domain:String){game(domainName:$domain){id}}', { domain: r.domain });
       const raw = await this.gql('query($mod:ID!,$game:ID!){mod(modId:$mod,gameId:$game){description modRequirements{nexusRequirements{nodes{modName notes}}}} modFiles(modId:$mod,gameId:$game){fileId name uri detectedFileExtension sizeInBytes size version category description}}', { mod: r.id, game: String(g.game.id) });
-      return { description: text(raw.mod.description), requirements: (raw.mod.modRequirements?.nexusRequirements?.nodes || []).map(m => text(`${m.modName} ${m.notes || ''}`)), notice: this.keys.nexus ? 'API Key 已配置，下载时由 N 网验证。普通账号可在软件内授权窗口点击 Mod Manager Download，软件收到 NXM 链接后自动继续下载。' : '公开列表可浏览，下载需连接 Nexus API Key。Key 仅保存在本次运行内存中，重启后需重新填写。普通账号需在 Nexus 授权窗口签发 NXM 文件授权。', files: raw.modFiles.filter(f => !['REMOVED', 'ARCHIVED', 'OLD_VERSION'].includes(f.category)).map(f => ({ id: String(f.fileId), name: text(`${f.name}.${f.detectedFileExtension || 'zip'}`), label: text(f.name), size: Number(f.sizeInBytes || f.size * 1024), version: f.version, category: f.category, available: !!this.keys.nexus, downloadCode:this.keys.nexus?'NEXUS_PERMISSION_CHECK':'NEXUS_KEY_REQUIRED',downloadReason:this.keys.nexus?'已配置 API Key，点击后向 N 网申请下载链接；尚未确认账号和此文件权限':'未连接 Nexus API Key；请在设置中连接。重启软件后授权会清除。' })) };
+      return { description: text(raw.mod.description), requirements: (raw.mod.modRequirements?.nexusRequirements?.nodes || []).map(m => text(`${m.modName} ${m.notes || ''}`)), notice: this.keys.nexus ? 'API Key 已配置，下载时由 N 网验证。普通账号可在软件内授权窗口点击 Mod Manager Download，软件收到 NXM 链接后自动继续下载。' : '公开列表可浏览，下载前请在设置中连接 Nexus。普通账号仍需在 Nexus 网页签发 NXM 文件授权。', files: raw.modFiles.filter(f => !['REMOVED', 'ARCHIVED', 'OLD_VERSION'].includes(f.category)).map(f => ({ id: String(f.fileId), name: text(`${f.name}.${f.detectedFileExtension || 'zip'}`), label: text(f.name), size: Number(f.sizeInBytes || f.size * 1024), version: f.version, category: f.category, available: !!this.keys.nexus, downloadCode:this.keys.nexus?'NEXUS_PERMISSION_CHECK':'NEXUS_KEY_REQUIRED',downloadReason:this.keys.nexus?'已配置 API Key，点击后向 N 网申请下载链接；尚未确认账号和此文件权限':'未连接 Nexus；请在设置中连接账号。' })) };
     }
     if (!game.appId || game.workshop === false) throw new Error('该游戏不支持 Steam 工坊');
     const raw = await this.request('https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ itemcount: '1', 'publishedfileids[0]': r.id }).toString() });
@@ -194,9 +217,18 @@ class Sources {
     if (game.banana) { this.matching('banana',game,{id:game.banana,name:game.searchName}); return String(game.banana); }
     const key = `banana:${game.id}:${game.searchName}`; if (this.gameIds.has(key)) return this.gameIds.get(key);
     const u = new URL('https://gamebanana.com/apiv11/Util/Search/Results'); u.searchParams.set('_sSearchString', game.searchName); u.searchParams.set('_sModelName', 'Game');
-    const raw = await this.request(u); if (raw._sErrorCode || !Array.isArray(raw._aRecords)) throw Object.assign(new Error('GameBanana 游戏索引返回异常'), { code: 'INVALID_SCHEMA' });
-    const matches = raw._aRecords.filter(g => [game.searchName,game.name].some(n=>normalize(n)===normalize(g._sName)));
-    if (matches.length !== 1) { this.matching('banana',game,{searchName:game.searchName,candidates:raw._aRecords.filter(g=>g._idRow&&g._sName).slice(0,6).map(g=>({id:String(g._idRow),name:g._sName}))}); return null; }
+    let records;
+    try { records = bananaGameRecords(await this.request(u)); }
+    catch (error) {
+      if (!['INVALID_SCHEMA', 'INVALID_JSON'].includes(error.code) && !error.code?.startsWith('GAMEBANANA_')) throw error;
+      // The dedicated index remains usable when the general search returns an invalid payload.
+      const fallback = new URL('https://gamebanana.com/apiv11/Game/Index');
+      fallback.searchParams.set('_aFilters[Generic_Name]', `contains,${game.searchName}`);
+      fallback.searchParams.set('_nPerpage', '15');
+      records = bananaGameRecords(await this.request(fallback));
+    }
+    const matches = records.filter(g => [game.searchName,game.name].some(n=>normalize(n)===normalize(g._sName)));
+    if (matches.length !== 1) { this.matching('banana',game,{searchName:game.searchName,candidates:records.slice(0,6).map(g=>({id:String(g._idRow),name:g._sName}))}); return null; }
     const match = matches[0], id = String(match._idRow); this.matching('banana',game,{name:match._sName,id}); this.gameIds.set(key,id); return id;
   }
   async list(source, game, query = '', page = 1) {
@@ -227,7 +259,7 @@ class Sources {
         base.matchedGame = this.binding(source,game);
         const filter = { gameDomainName: [{ value: domain, op: 'EQUALS' }] };
         if (query) filter.name = [{ value: query.replace(/[*?]/g, ''), op: 'WILDCARD' }];
-        const raw = await this.gql('query($filter:ModsFilter,$offset:Int){mods(filter:$filter,offset:$offset,count:20,sort:[{downloads:{direction:DESC}}]){totalCount nodes{modId name summary author thumbnailUrl version downloads updatedAt game{domainName}}}}', { filter, offset: (page - 1) * 20 });
+        const raw = await this.gql('query($filter:ModsFilter,$offset:Int){mods(filter:$filter,offset:$offset,count:20,sort:[{downloads:{direction:DESC}}]){totalCount nodes{modId name summary author thumbnailUrl category version downloads updatedAt game{domainName}}}}', { filter, offset: (page - 1) * 20 });
         if (!Array.isArray(raw.mods?.nodes)) throw new Error('N 网搜索返回未知格式');
         base.items = normalizeNexus(raw.mods.nodes.filter(m => !m.game?.domainName || m.game.domainName.toLowerCase() === domain.toLowerCase()).map(m => ({ ...m, mod_id: m.modId, picture_url: m.thumbnailUrl, mod_downloads: m.downloads })), { ...game, nexus: domain });
         base.total = Number.isFinite(Number(raw.mods.totalCount)) ? Number(raw.mods.totalCount) : null; base.hasNext = page * 20 < base.total; base.scope = 'search'; base.matchedGame = this.binding(source,game); return this.result(base, raw.mods.nodes.length);
@@ -235,10 +267,10 @@ class Sources {
       if (source === 'banana') {
         const gameId = await this.bananaGame(game); if (!gameId) return { ...base, status: 'unmapped', ...this.binding(source,game), message: `未找到唯一匹配的香蕉网专区（查找名：${game.searchName}）${this.binding(source,game).candidates?.length?'，可选择下方候选专区':''}` };
         base.matchedGame = this.binding(source,game);
-        const u = new URL(query ? 'https://gamebanana.com/apiv11/Util/Search/Results' : `https://gamebanana.com/apiv11/Game/${gameId}/Subfeed`);
+        const u = new URL(query ? 'https://gamebanana.com/apiv11/Util/Search/Results' : 'https://gamebanana.com/apiv11/Mod/Index');
         if (page > 1) u.searchParams.set('_nPage', page);
         if (query) { u.searchParams.set('_sSearchString', query); u.searchParams.set('_sModelName', 'Mod'); u.searchParams.set('_idGameRow', gameId); }
-        else u.searchParams.set('_aFilters[Generic_SubmissionType]', 'Mod');
+        else { u.searchParams.set('_aFilters[Generic_Game]', gameId); u.searchParams.set('_nPerpage', '15'); }
         const raw = await this.request(u); if (raw._sErrorCode || !Array.isArray(raw._aRecords)) throw new Error('香蕉网资源接口暂不可用');
         base.items = normalizeBanana(raw._aRecords, game, gameId); base.hasNext = Number(raw._aMetadata?._nRecordCount || 0) > page * Number(raw._aMetadata?._nPerpage || 15); base.total = raw._aMetadata?._nRecordCount ?? null; base.browseUrl = query ? base.browseUrl : `https://gamebanana.com/games/${gameId}`; base.scope = 'search'; base.matchedGame = this.binding(source,game); return this.result(base, raw._aRecords.length);
       }
@@ -249,9 +281,12 @@ class Sources {
         base.items = normalizeWorkshop(raw.response.publishedfiledetails || [], game); base.total = raw.response.total ?? null; base.hasNext = Number(base.total) > page * 15; base.matchedGame = { id: game.appId, name: game.name }; return this.result(base, (raw.response.publishedfiledetails || []).length);
       }
       const u = new URL(base.browseUrl); u.searchParams.set('browsesort', 'trend'); u.searchParams.set('section', 'readytouseitems'); u.searchParams.set('numperpage', '12'); u.searchParams.set('p', page);
-      const html = await this.request(u, { format: 'html' }); base.items = parseWorkshopHtml(html, game);
+      const html = await this.request(u, { format: 'html' }); const parsed = parseWorkshopPage(html, game);
+      if (parsed.page != null && parsed.page !== page) throw new Error('Steam 返回的页码不一致，请打开官方工坊或重试');
+      Object.assign(base, { items: parsed.items, total: parsed.total, hasNext: parsed.hasNext, scope: 'search' });
+      if (parsed.total != null) return this.result(base, parsed.rawCount);
       if (!base.items.length) return { ...base, status: /No items matching|No items to display|没有符合/i.test(html) ? 'empty' : 'needs_connection', message: /No items matching|No items to display|没有符合/i.test(html) ? '工坊没有返回匹配的资源' : '工坊页面未提供可解析的列表，请连接 Steam Web API' };
-      base.hasNext = /(?:下一页|Next|&gt;|›)<\/a>/.test(html) || base.items.length >= 12; base.scope = 'search'; return this.result(base, base.items.length);
+      return this.result(base, parsed.rawCount);
     } catch (e) { return { ...base, status: 'error', code: e.code || 'QUERY_FAILED', host: e.host || null, message: e.message }; }
   }
 }

@@ -234,6 +234,7 @@ const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQ
   assert.equal(await page.locator('.auth-swap').getAttribute('data-active'), 'false', 'Partial code must not register');
   await page.getByLabel('邮箱验证码', { exact: true }).press('0');
   await page.locator('.auth-swap[data-active="true"][data-transitioning="false"]').waitFor();
+  await page.getByRole('button', { name: '暂时跳过', exact: true }).click();
   assert.equal(new URL(page.url()).hash, '#home');
   assert.match(await page.locator('.profile-text').innerText(), /register/);
   const animations = await page.evaluate(() => window.authStepAnimations);

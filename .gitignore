@@ -8,3 +8,8 @@ public/auth.js
 public/auth.css
 output/playwright/
 output/windows/
+output/macos/
+output/nexus-review*/
+output/nexus-review-tests.log
+.playwright-cli/
+.DS_Store

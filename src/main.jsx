@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import CodeSlots from './components/CodeSlots';
 import GridScanTransition from './components/GridScanTransition';
@@ -8,6 +8,8 @@ import FuzzyText from './components/FuzzyText';
 import SteamBackdrop from './auth/SteamBackdrop';
 import BootSplash from './components/BootSplash';
 import FaultyTerminal from './components/FaultyTerminal';
+import SourceOnboarding from './components/SourceOnboarding';
+import { useMotionState } from './motion/useMotion';
 import accountClient from './auth/client.cjs';
 import { mountHome, unmountHome, suspendHome } from '../public/app.js';
 import './auth.css';
@@ -37,7 +39,7 @@ function Field({ label, id, type = 'text', icon, error, ...props }) {
 }
 function AuthPanel({ onEnter, navigating, backgroundActive, initialNotice, initialNoticeTone }) {
  const [mode, setMode] = useState(window.location.hash.startsWith('#register') ? 'register' : 'login');
- const [step, setStep] = useState('email');
+ const [step, setStep, stepMotion] = useMotionState('email');
  const [email, setEmail] = useState('');
  const [password, setPassword] = useState('');
  const [confirmation, setConfirmation] = useState('');
@@ -52,10 +54,10 @@ function AuthPanel({ onEnter, navigating, backgroundActive, initialNotice, initi
  const [status, setStatus] = useState('idle');
  const [slotKey, setSlotKey] = useState(0);
  const [slotSize, setSlotSize] = useState(44);
- const [stepAnimating, setStepAnimating] = useState(false);
+ const stepAnimating = stepMotion.transitioning;
  const panelRef = useRef(null);
- const stepAnimationRef = useRef(null);
  const stepTransitionRef = useRef(false);
+ stepTransitionRef.current = stepAnimating;
  const stepDirectionRef = useRef(1);
  const verifyRef = useRef(null);
  const titleRef = useRef(null);
@@ -70,33 +72,11 @@ function AuthPanel({ onEnter, navigating, backgroundActive, initialNotice, initi
  const successNotice = !Object.keys(errors).length && (notice ? noticeTone === 'success' : step === 'email' && !!initialNotice && initialNoticeTone === 'success');
  useEffect(() => { let live = true; auth.config().then(value => { if (live) setAccountConfig(value); }).catch(error => { if (live) setNotice(error.message); }); return () => { live = false; }; }, []);
  useEffect(() => { if (!stepAnimating) panelRef.current?.querySelector('input')?.focus(); }, [mode, step, stepAnimating]);
- useEffect(() => () => stepAnimationRef.current?.cancel(), []);
- useLayoutEffect(() => {
-  if (!stepTransitionRef.current) return;
-  stepAnimationRef.current?.cancel();
-  const animation = panelRef.current.animate([
-   { opacity: 0, transform: `translateX(${stepDirectionRef.current * 14}px)` },
-   { opacity: 1, transform: 'translateX(0)' }
-  ], { duration: 220, easing: 'cubic-bezier(0.22, 1, 0.36, 1)', fill: 'both' });
-  stepAnimationRef.current = animation;
-  let cancelled = false;
-  animation.finished.then(() => {
-   if (cancelled) return;
-   animation.cancel(); stepAnimationRef.current = null; stepTransitionRef.current = false; setStepAnimating(false);
-  }).catch(() => {});
-  return () => { cancelled = true; animation.cancel(); };
- }, [step]);
  const changeStep = next => {
   if (stepTransitionRef.current || next === step) return;
-  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) { setStep(next); return; }
   stepDirectionRef.current = steps.indexOf(next) > steps.indexOf(step) ? 1 : -1;
-  stepTransitionRef.current = true; setStepAnimating(true);
-  const animation = panelRef.current.animate([
-   { opacity: 1, transform: 'translateX(0)' },
-   { opacity: 0, transform: `translateX(${-stepDirectionRef.current * 14}px)` }
-  ], { duration: 110, easing: 'ease-in', fill: 'forwards' });
-  stepAnimationRef.current = animation;
-  animation.finished.then(() => setStep(next)).catch(() => {});
+  stepTransitionRef.current = true;
+  setStep(next);
  };
  useEffect(() => { if (!challenge) return; const timer = setInterval(() => setClock(Date.now()), 1000); return () => clearInterval(timer); }, [challenge]);
  useEffect(() => {
@@ -187,7 +167,7 @@ function AuthPanel({ onEnter, navigating, backgroundActive, initialNotice, initi
     returnToLogin('密码已重置，请使用新密码登录。');
    } else {
     const user = await auth.register({ email, password, code, termsAccepted });
-    setStatus('success'); setPassword(''); onEnter(user);
+    setStatus('success'); setPassword(''); onEnter(user, { registered: true });
    }
   }
   catch (err) { showError(err); setStatus('error'); }
@@ -204,7 +184,7 @@ function AuthPanel({ onEnter, navigating, backgroundActive, initialNotice, initi
     <header className="auth-card-header"><Brand active={backgroundActive} /></header>
     <div className="auth-form-card">
      <div className="auth-mode-row">{mode === 'reset' ? <span className="auth-reset-mode">账号恢复</span> : <div className="auth-tabs" role="tablist" aria-label="账号入口" onKeyDown={e => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key) && !busy && !navigating && !stepTransitionRef.current) { e.preventDefault(); const next = e.key === 'Home' ? 'login' : e.key === 'End' ? 'register' : mode === 'login' ? 'register' : 'login'; changeMode(next); document.getElementById(`${next}-tab`)?.focus(); } }}><button id="login-tab" role="tab" tabIndex={mode === 'login' ? 0 : -1} aria-selected={mode === 'login'} aria-controls="auth-panel" disabled={busy || navigating || stepAnimating} onClick={() => changeMode('login')}>登录</button><button id="register-tab" role="tab" tabIndex={mode === 'register' ? 0 : -1} aria-selected={mode === 'register'} aria-controls="auth-panel" disabled={busy || navigating || stepAnimating} onClick={() => changeMode('register')}>注册</button></div>}<span className="auth-step-count" aria-label={`第 ${stepNumber} 步，共 ${totalSteps} 步`}>{stepNumber} / {totalSteps}</span></div>
-     <section id="auth-panel" ref={panelRef} className="auth-step-panel" role={mode === 'reset' ? 'region' : 'tabpanel'} aria-label={mode === 'reset' ? '找回密码表单' : undefined} aria-labelledby={mode === 'reset' ? undefined : `${mode}-tab`} aria-busy={stepAnimating} data-transitioning={stepAnimating} inert={stepAnimating}>
+     <section id="auth-panel" ref={panelRef} className="auth-step-panel" role={mode === 'reset' ? 'region' : 'tabpanel'} aria-label={mode === 'reset' ? '找回密码表单' : undefined} aria-labelledby={mode === 'reset' ? undefined : `${mode}-tab`} aria-busy={stepAnimating} data-transitioning={stepAnimating} data-stage={stepMotion.stage} style={{ '--step-direction': stepDirectionRef.current }} inert={stepAnimating}>
       <div className="auth-form-heading"><h2 id="auth-title" ref={titleRef} tabIndex={-1} aria-label={step === 'email' ? title : undefined} className={step === 'email' ? 'auth-pixel-title' : undefined}>{step === 'email' && backgroundActive && !stepAnimating ? <span aria-hidden="true"><Shuffle key={mode} text={title} tag="span" className="auth-title-shuffle" textAlign="left" shuffleDirection="right" duration={0.35} animationMode="evenodd" shuffleTimes={1} stagger={0.025} rootMargin="0px" triggerOnce triggerOnHover={false} respectReducedMotion /></span> : title}</h2>{step !== 'email' && <p><span className="auth-account-email" title={email}>{email}</span></p>}</div>
       {step !== 'verify' ? <form className="auth-step-form" onSubmit={submit} noValidate>
        <div className="auth-step-input">{step === 'email' ? <Field key="email" id="auth-email" label="邮箱地址" type="email" icon="mail" placeholder="you@example.com" autoComplete="email" value={email} maxLength={254} error={errors.email} disabled={busy || navigating} onChange={e => { setEmail(e.target.value); setErrors({}); setNotice(''); }} /> : step === 'confirm' ? <Field key="confirmation" id="auth-confirm-password" label="确认新密码" type="password" icon="lock" autoComplete="new-password" value={confirmation} maxLength={128} error={errors.confirm} disabled={busy || navigating} onChange={e => { setConfirmation(e.target.value); setErrors({}); setNotice(''); }} /> : <Field key="password" id="auth-password" label={mode === 'register' ? '设置密码' : mode === 'reset' ? '新密码' : '密码'} type="password" icon="lock" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} value={password} maxLength={128} error={errors.password} disabled={busy || navigating} onChange={e => { setPassword(e.target.value); setConfirmation(''); setErrors({}); setNotice(''); }} />}
@@ -248,6 +228,7 @@ function App({ booting }) {
  const [checkingSession, setCheckingSession] = useState(true);
  const [initialNotice, setInitialNotice] = useState('');
  const [initialNoticeTone, setInitialNoticeTone] = useState('error');
+ const [sourceOnboarding, setSourceOnboarding] = useState(null);
  const returningRef = useRef(false);
  useEffect(() => {
   let live = true;
@@ -259,7 +240,7 @@ function App({ booting }) {
   return () => { live = false; };
  }, []);
  const ready = useCallback(() => setActive(true), []);
- const enter = user => { if (navigating || user?.mode !== 'mu') return; setNavigating(true); setSession(user); };
+ const enter = (user, options = {}) => { if (navigating || user?.mode !== 'mu') return; setSourceOnboarding(options.registered ? user.id : null); setNavigating(true); setSession(user); };
  const complete = shown => {
   returningRef.current = false;
   setNavigating(false);
@@ -271,7 +252,7 @@ function App({ booting }) {
  useEffect(() => {
   const logout = async () => {
    if (navigating || checkingSession || returningRef.current) return;
-   returningRef.current = true; suspendHome();
+   returningRef.current = true; setSourceOnboarding(null); suspendHome();
    setCheckingSession(true); setInitialNotice(''); setInitialNoticeTone('error');
    try { await auth.logout(); }
    catch (error) { setInitialNotice(error.message); }
@@ -280,7 +261,7 @@ function App({ booting }) {
   const requireLogin = event => {
    if (returningRef.current) return;
    returningRef.current = true;
-   unmountHome(); setSession(null); setCheckingSession(false); setFormKey(k => k + 1);
+   setSourceOnboarding(null); unmountHome(); setSession(null); setCheckingSession(false); setFormKey(k => k + 1);
    setInitialNotice(event.detail?.message || '登录已失效，请重新登录。');
    setInitialNoticeTone(event.detail?.tone || 'error');
    setNavigating(active); setActive(false);
@@ -290,7 +271,7 @@ function App({ booting }) {
   window.addEventListener('moddock:auth-required', requireLogin);
   return () => { window.removeEventListener('moddock:logout', logout); window.removeEventListener('moddock:auth-required', requireLogin); };
  }, [navigating, checkingSession, active]);
- return <GridScanTransition firstContent={<AuthPanel key={formKey} onEnter={enter} navigating={navigating || checkingSession} initialNotice={initialNotice} initialNoticeTone={initialNoticeTone} backgroundActive={!booting && !active && !navigating} />} secondContent={<Home session={session} onReady={ready} backgroundActive={active || navigating} />} active={active} onComplete={complete} className="auth-swap" />;
+ return <><GridScanTransition firstContent={<AuthPanel key={formKey} onEnter={enter} navigating={navigating || checkingSession} initialNotice={initialNotice} initialNoticeTone={initialNoticeTone} backgroundActive={!booting && !active && !navigating} />} secondContent={<Home session={session} onReady={ready} backgroundActive={active || navigating} />} active={active} onComplete={complete} className="auth-swap" />{sourceOnboarding === session?.id && active && !navigating && !booting && <SourceOnboarding key={session.id} onClose={() => setSourceOnboarding(null)} />}</>;
 }
 function DesktopChrome() {
  const overlay = navigator.windowControlsOverlay;

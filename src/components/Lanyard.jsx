@@ -722,6 +722,7 @@ const Lanyard = ({
   breeze = 0.5,
   interactive = true,
   intro = true,
+  keyboardLabel,
   onUnavailable,
   className = '',
   style
@@ -1238,6 +1239,14 @@ const Lanyard = ({
       if (pickCard()) event.preventDefault();
     };
 
+    const onKeyDown = event => {
+      if (!settingsRef.current.interactive || event.target !== container || !['Enter', ' '].includes(event.key)) return;
+      event.preventDefault();
+      flip(sim.body.position);
+      start();
+    };
+
+    container.addEventListener('keydown', onKeyDown);
     canvas.addEventListener('pointerdown', onPointerDown);
     canvas.addEventListener('pointermove', onPointerMove);
     canvas.addEventListener('pointerup', onPointerUp);
@@ -1282,6 +1291,7 @@ const Lanyard = ({
       canvas.removeEventListener('pointercancel', onPointerUp);
       canvas.removeEventListener('lostpointercapture', onPointerUp);
       canvas.removeEventListener('touchstart', onTouchStart);
+      container.removeEventListener('keydown', onKeyDown);
       [bodyMesh, frontMesh, backMesh, ring, clampMesh, eyelet, band].forEach(mesh => mesh.geometry?.dispose());
       [frontMaterial, backMaterial, edgeMaterial, metalMaterial, bandMaterial].forEach(material => material.dispose());
       [frontTexture, backTexture, strapTexture, grain, weave].forEach(texture => texture.dispose());
@@ -1291,7 +1301,7 @@ const Lanyard = ({
     };
   }, []);
 
-  return <div ref={containerRef} className={`lanyard ${className}`.trim()} style={style} />;
+  return <div ref={containerRef} className={`lanyard ${className}`.trim()} style={style} tabIndex={interactive && keyboardLabel ? 0 : undefined} role={keyboardLabel ? 'button' : undefined} aria-label={keyboardLabel} />;
 };
 
 export default Lanyard;
