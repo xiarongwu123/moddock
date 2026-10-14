@@ -1,0 +1,785 @@
+
+> moddock@0.5.0 test
+> node --test test/*.test.cjs
+
+TAP version 13
+# Subtest: encrypted token store writes atomically, survives restart and never writes tokens or email as plaintext
+ok 1 - encrypted token store writes atomically, survives restart and never writes tokens or email as plaintext
+  ---
+  duration_ms: 16.791458
+  type: 'test'
+  ...
+# Subtest: unavailable encryption and corrupted or oversized saved credentials fail closed
+ok 2 - unavailable encryption and corrupted or oversized saved credentials fail closed
+  ---
+  duration_ms: 15.015042
+  type: 'test'
+  ...
+# Subtest: MU login, reload verification and logout use the real contract without exposing or storing tokens
+ok 3 - MU login, reload verification and logout use the real contract without exposing or storing tokens
+  ---
+  duration_ms: 157.279958
+  type: 'test'
+  ...
+# Subtest: MU email code and registration send purpose, consent version and entered code; invalid code stays logged out
+ok 4 - MU email code and registration send purpose, consent version and entered code; invalid code stays logged out
+  ---
+  duration_ms: 74.055709
+  type: 'test'
+  ...
+# Subtest: local auth rejects missing token, cross-origin posts, missing consent and invalid inputs before calling MU
+ok 5 - local auth rejects missing token, cross-origin posts, missing consent and invalid inputs before calling MU
+  ---
+  duration_ms: 62.986
+  type: 'test'
+  ...
+# Subtest: expired access token rotates once for concurrent session reads and logout uses the new bearer
+ok 6 - expired access token rotates once for concurrent session reads and logout uses the new bearer
+  ---
+  duration_ms: 51.512292
+  type: 'test'
+  ...
+# Subtest: 401 retries via refresh; a revoked or disabled account clears the local session
+ok 7 - 401 retries via refresh; a revoked or disabled account clears the local session
+  ---
+  duration_ms: 36.94375
+  type: 'test'
+  ...
+# Subtest: MU rate limits and maintenance are preserved; failed logout still clears the local session
+ok 8 - MU rate limits and maintenance are preserved; failed logout still clears the local session
+  ---
+  duration_ms: 143.839625
+  type: 'test'
+  ...
+# Subtest: unreachable MU and malformed successful sessions cannot appear as authenticated
+ok 9 - unreachable MU and malformed successful sessions cannot appear as authenticated
+  ---
+  duration_ms: 1.813583
+  type: 'test'
+  ...
+# Subtest: all local business routes require a session; bootstrap token and forged cookies cannot bypass login
+ok 10 - all local business routes require a session; bootstrap token and forged cookies cannot bypass login
+  ---
+  duration_ms: 75.438042
+  type: 'test'
+  ...
+# Subtest: login opens business routes with an HttpOnly API cookie; logout invalidates copied cookies immediately
+ok 11 - login opens business routes with an HttpOnly API cookie; logout invalidates copied cookies immediately
+  ---
+  duration_ms: 57.090667
+  type: 'test'
+  ...
+# Subtest: business authorization coalesces remote checks and blocks revoked, disabled or unavailable MU sessions
+ok 12 - business authorization coalesces remote checks and blocks revoked, disabled or unavailable MU sessions
+  ---
+  duration_ms: 28.41025
+  type: 'test'
+  ...
+# Subtest: reset codes and password resets use MU purpose and invalidate every local session for the email
+ok 13 - reset codes and password resets use MU purpose and invalidate every local session for the email
+  ---
+  duration_ms: 27.650083
+  type: 'test'
+  ...
+# Subtest: account snapshot preserves membership, payment switch and permission versions; password change requires re-login
+ok 14 - account snapshot preserves membership, payment switch and permission versions; password change requires re-login
+  ---
+  duration_ms: 24.851125
+  type: 'test'
+  ...
+# Subtest: business actions check live MU permissions even while login state is cached; denied responses preserve current account
+ok 15 - business actions check live MU permissions even while login state is cached; denied responses preserve current account
+  ---
+  duration_ms: 28.05025
+  type: 'test'
+  ...
+# Subtest: plans and owned orders reuse MU contracts; disabled payment never produces a checkout or membership upgrade
+ok 16 - plans and owned orders reuse MU contracts; disabled payment never produces a checkout or membership upgrade
+  ---
+  duration_ms: 86.767375
+  type: 'test'
+  ...
+# Subtest: remembered refresh tokens rotate and restore once across restart; logout and password reset delete the saved session
+ok 17 - remembered refresh tokens rotate and restore once across restart; logout and password reset delete the saved session
+  ---
+  duration_ms: 103.084042
+  type: 'test'
+  ...
+# Subtest: storage failure keeps a valid memory login with a warning; corrupt or mismatched saved services cannot auto-login
+ok 18 - storage failure keeps a valid memory login with a warning; corrupt or mismatched saved services cannot auto-login
+  ---
+  duration_ms: 27.821875
+  type: 'test'
+  ...
+# Subtest: browser adapter restores remembered login through the HTTP bridge after server restart without receiving MU tokens
+ok 19 - browser adapter restores remembered login through the HTTP bridge after server restart without receiving MU tokens
+  ---
+  duration_ms: 43.716333
+  type: 'test'
+  ...
+# Subtest: headless account store schedules heartbeats only on active business pages and ends reconnect grace without extending it
+ok 20 - headless account store schedules heartbeats only on active business pages and ends reconnect grace without extending it
+  ---
+  duration_ms: 186.690584
+  type: 'test'
+  ...
+# Subtest: headless store publishes denied permission snapshots and remains online when payment is deliberately disabled
+ok 21 - headless store publishes denied permission snapshots and remains online when payment is deliberately disabled
+  ---
+  duration_ms: 578.294417
+  type: 'test'
+  ...
+# Subtest: 扫描多 Steam 库与 Epic，排除未完成安装
+ok 22 - 扫描多 Steam 库与 Epic，排除未完成安装
+  ---
+  duration_ms: 30.425917
+  type: 'test'
+  ...
+# Subtest: desktop 403 automatically requests the exact file grant and resumes the same download
+ok 23 - desktop 403 automatically requests the exact file grant and resumes the same download
+  ---
+  duration_ms: 238.128375
+  type: 'test'
+  ...
+# Subtest: logout invalidates an automatic authorization callback before it can resume a download
+ok 24 - logout invalidates an automatic authorization callback before it can resume a download
+  ---
+  duration_ms: 91.164959
+  type: 'test'
+  ...
+# Subtest: a rejected website grant does not cause automatic authorization loops
+ok 25 - a rejected website grant does not cause automatic authorization loops
+  ---
+  duration_ms: 35.446458
+  type: 'test'
+  ...
+# Subtest: NXM strict parsing rejects expired, malformed, duplicate and non-file links
+ok 26 - NXM strict parsing rejects expired, malformed, duplicate and non-file links
+  ---
+  duration_ms: 0.863084
+  type: 'test'
+  ...
+# Subtest: 403 waits for NXM, resumes same job, downloads exact bytes, auto-imports and previews actual files; secrets not persisted
+ok 27 - 403 waits for NXM, resumes same job, downloads exact bytes, auto-imports and previews actual files; secrets not persisted
+  ---
+  duration_ms: 193.942458
+  type: 'test'
+  ...
+# Subtest: NXM can arrive before API connection, pending grant resumes after connection; wrong user is refused
+ok 28 - NXM can arrive before API connection, pending grant resumes after connection; wrong user is refused
+  ---
+  duration_ms: 86.231375
+  type: 'test'
+  ...
+# Subtest: loadout switch changes whole enabled set and default recipe, persists across restart, refuses changed files or removed mods
+ok 29 - loadout switch changes whole enabled set and default recipe, persists across restart, refuses changed files or removed mods
+  ---
+  duration_ms: 227.771292
+  type: 'test'
+  ...
+# Subtest: loadout mid-write failure rolls back all affected bytes and enabled states
+ok 30 - loadout mid-write failure rolls back all affected bytes and enabled states
+  ---
+  duration_ms: 163.789875
+  type: 'test'
+  ...
+# Subtest: Bethesda Data preserves assets; FOMOD and loaders are refused; Unreal and BepInEx recipes are suggested
+ok 31 - Bethesda Data preserves assets; FOMOD and loaders are refused; Unreal and BepInEx recipes are suggested
+  ---
+  duration_ms: 730.242375
+  type: 'test'
+  ...
+# Subtest: Nexus updates compare versions without treating alternate files as proven upgrades; downloaded update preserves old install
+ok 32 - Nexus updates compare versions without treating alternate files as proven upgrades; downloaded update preserves old install
+  ---
+  duration_ms: 110.572709
+  type: 'test'
+  ...
+# Subtest: grant arriving during first authorization request is retained and retries same queue entry
+ok 33 - grant arriving during first authorization request is retained and retries same queue entry
+  ---
+  duration_ms: 113.869083
+  type: 'test'
+  ...
+# Subtest: loadout cannot disable a SMAPI provider needed by an unmanaged game mod
+ok 34 - loadout cannot disable a SMAPI provider needed by an unmanaged game mod
+  ---
+  duration_ms: 235.475
+  type: 'test'
+  ...
+# Subtest: GameBanana valid search resolves the game without a fallback and caches it
+ok 35 - GameBanana valid search resolves the game without a fallback and caches it
+  ---
+  duration_ms: 54.820875
+  type: 'test'
+  ...
+# Subtest: GameBanana malformed search responses recover through the filtered game index
+    # Subtest: response 0
+    ok 1 - response 0
+      ---
+      duration_ms: 3.648708
+      type: 'test'
+      ...
+    # Subtest: response 1
+    ok 2 - response 1
+      ---
+      duration_ms: 1.086
+      type: 'test'
+      ...
+    # Subtest: response 2
+    ok 3 - response 2
+      ---
+      duration_ms: 2.49875
+      type: 'test'
+      ...
+    # Subtest: response 3
+    ok 4 - response 3
+      ---
+      duration_ms: 2.083333
+      type: 'test'
+      ...
+    # Subtest: response 4
+    ok 5 - response 4
+      ---
+      duration_ms: 5.61075
+      type: 'test'
+      ...
+    # Subtest: response 5
+    ok 6 - response 5
+      ---
+      duration_ms: 1.366084
+      type: 'test'
+      ...
+    # Subtest: response 6
+    ok 7 - response 6
+      ---
+      duration_ms: 0.562
+      type: 'test'
+      ...
+    # Subtest: response 7
+    ok 8 - response 7
+      ---
+      duration_ms: 0.781584
+      type: 'test'
+      ...
+    1..8
+ok 36 - GameBanana malformed search responses recover through the filtered game index
+  ---
+  duration_ms: 19.548792
+  type: 'test'
+  ...
+# Subtest: GameBanana empty and ambiguous indexes stay unmapped without requesting mods
+    # Subtest: []
+    ok 1 - []
+      ---
+      duration_ms: 1.553875
+      type: 'test'
+      ...
+    # Subtest: [{"_idRow":6762,"_sModelName":"Game","_sName":"RimWorld Classic"}]
+    ok 2 - [{"_idRow":6762,"_sModelName":"Game","_sName":"RimWorld Classic"}]
+      ---
+      duration_ms: 1.382542
+      type: 'test'
+      ...
+    # Subtest: [{"_idRow":6762,"_sModelName":"Game","_sName":"RimWorld"},{"_idRow":9999,"_sModelName":"Game","_sName":"RimWorld"}]
+    ok 3 - [{"_idRow":6762,"_sModelName":"Game","_sName":"RimWorld"},{"_idRow":9999,"_sModelName":"Game","_sName":"RimWorld"}]
+      ---
+      duration_ms: 1.56475
+      type: 'test'
+      ...
+    1..3
+ok 37 - GameBanana empty and ambiguous indexes stay unmapped without requesting mods
+  ---
+  duration_ms: 5.189333
+  type: 'test'
+  ...
+# Subtest: GameBanana valid empty search does not trigger a fallback
+ok 38 - GameBanana valid empty search does not trigger a fallback
+  ---
+  duration_ms: 0.7115
+  type: 'test'
+  ...
+# Subtest: GameBanana fallback errors retain the provider code and host and can be retried
+ok 39 - GameBanana fallback errors retain the provider code and host and can be retried
+  ---
+  duration_ms: 1.292583
+  type: 'test'
+  ...
+# Subtest: GameBanana malformed fallback remains an error rather than an empty result
+ok 40 - GameBanana malformed fallback remains an error rather than an empty result
+  ---
+  duration_ms: 1.010375
+  type: 'test'
+  ...
+# Subtest: GameBanana HTTP rate limits do not trigger extra index requests
+ok 41 - GameBanana HTTP rate limits do not trigger extra index requests
+  ---
+  duration_ms: 0.778541
+  type: 'test'
+  ...
+# Subtest: GameBanana games with requests but no mods report an empty Mod index
+ok 42 - GameBanana games with requests but no mods report an empty Mod index
+  ---
+  duration_ms: 0.9485
+  type: 'test'
+  ...
+# Subtest: GameBanana Mod index preserves pagination and game filtering
+ok 43 - GameBanana Mod index preserves pagination and game filtering
+  ---
+  duration_ms: 4.388
+  type: 'test'
+  ...
+# Subtest: 跨内容根目录的同一目标在启用和停用时都拒绝重复托管
+    # Subtest: 游戏根先安装 / 启用
+    ok 1 - 游戏根先安装 / 启用
+      ---
+      duration_ms: 201.839292
+      type: 'test'
+      ...
+    # Subtest: 游戏根先安装 / 停用
+    ok 2 - 游戏根先安装 / 停用
+      ---
+      duration_ms: 159.228125
+      type: 'test'
+      ...
+    # Subtest: 子目录先安装 / 启用
+    ok 3 - 子目录先安装 / 启用
+      ---
+      duration_ms: 101.574417
+      type: 'test'
+      ...
+    # Subtest: 子目录先安装 / 停用
+    ok 4 - 子目录先安装 / 停用
+      ---
+      duration_ms: 76.800458
+      type: 'test'
+      ...
+    1..4
+ok 44 - 跨内容根目录的同一目标在启用和停用时都拒绝重复托管
+  ---
+  duration_ms: 541.806292
+  type: 'test'
+  ...
+# Subtest: 执行旧方案时重新检查跨根目录冲突，即使目标哈希与预览一致
+ok 45 - 执行旧方案时重新检查跨根目录冲突，即使目标哈希与预览一致
+  ---
+  duration_ms: 114.587208
+  type: 'test'
+  ...
+# Subtest: 安装回滚失败锁定后续操作，保留日志和备份直到重启恢复成功
+ok 46 - 安装回滚失败锁定后续操作，保留日志和备份直到重启恢复成功
+  ---
+  duration_ms: 217.659625
+  type: 'test'
+  ...
+# Subtest: 配置档案回滚失败同样锁定事务，重启恢复全部启用状态
+ok 47 - 配置档案回滚失败同样锁定事务，重启恢复全部启用状态
+  ---
+  duration_ms: 181.097458
+  type: 'test'
+  ...
+# Subtest: 启动恢复缺少备份时不能将 ENOENT 当成没有事务并清理载荷
+ok 48 - 启动恢复缺少备份时不能将 ENOENT 当成没有事务并清理载荷
+  ---
+  duration_ms: 788.371
+  type: 'test'
+  ...
+# Subtest: 未知游戏规则真正部署：备份替换、停用、启用、卸载和重启持久化
+ok 49 - 未知游戏规则真正部署：备份替换、停用、启用、卸载和重启持久化
+  ---
+  duration_ms: 251.67075
+  type: 'test'
+  ...
+# Subtest: 保护外部修改、托管冲突、过期方案、游戏路径变化与下载篡改
+ok 50 - 保护外部修改、托管冲突、过期方案、游戏路径变化与下载篡改
+  ---
+  duration_ms: 71.241542
+  type: 'test'
+  ...
+# Subtest: ZIP 路径穿越、Windows 特殊路径、大小写重名、符号链接和 CRC 损坏被拒绝
+ok 51 - ZIP 路径穿越、Windows 特殊路径、大小写重名、符号链接和 CRC 损坏被拒绝
+  ---
+  duration_ms: 66.229292
+  type: 'test'
+  ...
+# Subtest: 目标符号链接不写出游戏目录；缺少前置或游戏运行中阻止安装
+ok 52 - 目标符号链接不写出游戏目录；缺少前置或游戏运行中阻止安装
+  ---
+  duration_ms: 11.969875
+  type: 'test'
+  ...
+# Subtest: 中途写入失败回滚全部文件与安装记录
+ok 53 - 中途写入失败回滚全部文件与安装记录
+  ---
+  duration_ms: 31.694042
+  type: 'test'
+  ...
+# Subtest: 崩溃恢复使用落盘事务；无法安全回滚时保留日志和外部文件
+ok 54 - 崩溃恢复使用落盘事务；无法安全回滚时保留日志和外部文件
+  ---
+  duration_ms: 196.349917
+  type: 'test'
+  ...
+# Subtest: 源目录映射适用于任意游戏，并保留包内层级
+ok 55 - 源目录映射适用于任意游戏，并保留包内层级
+  ---
+  duration_ms: 71.310041
+  type: 'test'
+  ...
+# Subtest: 同一游戏可部署多种规则，旧项启停卸载沿用自己的目录快照
+ok 56 - 同一游戏可部署多种规则，旧项启停卸载沿用自己的目录快照
+  ---
+  duration_ms: 110.359125
+  type: 'test'
+  ...
+# Subtest: SMAPI 运行证据只来自加载列表且版本匹配，描述中的名称不会冒充加载
+ok 57 - SMAPI 运行证据只来自加载列表且版本匹配，描述中的名称不会冒充加载
+  ---
+  duration_ms: 1.234834
+  type: 'test'
+  ...
+# Subtest: SMAPI 清单依赖、重复 ID、入口 DLL 和最低版本检查
+ok 58 - SMAPI 清单依赖、重复 ID、入口 DLL 和最低版本检查
+  ---
+  duration_ms: 138.586708
+  type: 'test'
+  ...
+# Subtest: 纯 archive 规则拒绝依赖其他框架的混合包与错误文件头
+ok 59 - 纯 archive 规则拒绝依赖其他框架的混合包与错误文件头
+  ---
+  duration_ms: 97.812959
+  type: 'test'
+  ...
+# Subtest: 运行验证不采信旧日志，只接受本次新增标记并报告加载错误
+ok 60 - 运行验证不采信旧日志，只接受本次新增标记并报告加载错误
+  ---
+  duration_ms: 49.562333
+  type: 'test'
+  ...
+# Subtest: 安装 API 鉴权、绑定扫描游戏，并支持未知游戏的完整生命周期
+ok 61 - 安装 API 鉴权、绑定扫描游戏，并支持未知游戏的完整生命周期
+  ---
+  duration_ms: 91.052959
+  type: 'test'
+  ...
+# Subtest: authorization is serialized, duplicate requests reuse the current file, and successful grants close the window
+ok 62 - authorization is serialized, duplicate requests reuse the current file, and successful grants close the window
+  ---
+  duration_ms: 3.789917
+  type: 'test'
+  ...
+# Subtest: login and site verification are surfaced, and cancellation prevents stale account callbacks
+ok 63 - login and site verification are surfaced, and cancellation prevents stale account callbacks
+  ---
+  duration_ms: 0.964334
+  type: 'test'
+  ...
+# Subtest: cancelling a queued file leaves the current authorization intact and closing the window cancels its owner queue
+ok 64 - cancelling a queued file leaves the current authorization intact and closing the window cancels its owner queue
+  ---
+  duration_ms: 0.651167
+  type: 'test'
+  ...
+# Subtest: only a validated manager-download file page can start an authorization
+ok 65 - only a validated manager-download file page can start an authorization
+  ---
+  duration_ms: 0.831209
+  type: 'test'
+  ...
+# Subtest: different backend jobs for the same file retain separate authorization callbacks
+ok 66 - different backend jobs for the same file retain separate authorization callbacks
+  ---
+  duration_ms: 0.749
+  type: 'test'
+  ...
+# Subtest: clients with no Nexus key share a backend session, wait for maintenance, and receive verified file bytes without grants
+ok 67 - clients with no Nexus key share a backend session, wait for maintenance, and receive verified file bytes without grants
+  ---
+  duration_ms: 434.753
+  type: 'test'
+  ...
+# Subtest: cancellation aborts the backend preparation without asking the client to authorize
+ok 68 - cancellation aborts the backend preparation without asking the client to authorize
+  ---
+  duration_ms: 96.969083
+  type: 'test'
+  ...
+# Subtest: private local service rejects unauthenticated/browser requests and arbitrary network configurations
+ok 69 - private local service rejects unauthenticated/browser requests and arbitrary network configurations
+  ---
+  duration_ms: 10.733584
+  type: 'test'
+  ...
+# Subtest: aborting preparation schedules cancellation before the MU owner session is released
+ok 70 - aborting preparation schedules cancellation before the MU owner session is released
+  ---
+  duration_ms: 56.085417
+  type: 'test'
+  ...
+# Subtest: a corrupted service transfer fails the client hash check
+ok 71 - a corrupted service transfer fails the client hash check
+  ---
+  duration_ms: 33.166333
+  type: 'test'
+  ...
+# Subtest: the shared backend isolates MU owners for polling, cancellation and file access
+ok 72 - the shared backend isolates MU owners for polling, cancellation and file access
+  ---
+  duration_ms: 77.192583
+  type: 'test'
+  ...
+# Subtest: default MU clients use their MU login for platform downloads with no local Nexus configuration
+ok 73 - default MU clients use their MU login for platform downloads with no local Nexus configuration
+  ---
+  duration_ms: 2140.310625
+  type: 'test'
+  ...
+# Subtest: SSO uses official protocol 2 and returns no API key or reconnect token to the renderer
+ok 74 - SSO uses official protocol 2 and returns no API key or reconnect token to the renderer
+  ---
+  duration_ms: 45.416333
+  type: 'test'
+  ...
+# Subtest: SSO resumes the same browser authorization after a temporary disconnect
+ok 75 - SSO resumes the same browser authorization after a temporary disconnect
+  ---
+  duration_ms: 14.580625
+  type: 'test'
+  ...
+# Subtest: a dismissed onboarding flow cannot cancel a newer Nexus connection
+ok 76 - a dismissed onboarding flow cannot cancel a newer Nexus connection
+  ---
+  duration_ms: 5.060666
+  type: 'test'
+  ...
+# Subtest: cancellation and replacement ignore late callbacks, including verification already in progress
+ok 77 - cancellation and replacement ignore late callbacks, including verification already in progress
+  ---
+  duration_ms: 2.449083
+  type: 'test'
+  ...
+# Subtest: missing App ID, timeouts, invalid payloads, denied grants and browser failures are actionable
+ok 78 - missing App ID, timeouts, invalid payloads, denied grants and browser failures are actionable
+  ---
+  duration_ms: 28.178458
+  type: 'test'
+  ...
+# Subtest: selected Steam game and steamapps folders resolve to one canonical library; non-libraries are rejected
+ok 79 - selected Steam game and steamapps folders resolve to one canonical library; non-libraries are rejected
+  ---
+  duration_ms: 201.050333
+  type: 'test'
+  ...
+# Subtest: picker persists a library once, scanning discovers games, restart restores it, and removing never deletes files
+ok 80 - picker persists a library once, scanning discovers games, restart restores it, and removing never deletes files
+  ---
+  duration_ms: 287.886458
+  type: 'test'
+  ...
+# Subtest: cancel, invalid selections and unavailable desktop picker do not mutate scan paths
+ok 81 - cancel, invalid selections and unavailable desktop picker do not mutate scan paths
+  ---
+  duration_ms: 90.114667
+  type: 'test'
+  ...
+# Subtest: picker requires login, CSRF and configuration permission before opening the native window
+ok 82 - picker requires login, CSRF and configuration permission before opening the native window
+  ---
+  duration_ms: 49.894958
+  type: 'test'
+  ...
+# Subtest: only one picker opens and signing out while it is open prevents a late configuration write
+ok 83 - only one picker opens and signing out while it is open prevents a late configuration write
+  ---
+  duration_ms: 94.655125
+  type: 'test'
+  ...
+# Subtest: legacy Steam libraryfolders entries and alternate folder selections are deduplicated
+ok 84 - legacy Steam libraryfolders entries and alternate folder selections are deduplicated
+  ---
+  duration_ms: 79.528833
+  type: 'test'
+  ...
+# Subtest: the HTTP cancel route only cancels the requested SSO attempt
+ok 85 - the HTTP cancel route only cancels the requested SSO attempt
+  ---
+  duration_ms: 356.049666
+  type: 'test'
+  ...
+# Subtest: server restores encrypted keys with remembered MU login after restart and never exposes credentials
+ok 86 - server restores encrypted keys with remembered MU login after restart and never exposes credentials
+  ---
+  duration_ms: 104.336083
+  type: 'test'
+  ...
+# Subtest: SSO validates the official API key before saving; logout cancels late grants and another MU account sees no key
+ok 87 - SSO validates the official API key before saving; logout cancels late grants and another MU account sees no key
+  ---
+  duration_ms: 85.618417
+  type: 'test'
+  ...
+# Subtest: cancel during Nexus validation prevents a late save, and changing password cancels the active flow
+ok 88 - cancel during Nexus validation prevents a late save, and changing password cancels the active flow
+  ---
+  duration_ms: 130.050333
+  type: 'test'
+  ...
+# Subtest: rejected Nexus keys never replace an existing saved connection
+ok 89 - rejected Nexus keys never replace an existing saved connection
+  ---
+  duration_ms: 30.977584
+  type: 'test'
+  ...
+# Subtest: download queues retain their initiating client and reject grants from another account
+ok 90 - download queues retain their initiating client and reject grants from another account
+  ---
+  duration_ms: 55.582458
+  type: 'test'
+  ...
+# Subtest: source keys are encrypted, owner scoped, atomically replaced and restored after restart
+ok 91 - source keys are encrypted, owner scoped, atomically replaced and restored after restart
+  ---
+  duration_ms: 79.129708
+  type: 'test'
+  ...
+# Subtest: plaintext backends, corruption, wrong owners and cancelled writes never become saved credentials
+ok 92 - plaintext backends, corruption, wrong owners and cancelled writes never become saved credentials
+  ---
+  duration_ms: 19.785875
+  type: 'test'
+  ...
+# Subtest: connections merge concurrent providers, restore only the same account and persist disconnection
+ok 93 - connections merge concurrent providers, restore only the same account and persist disconnection
+  ---
+  duration_ms: 10.356583
+  type: 'test'
+  ...
+# Subtest: unavailable encryption is memory only and allows disconnect; failed persistence keeps the working key
+ok 94 - unavailable encryption is memory only and allows disconnect; failed persistence keeps the working key
+  ---
+  duration_ms: 7.084
+  type: 'test'
+  ...
+# Subtest: N 网全库搜索、分页、游戏范围及缓存
+ok 95 - N 网全库搜索、分页、游戏范围及缓存
+  ---
+  duration_ms: 20.152875
+  type: 'test'
+  ...
+# Subtest: 香蕉网详情校验游戏、文件归属及直链
+ok 96 - 香蕉网详情校验游戏、文件归属及直链
+  ---
+  duration_ms: 2.150833
+  type: 'test'
+  ...
+# Subtest: 下载状态区分 N 网缺少 Key、工坊通道缺失和香蕉网地址缺失
+ok 97 - 下载状态区分 N 网缺少 Key、工坊通道缺失和香蕉网地址缺失
+  ---
+  duration_ms: 4.888958
+  type: 'test'
+  ...
+# Subtest: N 网 CDN 官方链接允许下载，网络错误不冒充账号权限问题
+ok 98 - N 网 CDN 官方链接允许下载，网络错误不冒充账号权限问题
+  ---
+  duration_ms: 2.2035
+  type: 'test'
+  ...
+# Subtest: Steam 工坊查询分页，详情无直链时不能假装下载
+ok 99 - Steam 工坊查询分页，详情无直链时不能假装下载
+  ---
+  duration_ms: 2.988959
+  type: 'test'
+  ...
+# Subtest: Steam 新版公开 SSR 列表保留分页、分类与总数，过滤其他游戏及合集
+ok 100 - Steam 新版公开 SSR 列表保留分页、分类与总数，过滤其他游戏及合集
+  ---
+  duration_ms: 1.071958
+  type: 'test'
+  ...
+# Subtest: 真实字节下载、来源 MD5 与大小校验、重启记录恢复
+ok 101 - 真实字节下载、来源 MD5 与大小校验、重启记录恢复
+  ---
+  duration_ms: 104.88975
+  type: 'test'
+  ...
+# Subtest: 拒绝非来源重定向、网页伪装和取消下载，清理临时文件
+ok 102 - 拒绝非来源重定向、网页伪装和取消下载，清理临时文件
+  ---
+  duration_ms: 66.272458
+  type: 'test'
+  ...
+# Subtest: 接口只暴露本机游戏、不暴露密钥和下载直链、下载必须鉴权
+ok 103 - 接口只暴露本机游戏、不暴露密钥和下载直链、下载必须鉴权
+  ---
+  duration_ms: 85.145459
+  type: 'test'
+  ...
+# Subtest: 空列表不显示获取成功，有原始记录但全被过滤时明确报告解析问题
+ok 104 - 空列表不显示获取成功，有原始记录但全被过滤时明确报告解析问题
+  ---
+  duration_ms: 3.431166
+  type: 'test'
+  ...
+# Subtest: 游戏专区限定接口省略冗余字段时，合法 Mod 不被误过滤
+ok 105 - 游戏专区限定接口省略冗余字段时，合法 Mod 不被误过滤
+  ---
+  duration_ms: 7.708417
+  type: 'test'
+  ...
+# Subtest: 商标、中文与 Skyrim 别名保持安全的游戏身份匹配
+ok 106 - 商标、中文与 Skyrim 别名保持安全的游戏身份匹配
+  ---
+  duration_ms: 1.822459
+  type: 'test'
+  ...
+# Subtest: 网络错误保留来源和具体代码，超时不伪装为空 Mod
+ok 107 - 网络错误保留来源和具体代码，超时不伪装为空 Mod
+  ---
+  duration_ms: 0.655125
+  type: 'test'
+  ...
+# Subtest: startup builds missing UI assets, keeps complete builds, and repairs partial builds
+ok 108 - startup builds missing UI assets, keeps complete builds, and repairs partial builds
+  ---
+  duration_ms: 2682.750083
+  type: 'test'
+  ...
+# Subtest: catalog is independent of installed games, paginated, searchable, and keeps game editions distinct
+ok 109 - catalog is independent of installed games, paginated, searchable, and keeps game editions distinct
+  ---
+  duration_ms: 396.143083
+  type: 'test'
+  ...
+# Subtest: uninstalled game supports three-source browsing; failures stay source-specific and metadata survives
+ok 110 - uninstalled game supports three-source browsing; failures stay source-specific and metadata survives
+  ---
+  duration_ms: 171.591333
+  type: 'test'
+  ...
+# Subtest: favorites persist per account, reject unobserved items, and serialize concurrent writes
+ok 111 - favorites persist per account, reject unobserved items, and serialize concurrent writes
+  ---
+  duration_ms: 251.305459
+  type: 'test'
+  ...
+# Subtest: download before installation can bind only to the matching scanned game, then deploy through a plan
+ok 112 - download before installation can bind only to the matching scanned game, then deploy through a plan
+  ---
+  duration_ms: 141.845167
+  type: 'test'
+  ...
+# Subtest: catalog Nexus authorization resumes the intended download when the API key is connected later
+ok 113 - catalog Nexus authorization resumes the intended download when the API key is connected later
+  ---
+  duration_ms: 58.852417
+  type: 'test'
+  ...
+1..113
+# tests 128
+# suites 0
+# pass 128
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 3793.525375

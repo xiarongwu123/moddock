@@ -2,7 +2,7 @@ const { createServer: createLocalServer } = require('../server.cjs');
 const { accountFixture } = require('./account-fixture.cjs');
 
 function createServer(options = {}) {
- return createLocalServer({ ...options, accounts: options.accounts || accountFixture().options });
+ return createLocalServer({ nexusPlatformDisabled: true, ...options, accounts: options.accounts || accountFixture().options });
 }
 async function loginFixture(service) {
  const config = await fetch(service.url + '/api/auth/config').then(response => response.json());

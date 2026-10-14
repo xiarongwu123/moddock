@@ -11,5 +11,5 @@ function parseNxm(value, now = Date.now()) {
  if(userId&&!/^\d+$/.test(userId))throw new Error('NXM 账号参数无效');
  return {domain:u.hostname.toLowerCase(),modId:m[1],fileId:m[2],key,expires,userId:userId||null};
 }
-function authorizationPage(resourceId,fileId){const m=String(resourceId).match(/^nexus:([a-z0-9_-]+):([1-9]\d*)$/);if(!m||! /^[1-9]\d*$/.test(String(fileId)))throw new Error('Nexus 文件编号无效');return `https://www.nexusmods.com/${m[1]}/mods/${m[2]}?tab=files&file_id=${fileId}`;}
+function authorizationPage(resourceId,fileId){const m=String(resourceId).match(/^nexus:([a-z0-9_-]+):([1-9]\d*)$/);if(!m||! /^[1-9]\d*$/.test(String(fileId)))throw new Error('Nexus 文件编号无效');return `https://www.nexusmods.com/${m[1]}/mods/${m[2]}?tab=files&file_id=${fileId}&nmm=1`;}
 module.exports={parseNxm,authorizationPage};

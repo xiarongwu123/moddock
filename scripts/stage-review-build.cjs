@@ -12,7 +12,7 @@ const { build } = require('esbuild');
  await fs.mkdir(destination, { recursive: true });
  const app = path.join(destination, 'app');
  await fs.mkdir(app);
- const runtime = ['electron.cjs', 'server.cjs', 'sources.cjs', 'workshop.cjs', 'downloads.cjs', 'scanner.cjs', 'installers.cjs', 'nxm.cjs', 'library.cjs', 'adapters.cjs', 'account.cjs', 'account-policy.cjs', 'account-token-store.cjs', 'nexus-games.json', 'nexus-app.json', 'nexus-sso.cjs', 'source-key-store.cjs', 'source-connections.cjs', 'README.md'];
+ const runtime = ['electron.cjs', 'server.cjs', 'sources.cjs', 'workshop.cjs', 'downloads.cjs', 'scanner.cjs', 'installers.cjs', 'nxm.cjs', 'nexus-authorization.cjs', 'nexus-platform-client.cjs', 'library.cjs', 'adapters.cjs', 'account.cjs', 'account-policy.cjs', 'account-token-store.cjs', 'nexus-games.json', 'nexus-app.json', 'nexus-sso.cjs', 'source-key-store.cjs', 'source-connections.cjs', 'README.md'];
  for (const file of runtime) await fs.copyFile(path.join(project, file), path.join(app, file));
  for (const directory of ['src', 'public']) await fs.cp(path.join(project, directory), path.join(app, directory), { recursive: true });
  await fs.mkdir(path.join(app, 'scripts'));

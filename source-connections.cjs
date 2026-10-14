@@ -4,13 +4,13 @@ class SourceConnections {
  constructor(scope, options = {}, store) { this.scope = scope; this.options = options; this.store = store; this.entries = new Map(); }
  async get(owner) {
   if (!this.entries.has(owner)) {
-   const entry = { sources: new Sources(this.options), saved: {}, warning: null, queue: Promise.resolve(), disposed: false };
+   const entry = { sources: new Sources({ ...this.options, nexusPlatform: this.options.nexusPlatform || this.options.nexusPlatformFactory?.(owner) }), saved: {}, warning: null, queue: Promise.resolve(), disposed: false };
    this.entries.set(owner, entry);
    entry.ready = (async () => {
     try {
      const keys = await this.store?.read(this.scope + '\n' + owner) || {};
      if (entry.disposed) return;
-     for (const [source, key] of Object.entries(keys)) { entry.sources.connect(source, key); entry.saved[source] = !!key; }
+     for (const [source, key] of Object.entries(keys)) { if (source === 'nexus' && entry.sources.nexusPlatform) continue; entry.sources.connect(source, key); entry.saved[source] = !!key; }
     } catch { entry.warning = '无法解密已保存的来源授权，请重新连接；原加密文件已保留。'; }
    })();
   }
@@ -24,6 +24,7 @@ class SourceConnections {
  }
  async connect(owner, source, key, current = () => true) {
   const entry = await this.get(owner);
+  if (source === 'nexus' && entry.sources.nexusPlatform) throw new Error('Nexus 下载由平台服务提供，无需连接个人账号');
   const work = entry.queue.catch(() => {}).then(async () => {
    if (entry.disposed || !current()) throw new Error('授权已取消，请重新连接');
    // Validate without replacing a working key if encryption or persistence fails.

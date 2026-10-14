@@ -16,19 +16,25 @@ const { featureForRoute } = require('./account-policy.cjs');
 const { Workshop, sameGame } = require('./workshop.cjs');
 const { SourceConnections } = require('./source-connections.cjs');
 const { NexusSso } = require('./nexus-sso.cjs');
+const { createMuNexusPlatformClient } = require('./nexus-platform-client.cjs');
 async function createServer(options = {}) {
  await ensureUi();
  const accounts = createAccountClient(options.accounts);
+ const sessionOwners = new Map();
+ const sourceOptions = { ...options.sources };
+ if (!options.nexusPlatformDisabled && !sourceOptions.nexusPlatform) sourceOptions.nexusPlatformFactory = owner => createMuNexusPlatformClient((route, init) => {
+  const sessionId = [...sessionOwners].find(([, id]) => id === owner)?.[0];
+  return accounts.nexusRequest(sessionId, route, init);
+ });
  const root = path.resolve(options.root || process.env.MODDOCK_DATA || path.join(__dirname, '.moddock-data')); await fs.mkdir(root, { recursive: true });
  const configPath = path.join(root, 'settings.json'); let config = { scanPaths: [], mappings: {}, autoImport:true };
  try { config = { ...config, ...JSON.parse(await fs.readFile(configPath, 'utf8')) }; } catch (e) { if (e.code !== 'ENOENT') throw e; }
  const saveConfig = async () => { await fs.writeFile(configPath + '.tmp', JSON.stringify(config, null, 2)); await fs.rename(configPath + '.tmp', configPath); };
  const doScan = options.scan || scan; let scanResult = await doScan(config.scanPaths);
  let choosingScanDirectory = false;
- const token = crypto.randomBytes(32).toString('hex'); const sources = new Sources(options.sources || {}); const downloads = await new Downloads(root, sources, options.downloads).open();
- const connections = new SourceConnections(accounts.config.legalUrls.terms, options.sources, options.sourceKeyStore);
+ const token = crypto.randomBytes(32).toString('hex'); const sources = new Sources({ ...sourceOptions, nexusPlatform: sourceOptions.nexusPlatform || sourceOptions.nexusPlatformFactory?.(null) }); const downloads = await new Downloads(root, sources, options.downloads).open();
+ const connections = new SourceConnections(accounts.config.legalUrls.terms, sourceOptions, options.sourceKeyStore);
  const sso = new NexusSso({ application: process.env.MODDOCK_NEXUS_APP_ID || require('./nexus-app.json').application, ...options.nexusSso });
- const sessionOwners = new Map();
  const installers = await new Installers(root, downloads, options.installers).open();
  const library=new ModLibrary(downloads,installers,sources);
  const workshop = new Workshop(root, onlineGames);
@@ -39,6 +45,7 @@ async function createServer(options = {}) {
  function releaseOwner(owner) {
   if (!owner) return;
   sso.forget(owner);
+  options.cancelAuthorization?.(owner);
   const entry = connections.entries.get(owner);
   if (entry) downloads.releaseClient(entry.sources);
   connections.release(owner);
@@ -49,6 +56,7 @@ async function createServer(options = {}) {
  async function connectSource(owner, source, key, current) {
   const result = await connections.connect(owner, source, key, current);
   if (!result || (current && !current())) return result;
+  if (source === 'nexus') options.cancelAuthorization?.(owner);
   if (source === 'nexus' && key) {
    const client = (await connections.get(owner)).sources;
    for (const [id, pending] of pendingNxm) {
@@ -69,6 +77,7 @@ async function createServer(options = {}) {
   let owner;
   try{const permission=sessionId?await accounts.authorize(sessionId,'library.manage'):await accounts.authorizeActive('library.manage');owner=permission.account.id;const sources=(await connections.get(owner)).sources;const auth=parseNxm(value);const target=nexusTargets.get(`${owner}:${auth.domain}:${auth.modId}:${auth.fileId}`);let games=gameId?[downloadGame(gameId)]:target?[downloadGame(target.gameId)]:onlineGames();const matches=[];for(const g of games){try{if(await sources.nexusGame(g)===auth.domain)matches.push(g);}catch{}}
    if(matches.length!==1)throw new Error(matches.length?'多个本机游戏匹配此专区，请在设置中选择目标游戏后接收链接':'此 NXM 游戏不在本机游戏库中，请扫描游戏并匹配 Nexus 专区');const g=matches[0];
+   if (sources.nexusPlatform) throw new Error('文件由平台服务自动下载，无需接收 Nexus 授权链接');
    const resourceId=`nexus:${auth.domain}:${auth.modId}`;
    if(!sources.keys.nexus){if(pendingNxm.size>=20)throw new Error('待授权链接过多');pendingNxm.set(`${owner}:${g.id}:${resourceId}:${auth.fileId}`,{owner,auth,gameId:g.id});nxmStatus={owner,id:crypto.randomUUID(),status:'needs_key',gameId:g.id,message:'已收到文件授权，请先在设置中连接同一 Nexus 账号'};return nxmStatus;}
    const job=downloads.resumeAuthorization(g,resourceId,auth.fileId,auth,sources);nxmStatus={owner,id:crypto.randomUUID(),status:'queued',gameId:g.id,jobId:job.id,message:'已收到 NXM 文件授权，下载已加入队列'};return nxmStatus;
@@ -76,6 +85,37 @@ async function createServer(options = {}) {
  }
  function onlineGames() { return scanResult.games.map(g => { const known = sourceGames.find(s => (g.appId && s.appId === g.appId) || [s.name, s.searchName].some(n => n.toLowerCase() === g.name.toLowerCase())); return { ...known, ...g, searchName: known?.searchName || g.name, ...config.mappings[g.id] }; }); }
  function downloadGame(id) { return onlineGames().find(g => g.id === id) || workshop.game(id); }
+ async function authorizeFile(owner, sessionId, client, game, resourceId, fileId, job) {
+  if (client.nexusPlatform) throw new Error('文件由平台下载服务自动准备，无需客户端授权');
+  if (!options.authorize) throw new Error('软件内文件授权需要桌面版');
+  const resource = client.resource(game, resourceId);
+  if (resource.source !== 'nexus' || resource.domain !== await client.nexusGame(game)) throw new Error('文件不属于当前游戏');
+  const page = authorizationPage(resourceId, fileId);
+  if (nexusTargets.size >= 100) nexusTargets.delete(nexusTargets.keys().next().value);
+  nexusTargets.set(`${owner}:${resource.domain}:${resource.id}:${fileId}`, { owner, gameId: game.id });
+  const messages = { queued: '等待自动获取 Nexus 文件授权', waiting: '正在自动获取 Nexus 文件授权', submitted: '正在等待 Nexus 免费下载倒计时', login_required: '请在 Nexus 窗口登录一次，登录后自动继续下载', verification_required: '请完成 Nexus 网页验证，完成后自动继续下载', manual_required: 'Nexus 页面需要确认，请在弹出的窗口完成后继续', failed: 'Nexus 文件授权未完成，请检查网页登录账号并重试', cancelled: '文件授权已取消，可重新获取授权' };
+  await options.authorize(page, {
+   owner, jobId: job?.id,
+   isCurrent: () => sessionOwners.get(sessionId) === owner && connections.entries.get(owner)?.sources === client && !!client.keys.nexus && (!job || job.status === 'authorization_required'),
+   receive: value => {
+    const grant = parseNxm(value);
+    if (grant.domain !== resource.domain || grant.modId !== resource.id || grant.fileId !== String(fileId)) throw new Error('NXM 文件授权与当前任务不匹配');
+    return receiveNxm(value, game.id, sessionId);
+   },
+   onState: async state => {
+    if (job?.status === 'authorization_required' && messages[state]) { job.message = messages[state]; await downloads.save(); }
+   },
+  });
+ }
+ downloads.onAuthorizationRequired = async (job, client) => {
+  if (!options.authorize || !client.keys.nexus || job.status !== 'authorization_required') return;
+  const owner = [...connections.entries].find(([, entry]) => entry.sources === client)?.[0];
+  const sessionId = [...sessionOwners].find(([, accountId]) => accountId === owner)?.[0];
+  if (!owner || !sessionId) return;
+  const permission = await accounts.authorize(sessionId, 'library.manage');
+  if (permission.account.id !== owner || connections.entries.get(owner)?.sources !== client || job.status !== 'authorization_required') return;
+  await authorizeFile(owner, sessionId, client, downloadGame(job.gameId), job.resourceId, job.fileId, job);
+ };
  const server = http.createServer(async (req, res) => {
   let requestOwner;
   res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('Cache-Control', 'no-store');
@@ -141,6 +181,7 @@ async function createServer(options = {}) {
     if (url.pathname === '/api/account/authorize') return send(await accounts.authorize(sessionId, body.featureKey));
     if (url.pathname === '/api/account/orders') return send(await accounts.createOrder(sessionId, body));
     if (featureForRoute[url.pathname]) await accounts.authorize(sessionId, featureForRoute[url.pathname]);
+    if (url.pathname === '/api/nexus/sso/start' && sources.nexusPlatform) throw new Error('Nexus 下载由平台服务提供，无需连接个人账号');
     if (url.pathname === '/api/nexus/sso/start') return send(sso.start(profile.id, async (key, current) => {
      const permission = await accounts.authorize(sessionId, 'configuration.edit');
      if (permission.account.id !== profile.id || !current()) throw new Error('账号已切换');
@@ -189,7 +230,7 @@ async function createServer(options = {}) {
     if(url.pathname==='/api/loadouts/switch')return send(await installers.switchLoadout(game(),body.id));
     if(url.pathname==='/api/loadouts/delete')return send(await installers.deleteLoadout(game(),body.id));
     if(url.pathname==='/api/nexus/receive')return send(await receiveNxm(body.url,body.gameId,sessionId));
-    if(url.pathname==='/api/nexus/authorize'){const g=downloadGame(body.gameId);const r=sources.resource(g,body.id);if(r.source!=='nexus'||r.domain!==await sources.nexusGame(g))throw new Error('文件不属于当前游戏');const page=authorizationPage(body.id,body.fileId);if(!options.authorize)throw new Error('软件内授权窗口需要桌面版；网页预览可在设置中粘贴 NXM 链接');if(nexusTargets.size>=100)nexusTargets.delete(nexusTargets.keys().next().value);nexusTargets.set(`${profile.id}:${r.domain}:${r.id}:${body.fileId}`,{owner:profile.id,gameId:g.id});await options.authorize(page);return send({ok:true});}
+    if(url.pathname==='/api/nexus/authorize'){const g=downloadGame(body.gameId);const job=downloads.jobs.find(j=>j.gameId===g.id&&j.resourceId===body.id&&j.fileId===String(body.fileId)&&j.status==='authorization_required');await authorizeFile(profile.id,sessionId,sources,g,body.id,body.fileId,job);return send({ok:true});}
     if (url.pathname === '/api/installations/profile') return send(await installers.setProfile(game(), body.rule));
     if (url.pathname === '/api/installations/inspect') return send(await installers.inspect(game(), body.jobId));
     if (url.pathname === '/api/installations/plan') return send(await installers.prepare(game(), body.jobId));
@@ -202,7 +243,7 @@ async function createServer(options = {}) {
     if (url.pathname === '/api/sources/detail') { const detail = await sources.detail(game(), body.id); return send({ ...detail, files: detail.files.map(({ _url, md5, ...f }) => f) }); }
     if (url.pathname === '/api/sources/connection') { if (body.source === 'nexus') sso.cancel(profile.id); return send(await connectSource(profile.id,body.source,body.key)); }
     if (url.pathname === '/api/downloads/start') return send(downloads.start(downloadGame(body.gameId), body.id, body.fileId, body.name,undefined,sources));
-    if (url.pathname === '/api/downloads/cancel') { downloads.cancel(body.id); return send({ ok: true }); }
+    if (url.pathname === '/api/downloads/cancel') { downloads.cancel(body.id); options.cancelAuthorization?.(profile.id, body.id); return send({ ok: true }); }
     if (url.pathname === '/api/downloads/file') { const file = await downloads.completedFile(body.id); res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(file.name)}` }); createReadStream(file.file).pipe(res); return; }
     if (url.pathname === '/api/downloads/reveal') { const file = await downloads.completedFile(body.id); if (!options.reveal) throw new Error('此功能需要桌面版'); await options.reveal(file.file); return send({ ok: true }); }
     if (url.pathname === '/api/scan') { scanResult = await doScan(config.scanPaths); return send(scanResult); }

@@ -10,19 +10,19 @@ export function createSourceAuth(ctx) {
   const disconnect = source => `<button id="source-${source}-disconnect" class="source-disconnect" data-disconnect="${source}">${source === 'workshop' ? '断开 API' : '断开连接'}</button>`;
   const manual = (source, label, secondary = false) => `<details id="source-${source}-manual" name="source-key-editor" class="source-manual ${secondary ? 'is-secondary' : ''}" ${source === 'nexus' && waiting ? 'inert' : ''}><summary id="source-${source}-toggle">${label}${icon('chevron')}</summary><div class="source-key-form"><label for="${source}-api-key">${source === 'nexus' ? 'Nexus' : 'Steam Web'} API Key</label><input id="${source}-api-key" type="password" autocomplete="off" spellcheck="false" maxlength="2048" placeholder="粘贴 API Key"><button id="source-${source}-save" class="btn primary small" data-connect="${source}">保存连接</button></div></details>`;
   return `<section id="source-connections" class="source-connections" aria-labelledby="source-connections-title">
-   <div class="source-connections-heading"><h2 id="source-connections-title">来源连接</h2><span class="source-storage-note">${c.persistent ? icon('shield') + '本机加密 · 自动恢复' : '仅本次运行有效'}</span></div>
+   <div class="source-connections-heading"><h2 id="source-connections-title">来源连接</h2><span class="source-storage-note">${c.nexusManaged ? '下载服务已配置' : c.persistent ? icon('shield') + '本机加密 · 自动恢复' : '仅本次运行有效'}</span></div>
    ${c.warning ? `<div class="notice" role="status">${esc(c.warning)}</div>` : ''}
    <div class="source-connection-grid">
     <article class="source-connection-card" data-source-card="nexus" aria-labelledby="source-nexus-title">
      <span class="source-connection-mark is-nexus" aria-hidden="true">N</span><h3 id="source-nexus-title" tabindex="-1">Nexus Mods</h3>
      ${status(c.nexusConnected, waiting ? '等待授权' : c.nexusConnected ? '已连接' : '未连接')}
-     <p class="source-connection-description">${c.nexusConnected ? saved('nexus') : '连接账号，获取 MOD 下载授权'}</p>
-     ${s.message && !['idle', 'connected', 'cancelled'].includes(s.status) ? `<p class="source-auth-status ${['error', 'expired'].includes(s.status) ? 'is-error' : ''}" role="status">${waiting ? icon('loader', 'spinning') : ''}${esc(s.message)}</p>` : ''}
-     <div class="source-card-controls">
+     <p class="source-connection-description">${c.nexusManaged ? '可直接下载，无需登录 Nexus' : c.nexusConnected ? saved('nexus') : '连接账号，获取 MOD 下载授权'}</p>
+     ${!c.nexusManaged && s.message && !['idle', 'connected', 'cancelled'].includes(s.status) ? `<p class="source-auth-status ${['error', 'expired'].includes(s.status) ? 'is-error' : ''}" role="status">${waiting ? icon('loader', 'spinning') : ''}${esc(s.message)}</p>` : ''}
+     <div class="source-card-controls">${c.nexusManaged ? '<span class="source-ready-note">无需连接账号</span>' : `
       ${waiting ? '<button id="source-nexus-cancel" class="btn small" data-nexus-cancel>取消连接</button>' : s.available ? `<button id="source-nexus-connect" class="btn ${c.nexusConnected ? '' : 'primary'} small" data-nexus-connect>${c.nexusConnected ? '重新授权' : '连接 Nexus'}</button>` : ''}
       ${manual('nexus', s.available ? '手动输入 Key' : c.nexusConnected ? '更换 Key' : '连接 Nexus', !!s.available)}
       ${c.nexusConnected && !waiting ? disconnect('nexus') : ''}
-     </div>
+     `}</div>
     </article>
     <article class="source-connection-card" data-source-card="banana" aria-labelledby="source-banana-title">
      <span class="source-connection-mark is-banana" aria-hidden="true">G</span><h3 id="source-banana-title">GameBanana</h3>

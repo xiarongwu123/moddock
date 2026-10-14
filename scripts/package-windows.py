@@ -20,7 +20,7 @@ app = runtime / 'resources/app'
 if app.exists():
     shutil.rmtree(app)
 app.mkdir(parents=True)
-for name in ['package.json', 'electron.cjs', 'server.cjs', 'sources.cjs', 'workshop.cjs', 'downloads.cjs', 'scanner.cjs', 'installers.cjs', 'nxm.cjs', 'library.cjs', 'adapters.cjs', 'account.cjs', 'account-policy.cjs', 'account-token-store.cjs', 'nexus-games.json', 'nexus-app.json', 'nexus-sso.cjs', 'source-key-store.cjs', 'source-connections.cjs']:
+for name in ['package.json', 'electron.cjs', 'server.cjs', 'sources.cjs', 'workshop.cjs', 'downloads.cjs', 'scanner.cjs', 'installers.cjs', 'nxm.cjs', 'nexus-authorization.cjs', 'nexus-platform-client.cjs', 'library.cjs', 'adapters.cjs', 'account.cjs', 'account-policy.cjs', 'account-token-store.cjs', 'nexus-games.json', 'nexus-app.json', 'nexus-sso.cjs', 'source-key-store.cjs', 'source-connections.cjs']:
     shutil.copy2(project / name, app / name)
 for name in ['auth.js', 'auth.css']:
     assert (project / 'public' / name).is_file(), 'Run npm run build before packaging'

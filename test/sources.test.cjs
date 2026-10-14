@@ -54,6 +54,42 @@ test('真实字节下载、来源 MD5 与大小校验、重启记录恢复',asyn
  const d=await new Downloads(root,sources,{fetch:async()=>new Response(bytes,{headers:{'content-type':'application/zip','content-length':String(bytes.length)}})}).open();d.start(game,'banana:1','2','Mod');await wait(d);assert.equal(d.jobs[0].status,'completed');assert.deepEqual(await fs.readFile(d.jobs[0].path),bytes);assert.equal(d.jobs[0].sha256,crypto.createHash('sha256').update(bytes).digest('hex'));assert.equal((await new Downloads(root,sources).open()).jobs[0].status,'completed');
  sources.downloadFile=async()=>({name:'mod.zip',size:bytes.length,md5:'0'.repeat(32),_url:'https://files.gamebanana.com/mod.zip'});d.start(game,'banana:1','3','Bad checksum');await wait(d);assert.equal(d.jobs[0].status,'failed');assert.match(d.jobs[0].message,/校验/);await assert.rejects(fs.access(path.join(d.root,d.jobs[0].id+'.part')));
 });
+test('rounded Nexus metadata accepts complete files and retains exact size checks', async t => {
+ const bytes = Buffer.alloc(189903, 0xa5);
+ for (const example of [
+  { name: 'rounded KiB metadata', exactBytes: null, length: bytes.length, status: 'completed' },
+  { name: 'incorrect exact byte metadata', exactBytes: 189440, length: bytes.length, status: 'failed' },
+  { name: 'incomplete HTTP transfer', exactBytes: null, length: bytes.length + 1, status: 'failed' },
+ ]) await t.test(example.name, async child => {
+  const root = await temp(child);
+  const source = new Sources({ fetch: async (_url, init) => {
+   if (init.method === 'POST') {
+    if (JSON.parse(init.body).query.includes('modFiles')) return Response.json({ data: { mod: { description: 'test' }, modFiles: [
+     { fileId: 5, name: 'rounded', detectedFileExtension: 'zip', category: 'MAIN', size: 185, sizeInBytes: example.exactBytes },
+    ] } });
+    return Response.json({ data: { game: { id: 130 } } });
+   }
+   return Response.json([{ URI: 'https://premium-files.nexus-cdn.com/fixture.zip' }]);
+  } });
+  source.connect('nexus', 'test-key');
+  const file = (await source.detail(game, 'nexus:stardewvalley:99')).files[0];
+  assert.equal(file.size, 189440);
+  assert.equal(file.sizeExact, example.exactBytes !== null);
+  const downloads = await new Downloads(root, source, { fetch: async () => new Response(bytes, {
+   headers: { 'content-type': 'application/zip', 'content-length': String(example.length) },
+  }) }).open();
+  downloads.start(game, 'nexus:stardewvalley:99', '5', 'Rounded file');
+  await wait(downloads);
+  assert.equal(downloads.jobs[0].status, example.status);
+  if (example.status === 'completed') {
+   assert.deepEqual(await fs.readFile(downloads.jobs[0].path), bytes);
+   assert.equal(downloads.jobs[0].sha256, crypto.createHash('sha256').update(bytes).digest('hex'));
+  } else {
+   assert.match(downloads.jobs[0].message, /大小校验失败/);
+   await assert.rejects(fs.access(path.join(downloads.root, downloads.jobs[0].id + '.part')));
+  }
+ });
+});
 test('拒绝非来源重定向、网页伪装和取消下载，清理临时文件',async t=>{
  const root=await temp(t);const sources={resource:()=>({}),downloadFile:async()=>({name:'mod.zip',_url:'https://gamebanana.com/dl/1'})};
  let mode='redirect';const d=await new Downloads(root,sources,{fetch:async(url,opts)=>{

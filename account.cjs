@@ -159,6 +159,25 @@ function createAccountClient(options = {}) {
    return { allowed: true, reason: result.reason, account: state.profile };
   });
  }
+ async function nexusRequest(id, route, { method = 'GET', body, signal } = {}) {
+  if (!/^(?:status|jobs(?:\/[a-f0-9-]{36}(?:\/file)?)?)$/.test(route) || !['GET', 'POST', 'DELETE'].includes(method)) throw new Error('Invalid platform download route');
+  return withSession(id, async state => {
+   const refresh = async () => apply(state, await send('auth/refresh', { refreshToken: state.refreshToken }));
+   if (state.expiresAt <= now() + 30000) await refresh();
+   const call = async () => {
+    const timeout = new AbortController(), timer = setTimeout(() => timeout.abort(), 30000);
+    try { return await request(new URL('api/v1/nexus/' + route, base), {
+     method, redirect: 'error', signal: signal ? AbortSignal.any([signal, timeout.signal]) : timeout.signal,
+     headers: { Authorization: 'Bearer ' + state.accessToken, ...(body ? { 'Content-Type': 'application/json' } : {}) }, ...(body ? { body } : {}),
+    }); } finally { clearTimeout(timer); }
+   };
+   let response;
+   try { response = await call(); if (response.status === 401) { await response.body?.cancel(); await refresh(); response = await call(); } }
+   catch (error) { if (signal?.aborted) throw error; if (error instanceof AccountError) throw error; fail(503, 'nexus_unavailable', '下载服务暂不可用，请稍后重试。'); }
+   if (!response.ok) { let error; try { error = await response.json(); } catch {} fail(response.status, error?.code || 'nexus_unavailable', error?.message || '下载服务暂不可用，请稍后重试。', Number(response.headers.get('retry-after')) || undefined); }
+   return response;
+  });
+ }
  async function restore() {
   if (!tokenStore) return { profile: null, storageWarning: null };
   if (restoredId && sessions.has(restoredId)) return { id: restoredId, profile: await requireSession(restoredId), remember: true };
@@ -180,6 +199,7 @@ function createAccountClient(options = {}) {
  }
  return {
   config,
+  nexusRequest,
   status(id) { const state = sessions.get(id); return { remember: state?.remember === true, storageWarning: state?.storageWarning || storageWarning }; },
   requireSession,
   requireActiveSession() { return requireSession([...sessions.keys()].at(-1)); },

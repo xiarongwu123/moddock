@@ -1,0 +1,26 @@
+[Unit]
+Description=MODDOCK private Nexus download backend
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=/home/xrw/moddock-nexus/app
+ExecStartPre=/bin/bash /home/xrw/moddock-nexus/app/platform/allow-worker-network.sh --apply
+ExecStart=/bin/bash /home/xrw/moddock-nexus/app/platform/run-server.sh /home/xrw/moddock-nexus
+Environment=MODDOCK_NEXUS_HOST=172.25.0.1
+Environment=MODDOCK_NEXUS_IMPORT_FILE=/home/xrw/moddock-nexus/data/import-session.json
+Restart=always
+RestartSec=10
+KillMode=mixed
+TimeoutStopSec=30
+MemoryMax=768M
+TasksMax=512
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077
+LogRateLimitIntervalSec=30
+LogRateLimitBurst=50
+
+[Install]
+WantedBy=default.target
