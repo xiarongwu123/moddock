@@ -1,4 +1,6 @@
 node_modules/
+.moddock-tools/
+.moddock-private/
 .demo-data/
 test-results/
 playwright-report/
@@ -9,7 +11,16 @@ public/auth.css
 output/playwright/
 output/windows/
 output/macos/
+output/mu-studio/
+output/bg3-weapon/
+output/bg3-agent/
+output/bg3-extender/
+output/game-environments/
+output/download-recovery/
 output/nexus-review*/
 output/nexus-review-tests.log
+output/nexus-recovery*/
+platform/mu-nexus-gateway/bin/
+platform/mu-nexus-gateway/obj/
 .playwright-cli/
 .DS_Store

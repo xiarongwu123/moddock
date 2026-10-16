@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
-const { NexusAuthorizer } = require('../nexus-authorization.cjs');
+const { NexusAuthorizer, advanceNexusAuthorization } = require('../nexus-authorization.cjs');
 const page = id => `https://www.nexusmods.com/stardewvalley/mods/99?tab=files&file_id=${id}&nmm=1`;
 class Window extends EventEmitter {
  constructor() { super(); this.webContents = new EventEmitter(); this.webContents.getURL = () => this.url; this.webContents.executeJavaScript = async () => this.result || { state: 'waiting' }; this.webContents.setWindowOpenHandler = handler => { this.openHandler = handler; }; this.shown = 0; this.closed = false; }
@@ -68,4 +68,11 @@ test('a failed page load closes its window and releases the authorization slot',
  const authorizer = new NexusAuthorizer({ isAllowed: () => true, createWindow: () => window }); t.after(() => authorizer.close());
  await authorizer.open(page(5), { onState: state => states.push(state) });
  assert.equal(authorizer.active, null); assert.equal(window.closed, true); assert.ok(states.includes('failed'));
+});
+test('the Cloudflare security verification page waits for maintenance without clicking its challenge', () => {
+ const { runInNewContext } = require('node:vm');
+ const result = runInNewContext(`(${advanceNexusAuthorization.toString()})("${page(5)}")`, {
+  URL, location: { href: page(5) }, document: { body: { innerText: 'www.nexusmods.com\nPerforming security verification\nThis website uses a security service to protect against malicious bots.' }, querySelector: () => null, querySelectorAll: () => [] },
+ });
+ assert.equal(result.state, 'verification_required');
 });

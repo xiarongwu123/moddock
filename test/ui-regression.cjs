@@ -11,14 +11,17 @@ const {createServer}=require('./server-fixture.cjs');
  browser=await chromium.launch({channel:'chrome',headless:true});const page=await browser.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.route('https://cdn.akamai.steamstatic.com/steam/apps/413150/*.jpg',route=>route.fulfill({path:path.resolve(__dirname,'../public/covers/413150.jpg')}));
  await openHome(page,service.url);await page.locator('[data-game]').waitFor();
+ assert.equal(await page.locator('link[rel="icon"]').getAttribute('href'),'/favicon.svg');
+ for(const url of ['/favicon.svg','/favicon.ico']){const icon=await page.request.get(service.url+url);assert.equal(icon.status(),200);assert.match(icon.headers()['content-type'],/image\/svg\+xml/);}
  await page.locator('[data-game="steam-413150"] .holo-card__face--front img').evaluate(image=>image.decode());
  assert.equal(await page.locator('#app .subtitle,#app .eyebrow,#app .demo-note,#app .page-foot').count(),0);
  await fs.mkdir(path.resolve(__dirname,'../output/playwright'),{recursive:true});
  await page.screenshot({path:path.resolve(__dirname,'../output/playwright/home-minimal.png')});
  const help=page.locator('.context-help summary[aria-label="页面帮助"]');
  assert.equal(await page.locator('.context-help-body').isVisible(),false);
+ await help.click();
  const refresh=page.waitForResponse(response=>response.url()===service.url+'/api/state'&&response.ok());
- await help.click();await refresh;
+ await page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')));await refresh;
  assert.equal(await page.locator('.context-help').getAttribute('open'),'');
  assert.equal(await page.locator('.context-help-body').isVisible(),true);
  await help.press('Escape');assert.equal(await page.locator('.context-help-body').isVisible(),false);

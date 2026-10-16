@@ -9,10 +9,11 @@ const path = require('node:path');
 
 const messages = {
  queued: '下载服务正在排队准备文件', waiting: '下载服务正在准备文件', submitted: '正在等待来源下载倒计时',
- login_required: '下载服务等待维护方恢复会话', verification_required: '下载服务等待维护方完成来源验证',
+ login_required: '下载服务等待维护方恢复会话', verification_required: '请完成来源人机验证，验证后自动继续下载',
  manual_required: '下载服务等待维护方确认来源页面', failed: '下载服务暂时无法获取文件，请稍后重试', cancelled: '文件准备已取消',
+ browser_unavailable: '来源授权浏览器正在恢复，请重新下载',
 };
-async function createNexusService({ root, sources, authorizer, accessToken, fetch, port = 0, requireOwner = false, host = '127.0.0.1', maintenance }) {
+async function createNexusService({ root, sources, authorizer, verification, accessToken, fetch, port = 0, requireOwner = false, host = '127.0.0.1', maintenance, health }) {
  if (host !== '127.0.0.1' && !/^172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}$/.test(host)) throw new Error('Private service bind address required');
  if (!/^[a-f0-9]{64}$/.test(accessToken)) throw new Error('Invalid private service token');
  const readers = new Map();
@@ -42,10 +43,10 @@ async function createNexusService({ root, sources, authorizer, accessToken, fetc
     if (grant.domain !== resource.domain || grant.modId !== resource.id || grant.fileId !== job.fileId) throw new Error('NXM file does not match the service job');
     return downloads.resumeAuthorization(job.game, job.resourceId, job.fileId, grant);
    },
-   onState: async state => { if (job.status === 'authorization_required' && messages[state]) { if (state === 'cancelled') downloads.cancel(job.id); else { if (state === 'failed') job.status = 'failed'; job.message = messages[state]; await downloads.save(); } } },
+   onState: async state => { if (job.status === 'authorization_required' && messages[state]) { if (state === 'cancelled') downloads.cancel(job.id); else { if (['failed', 'browser_unavailable'].includes(state)) job.status = 'failed'; if (state === 'browser_unavailable') job.code = 'BROWSER_UNAVAILABLE'; job.message = messages[state]; await downloads.save(); } } },
   });
  };
- const publicJob = job => ({ id: job.id, status: job.status, message: job.status === 'failed' ? '下载服务暂时无法准备文件，请稍后重试' : job.message, bytes: job.bytes, total: job.total, ...(job.status === 'completed' ? { name: job.filename, size: job.bytes, version: job.version, sha256: job.sha256 } : {}) });
+ const publicJob = job => ({ id: job.id, status: job.status, message: job.status === 'failed' && job.code !== 'BROWSER_UNAVAILABLE' ? '下载服务暂时无法准备文件，请稍后重试' : job.message, bytes: job.bytes, total: job.total, verificationRequired: !!(verification && job.status === 'authorization_required' && authorizer.active?.context.jobId === job.id && authorizer.active.state === 'verification_required'), ...(job.status === 'completed' ? { name: job.filename, size: job.bytes, version: job.version, sha256: job.sha256 } : {}) });
  const server = http.createServer(async (req, res) => {
   res.setHeader('Cache-Control', 'no-store'); res.setHeader('X-Content-Type-Options', 'nosniff');
   const send = (body, code = 200) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body)); };
@@ -58,7 +59,7 @@ async function createNexusService({ root, sources, authorizer, accessToken, fetc
    const url = new URL(req.url, 'http://' + req.headers.host);
    if (req.method === 'GET' && maintenance && url.pathname === '/maintenance') return send(await maintenance(false));
    if (req.method === 'GET' && maintenance && url.pathname === '/maintenance/screenshot') { const bytes = await maintenance(true); if (!bytes) return send({ error: 'No maintenance window' }, 404); res.writeHead(200, { 'Content-Type': 'image/png' }); res.end(bytes); return; }
-   if (req.method === 'GET' && url.pathname === '/status') return send({ ready: !!sources.keys.nexus, pending: downloads.jobs.filter(job => ['queued', 'running', 'authorization_required'].includes(job.status)).length });
+   if (req.method === 'GET' && url.pathname === '/status') return send({ ready: !!sources.keys.nexus, pending: downloads.jobs.filter(job => ['queued', 'running', 'authorization_required'].includes(job.status)).length, ...health?.() });
    if (req.method === 'POST' && url.pathname === '/jobs') {
     if (downloads.jobs.filter(job => job.owner === owner && ['queued', 'running', 'authorization_required'].includes(job.status)).length >= 3) return send({ error: '当前账号的下载服务正在准备多个文件，请稍后重试' }, 429);
     if (downloads.jobs.filter(job => ['queued', 'running', 'authorization_required'].includes(job.status)).length >= 20) return send({ error: '下载服务繁忙，请稍后重试' }, 429);
@@ -69,9 +70,16 @@ async function createNexusService({ root, sources, authorizer, accessToken, fetc
     const job = downloads.start(game, `nexus:${input.domain}:${input.modId}`, String(input.fileId), 'Nexus file');
     const stored = downloads.jobs.find(item => item.id === job.id); stored.owner = owner; await downloads.save(); return send(publicJob(stored), 202);
    }
-   const match = url.pathname.match(/^\/jobs\/([a-f0-9-]{36})(\/file)?$/), job = match && downloads.jobs.find(item => item.id === match[1]);
+   const match = url.pathname.match(/^\/jobs\/([a-f0-9-]{36})(\/file|\/verification(?:\/click)?)?$/), job = match && downloads.jobs.find(item => item.id === match[1]);
    if (!job || (job.owner || 'platform-test') !== owner) return send({ error: 'Not found' }, 404);
    if (req.method === 'GET' && !match[2]) return send(publicJob(job));
+   if (req.method === 'GET' && match[2] === '/verification') return send(job.status === 'authorization_required' && verification ? await verification.view(job.id) : { pending: false });
+   if (req.method === 'POST' && match[2] === '/verification/click') {
+    let body = ''; for await (const chunk of req) { body += chunk; if (body.length > 1024) return send({ error: 'Request too large' }, 413); }
+    const input = JSON.parse(body);
+    if (job.status !== 'authorization_required' || !verification || !/^[a-f0-9-]{36}$/.test(input.revision || '') || !Number.isSafeInteger(input.x) || !Number.isSafeInteger(input.y) || !await verification.click(job.id, input)) return send({ error: '验证页面已更新，请重新操作' }, 409);
+    return send({ ok: true });
+   }
    if (req.method === 'DELETE' && !match[2]) { downloads.cancel(job.id); authorizer.cancel('platform', job.id); return send({ ok: true }); }
    if (req.method === 'GET' && match[2]) {
     if (job.status !== 'completed') return send({ error: 'File not ready' }, 409);

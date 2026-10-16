@@ -19,9 +19,18 @@ function platformDownloads(request, options) {
     while (job.status !== 'completed') {
      if (['failed', 'cancelled', 'expired'].includes(job.status)) throw new Error('下载服务暂时无法准备文件，请稍后重试');
      if (Date.now() - started > (options.timeout || 60 * 60 * 1000)) throw new Error('下载服务准备文件超时，请稍后重试');
-     await onProgress?.(job.message);
+     await onProgress?.(job.message, { verification: job.verificationRequired === true ? jobId : null });
      await wait(options.interval || 2000, undefined, { signal });
-     job = await (await request('/jobs/' + jobId, { signal })).json();
+     const reconnectStarted = Date.now(); let failures = 0;
+     for (;;) {
+      try { job = await (await request('/jobs/' + jobId, { signal })).json(); break; }
+      catch (error) {
+       const temporary = [502, 503, 504].includes(error.status) || ['account_timeout', 'account_unavailable', 'nexus_unavailable'].includes(error.code);
+       if (!temporary || signal?.aborted || Date.now() - reconnectStarted >= (options.reconnectTimeout ?? 90000)) throw error;
+       await onProgress?.('与 MU 下载服务的连接暂时中断，正在自动重连原任务…', { verification: null });
+       await wait(Math.min((options.interval || 2000) * 2 ** Math.min(failures++, 3), 10000), undefined, { signal });
+      }
+     }
      if (job.id !== jobId) throw new Error('Invalid service job response');
     }
     if (!/^[a-f0-9]{64}$/.test(job.sha256) || !Number.isSafeInteger(job.size) || job.size <= 0) throw new Error('Invalid service file response');
@@ -30,6 +39,10 @@ function platformDownloads(request, options) {
     await cancel();
     throw error;
    } finally { signal?.removeEventListener('abort', cancel); }
+  },
+  async verification(jobId, input, { signal } = {}) {
+   if (!/^[a-f0-9-]{36}$/.test(jobId)) throw new Error('Invalid verification job');
+   return (await request('/jobs/' + jobId + '/verification' + (input ? '/click' : ''), { signal, ...(input ? { method: 'POST', body: JSON.stringify(input) } : {}) })).json();
   },
  };
 }

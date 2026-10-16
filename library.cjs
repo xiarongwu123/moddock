@@ -4,7 +4,7 @@ class ModLibrary {
  constructor(downloads,installers,sources){this.downloads=downloads;this.installers=installers;this.sources=sources;this.queue=Promise.resolve();}
  import(game,jobId){const work=()=>this.importOne(game,jobId);const promise=this.queue.catch(()=>{}).then(work);this.queue=promise;return promise;}
  async importOne(game,jobId){const j=this.downloads.jobs.find(j=>j.id===jobId&&j.gameId===game.id&&j.status==='completed');if(!j)throw new Error('请选择下载完成的文件');
-  const files=await this.installers.inspect(game,jobId);j.import={status:'ready',message:'已校验并导入待安装库；选择规则后预览安装',files,suggestions:suggestions(game,files),at:new Date().toISOString()};await this.downloads.save();return j.import;
+  const files=await this.installers.inspect(game,jobId);j.import={status:'ready',message:'MOD 文件已校验，可以一键安装',files,suggestions:suggestions(game,files),at:new Date().toISOString()};await this.downloads.save();return j.import;
  }
  async checkUpdates(game){return this.installers.exclusive(async()=>{
   const mods=this.installers.state.mods.filter(m=>m.gameId===game.id&&m.resourceId?.startsWith('nexus:'));

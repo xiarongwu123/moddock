@@ -29,6 +29,13 @@ test('catalog is independent of installed games, paginated, searchable, and keep
  assert.equal(workshop.list({ scope: 'installed' }).total, 0);
  assert.throws(() => workshop.list({ page: -1 }));
 });
+test('saved catalog references remain usable after a local game gains its selected Nexus domain', () => {
+ let local = { id: 'local', name: 'Mapping Example', appId: '7654321' }, mappings = {};
+ const workshop = new Workshop('/tmp/unused', () => [local], () => mappings), id = 'catalog:steam:7654321';
+ assert.equal(workshop.game(id).appId, '7654321');
+ mappings = { [id]: { nexus: 'mappingexample' } }; local = { ...local, nexus: 'mappingexample' };
+ assert.equal(workshop.game(id).id, id); assert.equal(workshop.game(id).nexus, 'mappingexample');
+});
 test('uninstalled game supports three-source browsing; failures stay source-specific and metadata survives', async t => {
  const x = await fixture(t, { empty: true });
  const games = await x.post('workshop/catalog', { query: '星露谷' }); assert.equal(games.status, 200);
@@ -42,6 +49,22 @@ test('uninstalled game supports three-source browsing; failures stay source-spec
  const detail = await x.post('workshop/detail', { gameId: stardew, id: 'banana:99' });
  assert.equal(detail.body.files[0].available, true); assert.ok(!JSON.stringify(detail.body).includes('https://gamebanana.com/dl/'));
  assert.equal((await x.post('workshop/list', { gameId: 'made-up', source: 'banana' })).status, 400);
+});
+test('workshop candidates can be selected, persisted and used without accepting a forged mapping', async t => {
+ const x = await fixture(t, { empty: true, server: { sources: { fetch: async url => {
+  if (/\/Util\/Search|\/Game\/Index/.test(String(url))) return Response.json({ _aRecords: [{ _idRow: 11, _sName: 'Squad' }, { _idRow: 12, _sName: 'Squad' }] });
+  return Response.json({ _aRecords: [{ _idRow: 90, _sName: 'Selected Squad Mod', _sProfileUrl: 'https://gamebanana.com/mods/90', _aGame: { _idRow: 11 } }], _aMetadata: { _nRecordCount: 1 } });
+ } } } });
+ const gameId = 'catalog:nexus:squad';
+ const list = await x.post('workshop/list', { source: 'banana', gameId });
+ assert.equal(list.body.status, 'unmapped'); assert.equal(list.body.candidates.length, 2);
+ assert.equal((await x.post('workshop/mapping', { source: 'banana', gameId, id: '999' })).status, 400);
+ const selected = await x.post('workshop/mapping', { source: 'banana', gameId, id: '11' });
+ assert.equal(selected.status, 200); assert.equal(selected.body.banana, '11');
+ const result = await x.post('workshop/list', { source: 'banana', gameId, force: true });
+ assert.equal(result.body.items[0].name, 'Selected Squad Mod');
+ const saved = JSON.parse(await fs.readFile(path.join(x.root, 'data/settings.json'), 'utf8'));
+ assert.equal(saved.workshopMappings[gameId].banana, '11');
 });
 test('favorites persist per account, reject unobserved items, and serialize concurrent writes', async t => {
  const x = await fixture(t);

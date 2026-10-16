@@ -1,6 +1,7 @@
 [Unit]
-Description=MODDOCK private Nexus download backend
-After=network.target
+Description=MODDOCK private Nexus download API
+Wants=moddock-nexus-browser.service
+After=network.target moddock-nexus-browser.service
 StartLimitIntervalSec=0
 
 [Service]
@@ -12,10 +13,11 @@ Environment=MODDOCK_NEXUS_HOST=172.25.0.1
 Environment=MODDOCK_NEXUS_IMPORT_FILE=/home/xrw/moddock-nexus/data/import-session.json
 Restart=always
 RestartSec=10
-KillMode=mixed
+KillMode=control-group
 TimeoutStopSec=30
-MemoryMax=768M
-TasksMax=512
+MemoryHigh=192M
+MemoryMax=384M
+TasksMax=64
 NoNewPrivileges=true
 PrivateTmp=true
 UMask=0077

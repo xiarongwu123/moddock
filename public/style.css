@@ -152,6 +152,21 @@ body:has(.desktop-drag-region) .library-content{min-height:calc(100dvh - 136px)}
 .workshop-detail-actions{display:flex;flex-wrap:wrap;gap:10px;margin:22px 0}
 .workshop-detail-actions a{text-decoration:none}
 .workshop-detail-actions .is-saved{color:var(--accent);border-color:#b3f66b44}
+.mod-translation-bar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin:18px 0 14px;color:var(--muted);font-size:11px}
+.mod-translation-bar>div{display:flex;align-items:center;gap:12px}
+.mod-translation-bar .btn{white-space:nowrap}
+.mod-list-title{min-width:0;margin-bottom:8px}
+.mod-card .mod-list-title h3{margin-bottom:5px}
+.mod-card .mod-list-title h3 button{display:block;width:100%;padding:0;text-align:left;color:inherit;font:inherit;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.mod-original-name{display:block;max-width:100%;padding:0;color:#929e95;font-size:10px;line-height:1.7;text-align:left;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.mod-original-name:hover{color:var(--accent)}
+.mod-list-summary{margin-bottom:14px}
+.mod-card .mod-list-summary>.mod-list-description{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;height:40px;margin:0 0 6px}
+.mod-original-summary{font-size:10px;color:#919d95;line-height:1.8}
+.mod-original-summary summary{cursor:pointer;width:fit-content;color:#a7b69f}
+.mod-card .mod-original-summary>p{display:block;height:auto;max-height:160px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;margin:6px 0 0;font-size:10px;line-height:1.8;color:#98a49b}
+.mod-list-translation-status{font-size:10px;color:#8c9990;line-height:1.8}
+.mod-list-translation-status .text-link{font-size:10px;margin-left:6px}
 .workshop-drawer .resource-description{white-space:pre-wrap;line-height:1.9;color:#bac4be;font-size:13px;overflow-wrap:anywhere;max-height:none;margin-bottom:24px}
 .workshop-drawer h3{font-size:15px;margin:25px 0 14px}
 .workshop-requirements{font-size:12px;color:#bdc7bf;line-height:1.9;padding-left:20px}
@@ -256,3 +271,135 @@ body:has(.workshop-backdrop){overflow:hidden}
 .scan-settings .scan-diagnostics p{font-size:11px;overflow-wrap:anywhere;margin:10px 0 0}
 .scan-settings :is(button,summary):focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 @media(max-width:760px){.scan-settings-heading{align-items:flex-start;flex-direction:column;gap:20px}.scan-settings-actions{width:100%}.scan-settings-actions .btn{flex:1}.scan-summary{flex-wrap:wrap;gap:12px}.scan-last-run{margin-left:0;width:100%}.scan-location{flex-wrap:wrap}.scan-location-copy{min-width:60%}.scan-location-status{margin-left:30px}.scan-location .icon-button{margin-left:auto}}
+:root .install-advanced{font-size:12px;color:#98a8b8;position:relative}
+.install-advanced summary{cursor:pointer;padding:10px 8px;white-space:nowrap}
+.install-advanced[open]{padding:0 8px 8px;border:1px solid #343e49;border-radius:8px;background:#171c22}
+.install-advanced[open]>.btn{display:block;margin:6px 0;width:100%;text-align:left}
+
+/* Mod management keeps routine controls in the list and maintenance in dialogs. */
+.home-page:has(.mod-manager-content)>.home-backdrop{opacity:.24}
+.shell-topnav>.content.mod-manager-content{max-width:1440px;padding:30px 48px 48px}
+.manager-heading{display:flex;align-items:center;justify-content:space-between;gap:24px;margin:0 0 28px}
+.manager-heading h1{font-size:28px;letter-spacing:-.5px;margin:0 0 8px;line-height:1.3}
+.manager-heading p{font-size:13px;color:#8b9993;margin:0;line-height:1.6}
+.manager-browse{background:#1b2420;border-color:#37443b;color:#c8d3cb;font-size:12px;padding:10px 15px}
+.manager-browse svg{width:16px;height:16px}
+.manager-layout{display:grid;grid-template-columns:224px minmax(0,1fr);min-height:520px;border:1px solid #343e37;border-radius:16px;background:#141b18;box-shadow:0 16px 48px #0000001c;overflow:hidden}
+.manager-sidebar{display:flex;flex-direction:column;gap:5px;min-width:0;padding:24px 12px 20px;background:#151d19;border-right:1px solid #2b352e}
+.manager-sidebar-label{display:flex;align-items:center;justify-content:space-between;padding:0 10px 20px;font-size:11px;color:#a6b3aa;letter-spacing:.4px}
+.manager-sidebar-label>span{font-size:10px;color:#738279;letter-spacing:0}
+.manager-game{display:flex;align-items:center;gap:10px;width:100%;padding:11px 10px;min-height:52px;border:1px solid transparent;border-radius:9px;background:transparent;color:#a5b2a9;text-align:left;cursor:pointer;transition:background .16s,border-color .16s}
+.manager-game:hover{background:#ffffff05;color:#e0e8e1}
+.manager-game.is-selected{background:#afec6810;border-color:#b3f66b26;color:#d5efbc}
+.manager-game>span:nth-child(2){min-width:0;flex:1;font-size:12px;line-height:1.5;overflow:hidden;text-overflow:ellipsis}
+.manager-game>b{font-size:11px;font-weight:500;min-width:18px;text-align:center;color:#7e8f80}
+.manager-game.is-selected>b{color:#b3d493}
+.manager-all-icon,.manager-game-art{position:relative;display:grid;place-items:center;flex-shrink:0;width:34px;height:32px;border:1px solid #ffffff0a;border-radius:7px;background:#263028;overflow:hidden;color:#9bb28b}
+.manager-all-icon{background:#aee66e0b;border-color:#aee66e15}
+.manager-all-icon svg,.manager-game-art svg{width:17px;height:17px}
+.manager-game-art img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.manager-game-divider{height:1px;margin:8px 10px;background:#ffffff08}
+.manager-sidebar-note{display:flex;gap:9px;align-items:center;padding:32px 12px 0;margin-top:auto;font-size:11px;line-height:1.8;color:#6f8273}
+.manager-sidebar-note svg{width:16px;height:16px;flex-shrink:0;color:#829774}
+.manager-workspace{display:flex;flex-direction:column;min-width:0;background:#19211d}
+.manager-toolbar{display:flex;align-items:center;justify-content:space-between;gap:20px;min-height:80px;padding:18px 26px;border-bottom:1px solid #ffffff08}
+.manager-tabs{display:flex;gap:5px;flex-shrink:0;padding:4px;border:1px solid #ffffff06;border-radius:9px;background:#101713}
+.manager-tabs>button{display:flex;align-items:center;gap:9px;min-height:32px;padding:7px 14px;border:0;border-radius:6px;background:transparent;color:#829188;font-size:12px;cursor:pointer}
+.manager-tabs>button[aria-selected=true]{background:#2c392d;color:#c5e8a6;box-shadow:0 1px 4px #00000018}
+.manager-tabs>button>span{font-size:10px;color:#6f8276}
+.manager-tabs>button[aria-selected=true]>span{color:#9fbd87}
+.manager-search{display:flex;align-items:center;gap:8px;width:225px;min-width:120px;padding:9px 11px;border:1px solid #ffffff09;border-radius:8px;background:#141c18;color:#76867b}
+.manager-search>svg{width:15px;height:15px;flex-shrink:0}
+.manager-search input{padding:0;border:0;outline:0;background:transparent;color:#d9e2da;min-width:0;width:100%;font-size:12px}
+.manager-search input::placeholder{color:#748479}
+.manager-search:focus-within{border-color:#9cc76b70}
+.manager-search button{display:grid;place-items:center;border:0;padding:0;color:#95a497;background:transparent;cursor:pointer}
+.manager-search button svg{width:13px;height:13px}
+.manager-results{padding:4px 26px 24px;flex:1;min-width:0}
+.manager-group{margin-top:10px}
+.manager-group+.manager-group{margin-top:24px}
+.manager-group-head{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:62px}
+.manager-group-head>div:first-child{display:flex;align-items:center;gap:10px;min-width:0}
+.manager-group-head .manager-game-art{width:27px;height:27px;border-radius:6px;opacity:.85}
+.manager-group-head h3{font-size:12px;font-weight:500;line-height:1.6;color:#a6b6aa;overflow-wrap:anywhere;margin:0}
+.manager-group-head>div>span:last-child:not(.manager-game-art){font-size:10px;color:#667c6d}
+.manager-game-actions{display:flex;align-items:center;gap:6px;flex-shrink:0}
+.manager-settings-button,.manager-details-button{display:grid;place-items:center;width:30px;height:30px;border:0;border-radius:6px;background:transparent;color:#7c8f81;cursor:pointer}
+.manager-settings-button:hover,.manager-details-button:hover{background:#ffffff08;color:#d9e9d9}
+.manager-settings-button svg{width:15px;height:15px}
+.manager-details-button svg{width:15px;height:15px}
+.manager-launch.btn{border-color:#ffffff09;background:#ffffff03;color:#a6b9a3;min-height:30px;padding:6px 10px;font-size:10px}
+.manager-launch.btn svg{width:12px;height:12px}
+.manager-mod-list{overflow:visible;border:1px solid #ffffff0c;border-radius:10px;background:#202a23}
+.manager-mod-row.managed-row,.manager-mod-row{display:flex;align-items:center;flex-wrap:nowrap;gap:14px;min-height:84px;padding:18px 17px;margin:0;border:0;background:transparent;border-radius:0}
+.manager-mod-row+.manager-mod-row{border-top:1px solid #ffffff08}
+.manager-mod-icon{display:grid;place-items:center;width:40px;height:40px;flex-shrink:0;border:1px solid #d2f5b015;border-radius:10px;background:linear-gradient(145deg,#b9e69313,#b9e69306);color:#afcb94}
+.manager-mod-icon svg{width:20px;height:20px}
+.manager-mod-copy{min-width:0;flex:1}
+.manager-mod-name{display:block;max-width:100%;padding:0;border:0;background:transparent;text-align:left;font-size:13px;font-weight:550;line-height:1.6;color:#e0e7e0;cursor:pointer;overflow-wrap:anywhere}
+.manager-mod-name:hover{color:#b9f477}
+.manager-mod-copy h3{font-size:13px;font-weight:550;line-height:1.6;margin:0;color:#e0e7e0;overflow-wrap:anywhere}
+.manager-mod-copy p{display:flex;align-items:center;gap:7px;flex-wrap:wrap;font-size:11px;color:#829487;margin:5px 0 0;line-height:1.6}
+.manager-mod-copy p>span{color:#4e6554}
+.manager-state{font-size:11px;color:#718479;white-space:nowrap}
+.manager-state.is-enabled{color:#a4c98c}
+.manager-switch{position:relative;flex-shrink:0;width:32px;height:19px;padding:2px;border:1px solid #62726a;border-radius:20px;background:#46544a;cursor:pointer;transition:background .18s}
+.manager-switch>span{display:block;width:13px;height:13px;border-radius:50%;background:#bfcbc2;transition:transform .18s}
+.manager-switch[aria-checked=true]{border-color:#a9d66d;background:#a9d66d}
+.manager-switch[aria-checked=true]>span{background:#23351b;transform:translateX(13px)}
+.manager-mod-row.is-disabled .manager-mod-icon{color:#7d8f80;background:#ffffff03;border-color:#ffffff08}
+.manager-mod-row.is-disabled .manager-mod-name{color:#9ba99d}
+.manager-warning,.manager-update{display:inline-flex;align-items:center;gap:4px;border:0;padding:0;background:transparent;font-size:11px;line-height:1.6;color:#e2b07e;cursor:pointer}
+.manager-warning svg{width:12px;height:12px}
+.manager-update{color:#afd187}
+.manager-pending-row .install-advanced{flex-shrink:0;font-size:11px}
+.manager-pending-row .install-advanced[open]{position:relative;z-index:1}
+.manager-pending-row .btn.primary{font-size:11px;flex-shrink:0;padding:9px 13px}
+.manager-footer{display:flex;align-items:center;justify-content:center;gap:7px;padding:18px 24px;border-top:1px solid #ffffff06;font-size:10px;color:#74897a;line-height:1.7}
+.manager-footer svg{width:12px;height:12px;flex-shrink:0}
+.manager-results>.empty{min-height:300px;padding:60px 20px;background:transparent;border:0}
+.manager-results>.empty h3{font-size:16px;color:#c5d2c6}
+.manager-results>.empty p{font-size:12px}
+.manager-runs{margin:0 26px 20px;border-top:1px solid #ffffff0a;padding-top:15px;font-size:12px;color:#8ca38e}
+.manager-runs>summary{display:flex;align-items:center;gap:8px;cursor:pointer;list-style:none;width:fit-content}
+.manager-runs>summary::-webkit-details-marker{display:none}
+.manager-runs>summary svg{width:14px;height:14px}
+.manager-runs>summary svg:last-child{width:11px;height:11px;transform:rotate(90deg)}
+.manager-runs[open]>summary svg:last-child{transform:rotate(-90deg)}
+.manager-runs>div{padding-top:16px}
+.manager-runs h3{font-size:12px;color:#acbfae}
+.manager-runs .source-message{font-size:11px;background:#141c17;border-color:#2f3b31}
+.manager-runs .source-message b{display:none}
+.manager-modal{max-width:620px;background:#1b2420;border-color:#36443a}
+.manager-modal .modal-head{padding:24px 26px 20px;border-bottom:1px solid #ffffff08}
+.manager-modal .modal-head h2{font-size:18px;line-height:1.6;overflow-wrap:anywhere}
+.manager-modal .modal-body{padding:0 26px}
+.manager-modal .modal-foot{padding:20px 26px;border-top:1px solid #ffffff08}
+.manager-modal .modal-foot>.danger{margin-right:auto}
+.manager-detail-summary{display:flex;gap:14px;align-items:center;padding:22px 0}
+.manager-detail-summary p{font-size:13px;margin:0 0 6px;color:#d0dcd1}
+.manager-detail-summary span{font-size:11px;color:#91a593}
+.manager-detail-section{border-top:1px solid #ffffff0b;padding:22px 0}
+.manager-detail-section h3{font-size:13px;margin:0 0 8px;color:#d0ded1}
+.manager-detail-section p{font-size:12px;line-height:1.8;color:#91a294;margin:8px 0 0;overflow-wrap:anywhere}
+.manager-detail-section p.manager-warning{display:block;color:#e2b07e;cursor:default}
+.manager-detail-heading{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.manager-detail-heading h3{margin:0}
+.manager-detail-section>summary{cursor:pointer;font-size:12px;color:#b0c0b0}
+.manager-detail-section .plan-files{margin-top:15px;font-size:11px}
+.manager-detail-section .plan-files code{overflow-wrap:anywhere;word-break:break-word}
+.manager-detail-section .file-row{background:#151e18;border-color:#354038}
+.manager-detail-section .file-row strong{font-size:12px}
+.manager-detail-section .file-row small{font-size:11px}
+.manager-config{border-top:0}
+.manager-save-config{display:flex;gap:10px;margin-top:16px}
+.manager-save-config input{min-width:0;flex:1;font-size:12px;background:#111a14;border:1px solid #3a4a3b;border-radius:8px;padding:10px 12px;color:#dce8dc}
+.manager-save-config>.btn{font-size:12px;flex-shrink:0}
+.manager-config-help{font-size:11px;color:#7f9483;margin-top:16px}
+.manager-config-help summary{cursor:pointer}
+.manager-maintenance{display:flex;align-items:center;justify-content:space-between;gap:20px}
+.manager-maintenance>.btn{flex-shrink:0}
+.mod-manager-content :is(button,summary,input):focus-visible,.manager-modal :is(button,summary,input):focus-visible{outline:2px solid #b3e675;outline-offset:4px}
+@media(max-width:1100px){.shell-topnav>.content.mod-manager-content{padding:24px 28px 40px}.manager-layout{grid-template-columns:194px minmax(0,1fr)}.manager-toolbar{padding:16px 18px;gap:12px}.manager-search{width:180px}.manager-results{padding-inline:18px}.manager-mod-row.managed-row,.manager-mod-row{gap:10px;padding:16px 12px}.manager-state{display:none}.manager-game>span:nth-child(2){font-size:11px}.manager-runs{margin-inline:18px}}
+@media(max-width:760px){.shell-topnav>.content.mod-manager-content{padding:20px 18px 30px}.manager-heading{margin-bottom:20px;gap:12px}.manager-heading h1{font-size:24px}.manager-heading p{font-size:11px}.manager-browse{padding:8px 10px;font-size:11px}.manager-browse svg{display:none}.manager-layout{grid-template-columns:1fr;min-height:480px}.manager-sidebar{display:flex;flex-direction:row;align-items:center;gap:6px;overflow-x:auto;padding:12px;border-right:0;border-bottom:1px solid #2b352e}.manager-sidebar-label,.manager-sidebar-note,.manager-game-divider{display:none}.manager-game{width:auto;min-width:132px;max-width:220px;flex-shrink:0;min-height:42px;padding:6px 10px}.manager-game>span:nth-child(2){white-space:nowrap}.manager-game-art,.manager-all-icon{width:26px;height:26px}.manager-toolbar{min-height:74px;padding:14px;gap:12px}.manager-tabs>button{padding:7px 10px;gap:6px}.manager-search{width:160px}.manager-results{padding-inline:14px}.manager-group-head{min-height:58px}.manager-group-head h3{font-size:11px}.manager-launch.btn{font-size:0;gap:0;padding:7px}.manager-launch.btn svg{width:14px;height:14px}.manager-mod-copy p{font-size:10px}.manager-mod-name,.manager-mod-copy h3{font-size:12px}.manager-mod-icon{width:34px;height:34px}.manager-mod-row.managed-row,.manager-mod-row{gap:10px;min-height:80px}.manager-details-button{width:24px}.manager-footer{font-size:9px;padding:15px}.manager-pending-row{flex-wrap:wrap}.manager-pending-row .manager-mod-copy{min-width:60%}.manager-pending-row .install-advanced{margin-left:44px}.manager-pending-row>.btn{margin-left:auto}.manager-modal .modal-body{padding-inline:20px}.manager-maintenance{align-items:flex-start}.manager-save-config{flex-wrap:wrap}.manager-save-config input{min-width:180px}.manager-search input{font-size:11px}}
+@media(prefers-reduced-motion:reduce){.manager-game,.manager-switch,.manager-switch>span{transition:none}}

@@ -7,8 +7,7 @@ export LD_LIBRARY_PATH="$runtime/native/usr/lib/x86_64-linux-gnu${LD_LIBRARY_PAT
 export MODDOCK_NEXUS_SERVICE_DATA="$root/data"
 export MODDOCK_NEXUS_SERVER=1
 export MODDOCK_NEXUS_PORT=8095
-export XDG_RUNTIME_DIR="$root/runtime-state"
 umask 077
-mkdir -p "$XDG_RUNTIME_DIR"
-# Chromium uses the unprivileged namespace sandbox rather than a root-owned setuid helper.
-exec "$runtime/native/usr/bin/xvfb-run" -a -e "$XDG_RUNTIME_DIR/xvfb.log" -s '-screen 0 1100x850x24 -nolisten tcp' "$runtime/electron/electron" --disable-setuid-sandbox "$root/app/platform/nexus-worker.cjs"
+# Reuse the bundled Node runtime without starting Chromium in the API service.
+export ELECTRON_RUN_AS_NODE=1
+exec "$runtime/electron/electron" "$root/app/platform/nexus-worker.cjs"

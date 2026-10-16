@@ -20,12 +20,18 @@ app = runtime / 'resources/app'
 if app.exists():
     shutil.rmtree(app)
 app.mkdir(parents=True)
-for name in ['package.json', 'electron.cjs', 'server.cjs', 'sources.cjs', 'workshop.cjs', 'downloads.cjs', 'scanner.cjs', 'installers.cjs', 'nxm.cjs', 'nexus-authorization.cjs', 'nexus-platform-client.cjs', 'library.cjs', 'adapters.cjs', 'account.cjs', 'account-policy.cjs', 'account-token-store.cjs', 'nexus-games.json', 'nexus-app.json', 'nexus-sso.cjs', 'source-key-store.cjs', 'source-connections.cjs']:
+for name in ['package.json', 'electron.cjs', 'server.cjs', 'sources.cjs', 'workshop.cjs', 'downloads.cjs', 'scanner.cjs', 'installers.cjs', 'auto-install.cjs', 'install-rules.cjs', 'nxm.cjs', 'nexus-authorization.cjs', 'nexus-platform-client.cjs', 'library.cjs', 'adapters.cjs', 'account.cjs', 'account-policy.cjs', 'account-token-store.cjs', 'nexus-games.json', 'nexus-app.json', 'nexus-sso.cjs', 'source-key-store.cjs', 'source-connections.cjs']:
     shutil.copy2(project / name, app / name)
 for name in ['auth.js', 'auth.css']:
     assert (project / 'public' / name).is_file(), 'Run npm run build before packaging'
+for name in ['game-diagnostics.cjs', 'mod-studio.cjs', 'content-pack.cjs', 'universal-modder.cjs', 'studio-recipes.cjs', 'studio-conversations.cjs', 'studio-mu-client.cjs', 'studio-games.cjs', 'studio-preload.cjs', 'studio-migration.cjs', 'studio-lifecycle.cjs', 'studio-tools.cjs', 'studio-toolchain.cjs', 'larian-pak.cjs', 'bg3-mod.cjs', 'THIRD-PARTY-NOTICES.md']:
+    shutil.copy2(project / name, app / name)
+for name in ['studio-agent.cjs', 'studio-lua.cjs', 'bg3-controls.cjs', 'studio-control-host.cjs', 'bg3-extender.cjs', 'game-components.cjs', 'game-environment.cjs', 'studio-compiler-setup.cjs']:
+    shutil.copy2(project / name, app / name)
 (app / 'scripts').mkdir()
 shutil.copy2(project / 'scripts/build-ui.cjs', app / 'scripts/build-ui.cjs')
+shutil.copy2(project / 'scripts/universal-modder-bridge.py', app / 'scripts/universal-modder-bridge.py')
+shutil.copytree(project / 'vendor', app / 'vendor')
 shutil.copytree(project / 'public', app / 'public')
 copied = set()
 def dependency(name):
@@ -46,7 +52,7 @@ with zipfile.ZipFile(windows_zip, 'w', zipfile.ZIP_DEFLATED, compresslevel=6) as
     for file in sorted(runtime.rglob('*')):
         if file.is_file():
             archive.write(file, Path('Moddock') / file.relative_to(runtime))
-excluded = {'node_modules', '.git', '.demo-data', '.moddock-data', 'test-results', 'playwright-report', '__pycache__', 'output'}
+excluded = {'node_modules', '.git', '.demo-data', '.moddock-data', '.moddock-tools', '.moddock-private', '.playwright-cli', 'test-results', 'playwright-report', '__pycache__', 'output'}
 with zipfile.ZipFile(source_zip, 'w', zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
     for file in sorted(project.rglob('*')):
         if file.is_file() and not any(part in excluded for part in file.relative_to(project).parts):

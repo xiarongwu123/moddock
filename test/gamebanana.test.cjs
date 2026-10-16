@@ -45,7 +45,7 @@ test('GameBanana malformed search responses recover through the filtered game in
  });
 });
 
-test('GameBanana empty and ambiguous indexes stay unmapped without requesting mods', async t => {
+test('GameBanana absent and ambiguous indexes do not request unrelated mods', async t => {
  for (const records of [[], [{ ...record, _sName: 'RimWorld Classic' }], [record, { ...record, _idRow: 9999 }]]) await t.test(JSON.stringify(records), async () => {
   let calls = 0;
   const source = new Sources({ fetch: async value => {
@@ -55,17 +55,17 @@ test('GameBanana empty and ambiguous indexes stay unmapped without requesting mo
    return Response.json(url.pathname.includes('/Search/') ? {} : index(records));
   } });
   const result = await source.list('banana', game);
-  assert.equal(result.status, 'unmapped');
+  assert.equal(result.status, records.length ? 'unmapped' : 'unsupported');
   assert.equal(result.candidates.length, records.length);
   assert.equal(calls, 2);
  });
 });
 
-test('GameBanana valid empty search does not trigger a fallback', async () => {
+test('GameBanana valid empty search is checked against the dedicated index before reporting absence', async () => {
  let calls = 0;
  const source = new Sources({ fetch: async () => { calls++; return Response.json(index([])); } });
- assert.equal((await source.list('banana', game)).status, 'unmapped');
- assert.equal(calls, 1);
+ assert.equal((await source.list('banana', game)).status, 'unsupported');
+ assert.equal(calls, 2);
 });
 
 test('GameBanana fallback errors retain the provider code and host and can be retried', async () => {

@@ -1,0 +1,25 @@
+[Unit]
+Description=MODDOCK Nexus authorization browser
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=/home/xrw/moddock-nexus/app
+ExecStart=/bin/bash /home/xrw/moddock-nexus/app/platform/run-browser.sh /home/xrw/moddock-nexus
+Environment=MODDOCK_NEXUS_IMPORT_FILE=/home/xrw/moddock-nexus/data/import-session.json
+Restart=always
+RestartSec=2
+KillMode=control-group
+TimeoutStopSec=15
+MemoryHigh=1G
+MemoryMax=1280M
+TasksMax=512
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077
+LogRateLimitIntervalSec=30
+LogRateLimitBurst=50
+
+[Install]
+WantedBy=default.target

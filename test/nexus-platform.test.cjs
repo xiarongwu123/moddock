@@ -26,7 +26,7 @@ async function fixture(t, serviceOptions = {}) {
  const closers = [];
  const service = await createNexusService({ root, sources, authorizer, accessToken, fetch: async () => new Response(bytes, { headers: { 'Content-Length': String(bytes.length) } }), ...serviceOptions }); t.after(async () => { for (const close of closers) await close(); await service.close(); await fs.rm(root, { recursive: true, force: true }); });
  const gateway = createNexusPlatformClient({ url: service.url, accessToken }, { interval: 10 });
- return { root, contexts, cancelled, service, gateway, closers };
+ return { root, contexts, cancelled, service, gateway, closers, authorizer };
 }
 test('clients with no Nexus key share a backend session, wait for maintenance, and receive verified file bytes without grants', async t => {
  const x = await fixture(t), manager = new SourceConnections('test', { nexusPlatform: x.gateway }, { read: async () => ({ nexus: 'old-local-key' }), isAvailable: () => true });
@@ -87,6 +87,21 @@ test('the shared backend isolates MU owners for polling, cancellation and file a
  for (const [method, suffix] of [['GET', ''], ['DELETE', ''], ['GET', '/file']]) assert.equal((await fetch(x.service.url + '/jobs/' + job.id + suffix, { method, headers: headers('mu-bob') })).status, 404);
  assert.deepEqual(Buffer.from(await (await fetch(x.service.url + '/jobs/' + job.id + '/file', { headers: headers('mu-alice') })).arrayBuffer()), bytes);
 });
+test('verification pictures and clicks use the same owner isolation as downloads', async t => {
+ const calls = [], revision = crypto.randomUUID();
+ const x = await fixture(t, { requireOwner: true, verification: { view: async id => { calls.push(['view', id]); return { pending: true, revision, image: 'data:image/png;base64,dGVzdA==', width: 200, height: 100 }; }, click: async (id, input) => { calls.push(['click', id]); return input.revision === revision && input.x === 40 && input.y === 50; } } });
+ const headers = owner => ({ Authorization: 'Bearer ' + accessToken, 'X-Mu-Account-Id': owner, 'Content-Type': 'application/json' });
+ const job = await (await fetch(x.service.url + '/jobs', { method: 'POST', headers: headers('alice'), body: JSON.stringify({ domain: 'stardewvalley', modId: '99', fileId: '5' }) })).json();
+ await until(() => x.contexts.length === 1); x.authorizer.active = { context: { jobId: job.id }, state: 'verification_required' }; await x.contexts[0].onState('verification_required');
+ const state = await (await fetch(x.service.url + '/jobs/' + job.id, { headers: headers('alice') })).json(); assert.equal(state.verificationRequired, true);
+ for (const [method, suffix] of [['GET', '/verification'], ['POST', '/verification/click']]) assert.equal((await fetch(x.service.url + '/jobs/' + job.id + suffix, { method, headers: headers('bob'), ...(method === 'POST' ? { body: '{}' } : {}) })).status, 404);
+ assert.equal(calls.length, 0);
+ const frame = await (await fetch(x.service.url + '/jobs/' + job.id + '/verification', { headers: headers('alice') })).json(); assert.equal(frame.revision, revision);
+ const click = input => fetch(x.service.url + '/jobs/' + job.id + '/verification/click', { method: 'POST', headers: headers('alice'), body: JSON.stringify(input) });
+ assert.equal((await click({ revision, x: 40, y: 50 })).status, 200); assert.equal((await click({ revision, x: -1, y: 50 })).status, 409);
+ await x.contexts[0].receive(grant(5)); await until(() => x.service.downloads.jobs[0].status === 'completed');
+ assert.equal((await (await fetch(x.service.url + '/jobs/' + job.id + '/verification', { headers: headers('alice') })).json()).pending, false);
+});
 test('default MU clients use their MU login for platform downloads with no local Nexus configuration', async t => {
  const x = await fixture(t), { createServer } = require('../server.cjs'), { accountFixture } = require('./account-fixture.cjs'), { loginFixture } = require('./server-fixture.cjs');
  const clients = [], requests = [];
@@ -108,4 +123,28 @@ test('default MU clients use their MU login for platform downloads with no local
  await until(() => x.contexts.length === 2); for (const context of x.contexts) await context.receive(grant(5)); await until(() => clients.every(client => client.downloads.jobs[0].status === 'completed' && client.downloads.controllers.size === 0));
  assert.ok(requests.some(request => request.owner === 'mu-alice')); assert.ok(requests.some(request => request.owner === 'mu-bob'));
  for (const client of clients) assert.deepEqual(await fs.readFile(client.downloads.jobs[0].path), bytes);
+});
+test('the client forwards only its own active verification and resumes the original download after a user click', async t => {
+ let x;
+ const revision = crypto.randomUUID(), image = 'data:image/png;base64,dGVzdA==';
+ x = await fixture(t, { verification: { view: async () => ({ pending: true, revision, image, width: 200, height: 100 }), click: async (_id, input) => { assert.deepEqual(input, { revision, x: 40, y: 50 }); await x.contexts[0].receive(grant(5)); return true; } } });
+ const { createServer } = require('../server.cjs'), { accountFixture } = require('./account-fixture.cjs'), { loginFixture } = require('./server-fixture.cjs');
+ const account = accountFixture(), requests = [];
+ const service = await createServer({ root: path.join(x.root, 'client'), port: 0, scan: async () => ({ games: [game], diagnostics: [] }), accounts: { ...account.options, fetch: (url, init) => {
+  const pathname = new URL(url).pathname; if (!pathname.startsWith('/api/v1/nexus/')) return account.options.fetch(url, init);
+  requests.push(pathname); return fetch(x.service.url + pathname.slice('/api/v1/nexus'.length), { ...init, headers: { Authorization: 'Bearer ' + accessToken } });
+ } } });
+ x.closers.push(async () => { service.server.closeAllConnections(); await new Promise(resolve => service.server.close(resolve)); });
+ const auth = await loginFixture(service), post = (route, body) => auth.fetch(service.url + '/api/' + route, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Moddock-Token': auth.state.token }, body: JSON.stringify(body) });
+ const local = await (await post('downloads/start', { gameId: game.id, id: resource, fileId: '5', name: 'Verification fixture' })).json();
+ await until(() => x.contexts.length === 1); x.authorizer.active = { context: { jobId: x.contexts[0].jobId }, state: 'verification_required' }; await x.contexts[0].onState('verification_required');
+ await until(() => service.downloads.jobs[0].verificationRequired);
+ const frame = await (await post('downloads/verification', { id: local.id })).json(); assert.equal(frame.revision, revision);
+ assert.equal((await post('downloads/verification', { id: crypto.randomUUID() })).status, 400);
+ assert.equal((await post('downloads/verification-click', { id: local.id, revision, x: 40, y: 50 })).status, 200);
+ await until(() => service.downloads.jobs[0].status === 'completed' && service.downloads.controllers.size === 0);
+ assert.equal(service.downloads.jobs[0].id, local.id); assert.equal(service.downloads.verifications.size, 0); assert.equal(service.downloads.jobs[0].verificationRequired, undefined);
+ assert.ok(requests.some(route => route.endsWith('/verification/click')));
+ const history = await fs.readFile(path.join(service.downloads.root, 'history.json'), 'utf8'); assert.ok(!history.includes(image)); assert.ok(!history.includes(x.contexts[0].jobId));
+ assert.equal((await post('downloads/verification', { id: local.id })).status, 400);
 });

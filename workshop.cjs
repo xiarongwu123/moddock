@@ -28,18 +28,19 @@ function catalog(localGames = []) {
 }
 
 class Workshop {
- constructor(root, localGames) { this.root = path.join(root, 'workshop'); this.localGames = localGames; this.queues = new Map(); this.items = new Map(); }
+ constructor(root, localGames, mappings = () => ({})) { this.root = path.join(root, 'workshop'); this.localGames = localGames; this.mappings = mappings; this.queues = new Map(); this.items = new Map(); }
  remember(items) {
   for (const item of items) {
    if (this.items.size >= 2000) this.items.delete(this.items.keys().next().value);
    this.items.set(`${item.gameId}/${item.id}`, item);
   }
  }
- games() { return catalog(this.localGames()); }
+ games() { return catalog(this.localGames()).map(game => ({ ...game, ...this.mappings()[game.id] })); }
  game(id) {
-  const game = this.games().find(game => game.id === id);
+  const games = this.games(), mapping = this.mappings()[id];
+  const game = games.find(game => game.id === id) || (mapping?.nexus ? games.find(game => game.nexus === mapping.nexus) : null);
   if (!game) throw new Error('游戏不在工坊目录中，请重新选择游戏');
-  return game;
+  return { ...game, id };
  }
  list({ query = '', page = 1, scope = 'all' } = {}) {
   if (typeof query !== 'string' || query.length > 160 || !Number.isInteger(page) || page < 1 || page > 1000 || !['all', 'installed'].includes(scope)) throw new Error('游戏目录查询参数无效');

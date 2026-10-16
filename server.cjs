@@ -17,6 +17,13 @@ const { Workshop, sameGame } = require('./workshop.cjs');
 const { SourceConnections } = require('./source-connections.cjs');
 const { NexusSso } = require('./nexus-sso.cjs');
 const { createMuNexusPlatformClient } = require('./nexus-platform-client.cjs');
+const { ModStudio, studioAccess } = require('./mod-studio.cjs');
+const { StudioLifecycle } = require('./studio-lifecycle.cjs');
+const { StudioControlHost } = require('./studio-control-host.cjs');
+const { BG3Extender } = require('./bg3-extender.cjs');
+const { GameEnvironment } = require('./game-environment.cjs');
+const { resolveStudioGame, mergeStudioGames } = require('./studio-games.cjs');
+const { createMuStudioAI } = require('./studio-mu-client.cjs');
 async function createServer(options = {}) {
  await ensureUi();
  const accounts = createAccountClient(options.accounts);
@@ -30,20 +37,36 @@ async function createServer(options = {}) {
  const configPath = path.join(root, 'settings.json'); let config = { scanPaths: [], mappings: {}, autoImport:true };
  try { config = { ...config, ...JSON.parse(await fs.readFile(configPath, 'utf8')) }; } catch (e) { if (e.code !== 'ENOENT') throw e; }
  const saveConfig = async () => { await fs.writeFile(configPath + '.tmp', JSON.stringify(config, null, 2)); await fs.rename(configPath + '.tmp', configPath); };
- const doScan = options.scan || scan; let scanResult = await doScan(config.scanPaths);
+ const doScan = async paths => mergeStudioGames(await (options.scan || scan)(paths), config.localGames); let scanResult = await doScan(config.scanPaths);
  let choosingScanDirectory = false;
  const token = crypto.randomBytes(32).toString('hex'); const sources = new Sources({ ...sourceOptions, nexusPlatform: sourceOptions.nexusPlatform || sourceOptions.nexusPlatformFactory?.(null) }); const downloads = await new Downloads(root, sources, options.downloads).open();
  const connections = new SourceConnections(accounts.config.legalUrls.terms, sourceOptions, options.sourceKeyStore);
  const sso = new NexusSso({ application: process.env.MODDOCK_NEXUS_APP_ID || require('./nexus-app.json').application, ...options.nexusSso });
  const installers = await new Installers(root, downloads, options.installers).open();
+ const bg3Extender = new BG3Extender(root, installers, options.bg3Extender);
+ const gameEnvironment = new GameEnvironment(root, installers, bg3Extender, { ...options.gameEnvironment,
+  fetch: options.gameEnvironment?.fetch || options.bg3Extender?.fetch,
+  contentPatcher: options.gameEnvironment?.contentPatcher || installContentPatcher });
  const library=new ModLibrary(downloads,installers,sources);
- const workshop = new Workshop(root, onlineGames);
+ const managedStudio = options.studio === undefined ? createMuStudioAI((owner, route, init) => {
+  const sessionId = [...sessionOwners].find(([, id]) => id === owner)?.[0];
+  return accounts.studioRequest(sessionId, owner, route, init);
+ }) : {};
+ const studio = new ModStudio(root, { ...managedStudio, ...options.studio, tools: {
+  directory: path.join(root, 'toolchain'), fetch: options.gameEnvironment?.fetch || options.bg3Extender?.fetch, ...options.studio?.tools } });
+ const lifecycle = new StudioLifecycle(studio, downloads, library, installers);
+ const controls = new StudioControlHost(lifecycle);
+ studio.options.lifecycle = lifecycle;
+ studio.options.ensureEnvironment = context => gameEnvironment.ensure(context);
+ studio.options.runtimeCheck = context => lifecycle.runtime(context);
+ const workshop = new Workshop(root, onlineGames, () => config.workshopMappings || {});
  downloads.onCompleted=async job=>{if(!job.game.installPath){job.import={status:'unbound',message:'已下载，关联本机游戏后可预览安装'};await downloads.save();}else if(config.autoImport!==false)await library.import(job.game,job.id);};
  const nexusTargets = new Map();
  let nxmStatus=null; const pendingNxm=new Map();
  let nxmQueue=Promise.resolve();
  function releaseOwner(owner) {
   if (!owner) return;
+  studio.cancelOwner(owner);
   sso.forget(owner);
   options.cancelAuthorization?.(owner);
   const entry = connections.entries.get(owner);
@@ -85,6 +108,38 @@ async function createServer(options = {}) {
  }
  function onlineGames() { return scanResult.games.map(g => { const known = sourceGames.find(s => (g.appId && s.appId === g.appId) || [s.name, s.searchName].some(n => n.toLowerCase() === g.name.toLowerCase())); return { ...known, ...g, searchName: known?.searchName || g.name, ...config.mappings[g.id] }; }); }
  function downloadGame(id) { return onlineGames().find(g => g.id === id) || workshop.game(id); }
+ async function installContentPatcher(context) {
+  const { sources: client } = await connections.get(context.owner);
+  if (!client.nexusPlatform) throw new Error('Content Patcher 需要 MU 平台官方文件通道；请稍后重试，无需配置个人 Key');
+  await context.authorize('library.manage');
+  const resource = 'nexus:stardewvalley:1915', detail = await client.detail({ ...context.game, nexus: 'stardewvalley' }, resource);
+  const file = detail.files.filter(file => file.category === 'MAIN' && /\.zip$/i.test(file.name) && file.size > 0 && file.size < 32 * 1024 ** 2).sort((a, b) => Number(b.id) - Number(a.id))[0];
+  if (!file) throw new Error('官方 Content Patcher 主文件暂不可用，请稍后重试');
+  let job = downloads.jobs.find(job => job.gameId === context.game.id && job.resourceId === resource && job.fileId === file.id && job.status === 'completed');
+  if (!job) {
+   const view = downloads.start({ ...context.game, nexus: 'stardewvalley' }, resource, file.id, 'Content Patcher · 创作前置', undefined, client);
+   job = downloads.jobs.find(job => job.id === view.id);
+   const deadline = Date.now() + 180000;
+   while (['queued', 'running'].includes(job.status) && Date.now() < deadline) {
+    if (!context.current() || context.signal?.aborted) { downloads.cancel(job.id); throw new Error('账号已切换，已取消前置下载'); }
+    await new Promise(resolve => setTimeout(resolve, 400));
+   }
+   if (job.status !== 'completed') { if (['queued', 'running'].includes(job.status)) downloads.cancel(job.id); throw new Error('Content Patcher 前置下载未完成：' + job.message); }
+  }
+  await context.authorize('library.manage'); if (!context.current()) throw new Error('账号已切换');
+  const importDeadline = Date.now() + 30000;
+  while (downloads.controllers.has(job.id) && Date.now() < importDeadline) await new Promise(resolve => setTimeout(resolve, 100));
+  if (downloads.controllers.has(job.id)) throw new Error('Content Patcher 文件仍在校验，请稍后重试');
+  const inspected = await installers.inspect(context.game, job.id);
+  const manifests = inspected.filter(file => /(?:^|\/)manifest\.json$/i.test(file.path));
+  if (manifests.length !== 1) throw new Error('Content Patcher 官方包结构不明确');
+  const prepared = await installers.prepare(context.game, job.id, { mode: 'smapi', destination: 'Mods', requires: ['StardewModdingAPI.dll'] });
+  try {
+   if (prepared.units.length !== 1 || prepared.units[0].id !== 'Pathoschild.ContentPatcher') throw new Error('下载包不是官方 Content Patcher');
+   await context.authorize('library.manage'); if (!context.current()) throw new Error('账号已切换');
+   await installers.apply(context.game, prepared.id);
+  } finally { await installers.discard(prepared.id); }
+ }
  async function authorizeFile(owner, sessionId, client, game, resourceId, fileId, job) {
   if (client.nexusPlatform) throw new Error('文件由平台下载服务自动准备，无需客户端授权');
   if (!options.authorize) throw new Error('软件内文件授权需要桌面版');
@@ -143,10 +198,13 @@ async function createServer(options = {}) {
     if (req.method === 'GET' && url.pathname === '/api/account/plans') return send(await accounts.plans(sessionId));
     if (req.method === 'GET' && url.pathname === '/api/account/orders') return send(await accounts.orders(sessionId));
     if (req.method === 'GET' && url.pathname.startsWith('/api/account/orders/')) return send(await accounts.order(sessionId, decodeURIComponent(url.pathname.slice('/api/account/orders/'.length))));
-    if (req.method === 'GET' && url.pathname === '/api/state') return send({ scan: scanResult, token, games: scanResult.games, sourceGames: onlineGames(), providers, connections: await connections.status(profile.id), nexusSso: sso.status(profile.id), jobs: downloads.view(), installations: installers.view(onlineGames()), scanPaths: config.scanPaths, canChooseScanDirectory: typeof options.chooseScanDirectory === 'function', mappings: config.mappings, downloadPath: downloads.root, autoImport:config.autoImport!==false, recipes, nxmStatus: nxmStatus?.owner === profile.id ? nxmStatus : null, nexusAuthorizationWindow:!!options.authorize, nxmProtocol:options.protocolStatus?.()||false });
+    if (req.method === 'GET' && url.pathname === '/api/state') return send({ scan: scanResult, token, games: scanResult.games, sourceGames: onlineGames(), providers, connections: await connections.status(profile.id), nexusSso: sso.status(profile.id), jobs: downloads.view(profile.id), installations: installers.view(onlineGames()), studio: studio.status(profile), scanPaths: config.scanPaths, canChooseScanDirectory: typeof options.chooseScanDirectory === 'function', mappings: config.mappings, downloadPath: downloads.root, autoImport:config.autoImport!==false, recipes, nxmStatus: nxmStatus?.owner === profile.id ? nxmStatus : null, nexusAuthorizationWindow:!!options.authorize, nxmProtocol:options.protocolStatus?.()||false });
     if (req.method !== 'POST' || req.headers['x-moddock-token'] !== token) return send({ error: '请求未授权' }, 403);
     if (req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) return send({ error: '请求来源无效' }, 403);
-    let raw = ''; for await (const chunk of req) { raw += chunk; if (raw.length > 16384) return send({ error: '请求过大' }, 413); } const body = JSON.parse(raw || '{}');
+    const bodyLimit = ['/api/studio/save', '/api/studio/generate'].includes(url.pathname) ? 128 * 1024 : 16384;
+    let requestBytes = 0; const chunks = [];
+    for await (const chunk of req) { requestBytes += chunk.length; if (requestBytes > bodyLimit) return send({ error: '请求过大' }, 413); chunks.push(chunk); }
+    const body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
     if (url.pathname === '/api/auth/code') return send(await accounts.sendCode(body));
     if (url.pathname === '/api/auth/restore') {
      const result = await accounts.restore();
@@ -191,8 +249,94 @@ async function createServer(options = {}) {
     }));
     if (url.pathname === '/api/nexus/sso/cancel') { sso.cancel(profile.id, body.id); return send(sso.status(profile.id)); }
     const game = () => { const g = onlineGames().find(g => g.id === body.gameId); if (!g) throw new Error('请先扫描并选择本机安装的游戏'); return g; };
+    const ensureEnvironment = target => gameEnvironment.ensure({ game: target, owner: profile.id,
+     current: () => sessionOwners.get(sessionId) === profile.id,
+     authorize: async feature => {
+      const permission = await accounts.authorize(sessionId, feature);
+      if (permission.account.id !== profile.id || sessionOwners.get(sessionId) !== profile.id) throw new Error('账号已切换，操作已停止');
+     } });
+    const creationJob = downloads.jobs.find(job => job.source === 'studio' && (job.id === body.jobId || job.id === body.id || installers.plans.get(body.id)?.jobId === job.id));
+    if (creationJob && creationJob.creationOwner !== profile.id) throw new AccountError(403, 'creation_owner_mismatch', '此内容包不属于当前账号');
+    if (creationJob) {
+     const permission = await accounts.authorize(sessionId, 'library.manage');
+     if (permission.account.id !== profile.id || !studioAccess(permission.account)) throw new AccountError(403, 'pro_required', '创作项目的导入与安装需要 Pro 权限。');
+    }
+    if (url.pathname.startsWith('/api/studio/')) {
+     const permission = await accounts.authorize(sessionId, 'library.manage');
+     if (permission.account.id !== profile.id || !studioAccess(permission.account)) throw new AccountError(403, 'pro_required', 'AI Mod 创作工作台为 Pro 高级功能。');
+     const owner = profile.id;
+     const current = () => sessionOwners.get(sessionId) === owner;
+     if (url.pathname === '/api/studio/games/add') {
+      if (!options.chooseStudioGame) throw new Error('请在桌面端选择或拖入本机游戏');
+      const selected = body.path || await options.chooseStudioGame();
+      if (!current()) throw new Error('账号已切换');
+      if (!selected) return send({ cancelled: true });
+      const added = await resolveStudioGame(selected, scanResult.games);
+      const freshPermission = await accounts.authorize(sessionId, 'configuration.edit');
+      if (!current() || freshPermission.account.id !== owner || !studioAccess(freshPermission.account)) throw new Error('账号或 Pro 权限已变化，操作已停止');
+      if (!scanResult.games.some(game => game.id === added.id)) {
+       if ((config.localGames || []).length >= 50) throw new Error('最多添加 50 个本机游戏');
+       const previous = config.localGames; config.localGames = [...(previous || []), added];
+       try { await saveConfig(); } catch (error) { config.localGames = previous; throw error; }
+       scanResult = mergeStudioGames(scanResult, [added]);
+      }
+      return send({ game: added });
+     }
+     const target = game();
+     if (url.pathname === '/api/studio/environment') return send(await gameEnvironment.status(target));
+     if (url.pathname === '/api/studio/prepare-environment') return send(await ensureEnvironment(target));
+     if (url.pathname === '/api/studio/conversations/list') return send({ items: await studio.conversations.list(owner, target) });
+     if (url.pathname === '/api/studio/conversations/read') return send(await studio.conversations.read(owner, target, body.id));
+     const authorize = async feature => {
+      const permission = await accounts.authorize(sessionId, feature);
+      if (!current() || permission.account.id !== owner || !studioAccess(permission.account)) throw new AccountError(403, 'pro_required', '账号或 Pro 权限已变化，操作已停止。');
+     };
+     if (url.pathname === '/api/studio/library') return send(await lifecycle.keep({ owner, game: target, artifactId: body.id, current, authorize }));
+     if (url.pathname === '/api/studio/controls' || url.pathname === '/api/studio/controls/update' || url.pathname === '/api/studio/controls/action-status') {
+      const context = { owner, game: target, artifactId: body.id, current, authorize };
+      return send(url.pathname.endsWith('/update') ? await controls.update(context, body) : url.pathname.endsWith('/action-status') ? await controls.actionStatus(context, body.nonce) : await controls.get(context));
+     }
+     if (url.pathname === '/api/studio/conversations/send') return send(await studio.conversations.send(owner, target, body, current, authorize), 202);
+     if (url.pathname === '/api/studio/workspace') return send(await studio.workspace(target));
+     if (url.pathname === '/api/studio/diagnose') return send((await studio.workspace(target)).diagnostic);
+     if (url.pathname === '/api/studio/reference') return send({ text: await studio.integration.document(body.path) });
+     if (url.pathname === '/api/studio/list') return send({ items: await studio.list(owner, target.id) });
+     if (url.pathname === '/api/studio/save') return send(await studio.save(owner, target, body.draft));
+     if (url.pathname === '/api/studio/read') { const item = await studio.read(owner, body.id); if (item.gameId !== target.id) throw new Error('创作不属于当前游戏'); return send(item); }
+     if (url.pathname === '/api/studio/preview') return send(await studio.preview(owner, target, body.id));
+     if (url.pathname === '/api/studio/toolchain') { const item = await studio.read(owner, body.id); if (item.gameId !== target.id) throw new Error('创作不属于当前游戏'); return send({ report: item.toolchain, environment: await studio.toolchain.environment() }); }
+     if (url.pathname === '/api/studio/delete') return send(await studio.remove(owner, target, body.id));
+     if (url.pathname === '/api/studio/generate') return send(await studio.generate(owner, target, body, current));
+     if (url.pathname === '/api/studio/cancel') { studio.cancelOwner(owner); return send({ ok: true }); }
+     if (url.pathname === '/api/studio/export' || url.pathname === '/api/studio/prepare') {
+      if (url.pathname === '/api/studio/export') { const { item, bytes } = await studio.archive(owner, target, body.id); const buildId = body.buildId || (['bg3-lua', 'bg3-follower'].includes(item.adapterId) && !body.source ? item.toolchain?.id : null); if (['bg3-lua', 'bg3-follower'].includes(item.adapterId) && !body.source && !body.buildId && !item.toolchain?.bundle) throw new Error('尚未生成可导出的 BG3 Mod 包，请先完成编译与打包'); return send(buildId ? await studio.toolchain.bundle(owner, target, item.id, buildId) : { filename: item.draft.name + '.zip', base64: bytes.toString('base64') }); }
+      const saved = await studio.read(owner, body.id);
+      if (!saved.toolchain) await studio.toolchain.run(owner, target, body.id, await studio.workspace(target), { current, authorize });
+      const { item, bytes } = await studio.deploymentArchive(owner, target, body.id);
+      const rule = await studio.ruleFor(target, item, installers.getProfile(target).rule);
+      await ensureEnvironment(target);
+      const imported = await downloads.importCreation(target, item, bytes, owner);
+      await library.import(target, imported.id);
+      return send(await installers.prepare(target, imported.id, rule));
+     }
+     throw new Error('未知创作操作');
+    }
     if (url.pathname === '/api/workshop/catalog') return send(workshop.list(body));
     if (url.pathname === '/api/workshop/game') return send(workshop.game(body.gameId));
+    if (url.pathname === '/api/workshop/mapping') {
+     const g = workshop.game(body.gameId), source = body.source;
+     if (!['nexus', 'banana'].includes(source)) throw new Error('来源匹配参数无效');
+     const candidate = sources.binding(source, g).candidates?.find(item => item.id === body.id);
+     if (!candidate) throw new Error('候选专区已更新，请重新查询后选择');
+     if (!(source === 'nexus' ? /^[a-z0-9_-]{1,80}$/ : /^[1-9]\d{0,14}$/).test(candidate.id)) throw new Error('候选专区标识无效');
+     const previous = config.workshopMappings || {}, previousLocal = config.mappings;
+     config.workshopMappings = { ...previous, [g.id]: { ...previous[g.id], [source]: candidate.id } };
+     config.mappings = { ...previousLocal };
+     for (const id of g.localIds) config.mappings[id] = { ...previousLocal[id], [source]: candidate.id };
+     try { await saveConfig(); } catch (error) { config.workshopMappings = previous; config.mappings = previousLocal; throw error; }
+     sources.cache.clear(); sources.gameIds.clear();
+     return send(workshop.game(g.id));
+    }
     if (url.pathname === '/api/workshop/list') {
      const g = workshop.game(body.gameId);
      if (body.force === true) sources.cache.clear();
@@ -227,22 +371,68 @@ async function createServer(options = {}) {
     if(url.pathname==='/api/updates/check')return send(await new ModLibrary(downloads,installers,sources).checkUpdates(game()));
     if(url.pathname==='/api/updates/download')return send(await new ModLibrary(downloads,installers,sources).downloadUpdate(game(),body.id,body.fileId));
     if(url.pathname==='/api/loadouts/save')return send(await installers.saveLoadout(game(),body.name));
-    if(url.pathname==='/api/loadouts/switch')return send(await installers.switchLoadout(game(),body.id));
+    if(url.pathname==='/api/loadouts/switch'){const target=game();await ensureEnvironment(target);return send(await installers.switchLoadout(target,body.id));}
     if(url.pathname==='/api/loadouts/delete')return send(await installers.deleteLoadout(game(),body.id));
     if(url.pathname==='/api/nexus/receive')return send(await receiveNxm(body.url,body.gameId,sessionId));
     if(url.pathname==='/api/nexus/authorize'){const g=downloadGame(body.gameId);const job=downloads.jobs.find(j=>j.gameId===g.id&&j.resourceId===body.id&&j.fileId===String(body.fileId)&&j.status==='authorization_required');await authorizeFile(profile.id,sessionId,sources,g,body.id,body.fileId,job);return send({ok:true});}
     if (url.pathname === '/api/installations/profile') return send(await installers.setProfile(game(), body.rule));
     if (url.pathname === '/api/installations/inspect') return send(await installers.inspect(game(), body.jobId));
-    if (url.pathname === '/api/installations/plan') return send(await installers.prepare(game(), body.jobId));
+    if (url.pathname === '/api/installations/auto') {
+     const job=downloads.jobs.find(j=>j.id===body.jobId&&j.status==='completed');
+     if(!job)throw new Error('请选择已经下载完成的 MOD');
+     let target=onlineGames().find(g=>g.id===job.gameId);
+     if(!target&&job.gameId.startsWith('catalog:')){
+      const catalog=workshop.game(job.gameId),matches=onlineGames().filter(g=>sameGame(catalog,g));
+      if(matches.length!==1)throw new Error(matches.length?'检测到多个安装位置，请先选择要安装的游戏':'请先安装这款游戏并扫描游戏库');
+      target=matches[0];job.game=target;job.gameId=target.id;job.gameName=target.name;await downloads.save();
+     }
+     if(!target)throw new Error('请重新扫描，确认游戏仍在本机');
+     await ensureEnvironment(target);
+     let context={};
+     if(job.resourceId.startsWith('nexus:')){
+      const resource=sources.resource(target,job.resourceId),detail=await sources.detail(target,job.resourceId);
+      const file=detail.files.find(file=>file.id===job.fileId);if(!file)throw new Error('所选 Nexus 文件已下架，请重新选择');
+      context={domain:resource.domain,url:`https://www.nexusmods.com/${resource.domain}/mods/${resource.id}`,description:detail.description,fileDescription:file.description,requirements:detail.requirementDetails||detail.requirements||[]};
+     }
+     if (job.source === 'studio') {
+      const rule = await studio.ruleFor(target, job.studio || { adapterId: 'dialogue', draft: { kind: 'dialogue' } }, installers.getProfile(target).rule);
+      const plan = await installers.prepare(target, job.id, rule);
+      try { return send(await installers.apply(target, plan.id, true)); } catch (error) { await installers.discard(plan.id).catch(() => {}); throw error; }
+     }
+     return send(await installers.installAuto(target,job.id,context));
+    }
+    if (url.pathname === '/api/installations/restore') return send(await installers.restoreNative(game()));
+    if (url.pathname === '/api/installations/plan') {
+     const target = game(), rule = creationJob ? await studio.ruleFor(target, creationJob.studio || { adapterId: 'dialogue', draft: { kind: 'dialogue' } }, installers.getProfile(target).rule) : undefined;
+     await ensureEnvironment(target);
+     return send(await installers.prepare(target, body.jobId, rule));
+    }
     if (url.pathname === '/api/installations/discard') return send(await installers.discard(body.id));
-    if (url.pathname === '/api/installations/apply') return send(await installers.apply(game(), body.id, body.allowOverwrite === true));
-    if (url.pathname === '/api/installations/action') return send(await installers.action(game(), body.id, body.action));
-    if (url.pathname === '/api/installations/launch') return send(await installers.launch(game()));
+    if (url.pathname === '/api/installations/apply') { const target = game(); await ensureEnvironment(target); return send(await installers.apply(target, body.id, body.allowOverwrite === true)); }
+    if (url.pathname === '/api/installations/action') { const target = game(); if (body.action === 'enable') await ensureEnvironment(target); return send(await installers.action(target, body.id, body.action)); }
+    if (url.pathname === '/api/installations/launch') {
+     const target=game();
+     if(installers.state.mods.some(mod=>mod.gameId===target.id&&mod.profile.mode==='bg3'&&(mod.status==='enabled'||body.enabledModIds?.includes(mod.id))))await ensureEnvironment(target);
+     if(Array.isArray(body.enabledModIds)&&installers.state.mods.some(mod=>mod.gameId===target.id&&mod.status!==(body.enabledModIds.includes(mod.id)?'enabled':'disabled')))await accounts.authorize(sessionId,'library.manage');
+     return send(await installers.launch(target,body.enabledModIds));
+    }
     if (url.pathname === '/api/installations/run') return send(await installers.checkRun(game(), body.id));
     if (url.pathname === '/api/sources/list') { if (body.force === true) sources.cache.clear(); return send(await sources.list(body.source, game(), body.query || '', body.page ?? 1)); }
     if (url.pathname === '/api/sources/detail') { const detail = await sources.detail(game(), body.id); return send({ ...detail, files: detail.files.map(({ _url, md5, ...f }) => f) }); }
     if (url.pathname === '/api/sources/connection') { if (body.source === 'nexus') sso.cancel(profile.id); return send(await connectSource(profile.id,body.source,body.key)); }
     if (url.pathname === '/api/downloads/start') return send(downloads.start(downloadGame(body.gameId), body.id, body.fileId, body.name,undefined,sources));
+    if (url.pathname === '/api/downloads/verification' || url.pathname === '/api/downloads/verification-click') {
+     const controller = new AbortController();
+     const cancel = () => { if (!res.writableEnded) controller.abort(); };
+     res.on('close', cancel);
+     try {
+      await accounts.authorize(sessionId, 'library.manage');
+      if (controller.signal.aborted) return;
+      const result = await downloads.verification(body.id, sources, url.pathname.endsWith('-click') ? { revision: body.revision, x: body.x, y: body.y } : undefined, { signal: controller.signal });
+      if (!controller.signal.aborted) return send(result);
+     } finally { res.off('close', cancel); }
+     return;
+    }
     if (url.pathname === '/api/downloads/cancel') { downloads.cancel(body.id); options.cancelAuthorization?.(profile.id, body.id); return send({ ok: true }); }
     if (url.pathname === '/api/downloads/file') { const file = await downloads.completedFile(body.id); res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(file.name)}` }); createReadStream(file.file).pipe(res); return; }
     if (url.pathname === '/api/downloads/reveal') { const file = await downloads.completedFile(body.id); if (!options.reveal) throw new Error('此功能需要桌面版'); await options.reveal(file.file); return send({ ok: true }); }
@@ -280,11 +470,12 @@ async function createServer(options = {}) {
     }
     return send({ error: '接口不存在' }, 404);
    }
-   const files = { '/': 'index.html', '/app.js': 'app.js', '/style.css': 'style.css', '/auth.js': 'auth.js', '/auth.css': 'auth.css', '/splash.svg': 'splash.svg', '/splash-preview.html': 'splash-preview.html', '/splash-preview.css': 'splash-preview.css', '/splash-preview.js': 'splash-preview.js', '/logo-loading.svg': 'logo-loading.svg', '/logo-loading-preview.html': 'logo-loading-preview.html', '/fonts/fusion-pixel-12px-proportional-zh_hans.woff2': 'fonts/fusion-pixel-12px-proportional-zh_hans.woff2' }; const name = files[url.pathname] || (/^\/covers\/\d+\.jpg$/.test(url.pathname) ? url.pathname.slice(1) : undefined); if (!name) { res.writeHead(404); return res.end('Not found'); }
-   res.setHeader('Content-Security-Policy', "default-src 'self'; img-src 'self' https://cdn.akamai.steamstatic.com https://shared.akamai.steamstatic.com https://staticdelivery.nexusmods.com https://images.gamebanana.com https://images.steamusercontent.com https://steamuserimages-a.akamaihd.net data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'");
+   const files = { '/': 'index.html', '/favicon.svg': 'favicon.svg', '/favicon.ico': 'favicon.svg', '/app.js': 'app.js', '/style.css': 'style.css', '/auth.js': 'auth.js', '/auth.css': 'auth.css', '/splash.svg': 'splash.svg', '/splash-preview.html': 'splash-preview.html', '/splash-preview.css': 'splash-preview.css', '/splash-preview.js': 'splash-preview.js', '/logo-loading.svg': 'logo-loading.svg', '/logo-loading-preview.html': 'logo-loading-preview.html', '/youxia-ai-mascot.png': 'youxia-ai-mascot.png', '/youxia-ai-mascot.svg': 'youxia-ai-mascot.svg', '/mascot-preview.html': 'mascot-preview.html', '/mascot-preview.css': 'mascot-preview.css', '/mascot-preview.js': 'mascot-preview.js', '/fonts/fusion-pixel-12px-proportional-zh_hans.woff2': 'fonts/fusion-pixel-12px-proportional-zh_hans.woff2' }; const name = files[url.pathname] || (/^\/covers\/\d+\.jpg$/.test(url.pathname) ? url.pathname.slice(1) : undefined); if (!name) { res.writeHead(404); return res.end('Not found'); }
+   res.setHeader('Content-Security-Policy', "default-src 'self'; img-src 'self' https://cdn.akamai.steamstatic.com https://shared.akamai.steamstatic.com https://staticdelivery.nexusmods.com https://images.gamebanana.com https://images.steamusercontent.com https://steamuserimages-a.akamaihd.net data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https://api.translate.zvo.cn; frame-ancestors 'none'; base-uri 'none'");
    const content = await fs.readFile(path.join(__dirname, 'public', name));
-   res.writeHead(200, { 'Content-Type': name.endsWith('.jpg') ? 'image/jpeg' : name.endsWith('.woff2') ? 'font/woff2' : name.endsWith('.svg') ? 'image/svg+xml' : name.endsWith('.html') ? 'text/html; charset=utf-8' : name.endsWith('.js') ? 'text/javascript; charset=utf-8' : 'text/css; charset=utf-8' }); res.end(content);
+   res.writeHead(200, { 'Content-Type': name.endsWith('.jpg') ? 'image/jpeg' : name.endsWith('.png') ? 'image/png' : name.endsWith('.woff2') ? 'font/woff2' : name.endsWith('.svg') ? 'image/svg+xml' : name.endsWith('.html') ? 'text/html; charset=utf-8' : name.endsWith('.js') ? 'text/javascript; charset=utf-8' : 'text/css; charset=utf-8' }); res.end(content);
   } catch (e) {
+   if (res.destroyed || res.writableEnded) return;
    if (e instanceof AccountError) {
     if (e.status === 401 || ['account_disabled', 'disabled', 'user_disabled'].includes(e.code)) releaseOwner(requestOwner);
     if (e.status === 401 || ['account_disabled', 'disabled', 'user_disabled'].includes(e.code)) res.setHeader('Set-Cookie', ['/api', '/api/auth'].map(cookiePath => `moddock-account-${server.address().port}=; HttpOnly; SameSite=Strict; Path=${cookiePath}; Max-Age=0`));
@@ -295,8 +486,8 @@ async function createServer(options = {}) {
   }
  });
  await new Promise(resolve => server.listen(options.port ?? Number(process.env.PORT || 4173), '127.0.0.1', resolve));
- server.on('close', () => { sso.close(); connections.close(); accounts.clear(); });
- return { server, sources, downloads, installers, library, receiveNxm, accountLegalUrls: accounts.config.legalUrls, url: `http://127.0.0.1:${server.address().port}` };
+ server.on('close', () => { studio.close(); sso.close(); connections.close(); accounts.clear(); });
+ return { server, sources, downloads, installers, library, studio, bg3Extender, gameEnvironment, receiveNxm, accountLegalUrls: accounts.config.legalUrls, url: `http://127.0.0.1:${server.address().port}` };
 }
 if (require.main === module) createServer().then(({ url }) => console.log(`游匣已启动：${url}`)).catch(e => { console.error(e.message); process.exit(1); });
 module.exports = { createServer };
