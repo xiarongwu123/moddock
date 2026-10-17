@@ -7,6 +7,7 @@ const { validateControls } = require('./bg3-controls.cjs');
 const definitions = [
  { id: 'project-plan', name: '开发方案', category: '通用', description: '结合引擎指南与社区经验，整理任意游戏的 Mod 创作计划。', output: '方案工程', installable: false },
  { id: 'custom-project', name: '自定义 Mod 工程', category: '通用', description: '自由组织脚本、代码和配置文件，适用于更多游戏与创作方向。', output: '源码工程', installable: false },
+ { id: 'engine-mod', name: '按引擎开发 Mod', category: '通用引擎', description: '根据本机代码和资源调查、编写实现、构建并校验；无需命中特定游戏名单。', output: '引擎 Mod 工程', installable: false },
  { id: 'ue4ss-lua', name: 'UE4SS Lua 脚本', category: 'Unreal', description: '编写玩法与交互脚本，打包后交给已有 UE4SS 加载。', output: '脚本 Mod', installable: true },
  { id: 'reframework-lua', name: 'REFramework Lua 脚本', category: 'RE Engine', description: '制作 REFramework autorun 脚本，适用于已安装该框架的游戏。', output: '脚本 Mod', installable: true },
  { id: 'bepinex-plugin', name: 'BepInEx 插件工程', category: 'Unity Mono', description: '生成 C# 插件工程，使用本机游戏程序集自动编译与校验。', output: '插件工程', installable: false },
@@ -20,6 +21,7 @@ function recipesFor(game, report) {
  return definitions.map(type => {
   let available = false, reason = '';
   if (['project-plan', 'custom-project'].includes(type.id)) available = true;
+  else if (type.id === 'engine-mod') { available = !!require('./studio-engines.cjs').familyFor(report.engine.key); reason = '需识别 Unity、Unreal、Godot、RPG Maker、Ren\'Py 或 GameMaker 引擎。'; }
   else if (['dialogue','texture'].includes(type.id)) { available = isStardew(game); reason = '需要星露谷物语的 Content Patcher 适配。'; }
   else if (type.id === 'bepinex-plugin') { available = report.engine.key === 'unity-mono'; reason = '仅支持已识别的 Unity Mono；IL2CPP 需要不同工程。'; }
   else if (['bg3-lua', 'bg3-follower'].includes(type.id)) { available = isBG3(game); reason = '仅支持博德之门 3 的 Script Extender 脚本包。'; }
@@ -53,6 +55,15 @@ function buildStudioProject(game, input, id, report, context) {
   const built = buildBG3(draft, id, textFile);
   Object.assign(manifest, built.manifest); ({ content, runtime } = built); files.push(...built.files);
   summary = `${game.name} · Script Extender 脚本与 PAK 工程`;
+ } else if (input.kind === 'engine-mod') {
+  const engine = require('./studio-engines.cjs');
+  Object.assign(draft, engine.normalizeEngineDraft(input));
+  engine.validateEngineDraft(draft, context.engineEvidence);
+  for (const file of draft.files) files.push(textFile('src/' + file.name, file.text));
+  files.push(textFile('mod.json', JSON.stringify({ mode: draft.mode, patches: draft.patches, blockers: draft.blockers, targets: draft.targets }, null, 2)));
+  content = { engine: report.engine.name, mode: draft.mode, status: 'awaiting-build' };
+  if (draft.mode === 'unity-il2cpp') runtime = { loader: 'BepInEx', marker: 'MODDOCK_LOADED:' + uniqueId };
+  summary = `${game.name} · ${report.engine.name} · 实际开发工程`;
  } else if (input.kind === 'project-plan') {
   draft.plan = requiredText(input.plan, '开发方案', 24000);
   content = { game: game.name, engine: report.engine.name, type: recipe.name, plan: draft.plan };
@@ -101,13 +112,14 @@ function buildStudioProject(game, input, id, report, context) {
  const projectInfo = { ...manifest, gameId: game.id, game: game.name, engine: report.engine.key, adapter: recipe.id, output: recipe.output, upstream: context.toolkit.commit };
  files.push(textFile('project.json', JSON.stringify(projectInfo, null, 2)));
  files.push(textFile('REFERENCES.md', `# Development references\n\nUpstream: ${context.toolkit.repository}\nCommit: ${context.toolkit.commit}\nGuide: ${context.guide.path}\n\n${context.notes.map(note => `- ${note.title} (${note.status})`).join('\n')}\n\nCommunity reports are evidence to review, not compatibility guarantees.\n`));
- const instructions = input.kind === 'bepinex-plugin' ? 'Source project only. Install the .NET SDK and BepInEx 5 for this exact Unity Mono game.\nBuild src/ModdockPlugin.csproj with GamePath and ManagedPath pointing to your own local references.\nReview the compiled DLL before deploying it to BepInEx/plugins. Game references are not redistributed.\nA target frame rate does not override VSync or guarantee a performance increase.\n' : input.kind === 'project-plan' ? 'Planning document only. No game files are installed.\n' : input.kind === 'custom-project' ? 'Source project only. Review the source, choose the game-specific toolchain, build and validate before deploying.\nNo files from this project are installed or executed by Moddock.\n' : 'Review every Lua statement before installing. Moddock does not execute the script itself.\nRequires an existing compatible loader. Verify loading and behavior in the actual game.\n';
+ const instructions = input.kind === 'bepinex-plugin' ? 'Source project only. Install the .NET SDK and BepInEx 5 for this exact Unity Mono game.\nBuild src/ModdockPlugin.csproj with GamePath and ManagedPath pointing to your own local references.\nReview the compiled DLL before deploying it to BepInEx/plugins. Game references are not redistributed.\nA target frame rate does not override VSync or guarantee a performance increase.\n' : input.kind === 'engine-mod' ? 'Actual engine Mod implementation. The desktop host prepares matching tools, builds and verifies the installable Mod, and installs it with backups.\nUse the compiled ZIP for installation; this source archive contains the build inputs. Game files and locally generated game interfaces are not redistributed.\nCompilation and packaging do not establish in-game behavior; check the actual game after installation.\n' : input.kind === 'project-plan' ? 'Planning document only. No game files are installed.\n' : input.kind === 'custom-project' ? 'Source project only. Review the source, choose the game-specific toolchain, build and validate before deploying.\nNo files from this project are installed or executed by Moddock.\n' : 'Review every Lua statement before installing. Moddock does not execute the script itself.\nRequires an existing compatible loader. Verify loading and behavior in the actual game.\n';
  files.push(textFile('README.md', `${name}\n${description}\nAuthor: ${author}\n\n${instructions}`));
  return { draft, manifest, content, runtime, summary, files, adapterId: recipe.id, output: recipe.output, installable: recipe.installable };
 }
 function projectRule(item, report) {
  if (!item.installable) throw new Error('这份产物是开发方案或待编译工程，请导出；尚无可安装的 Mod 文件。');
  if (report.antiCheat.length || report.onlineOnly) throw new Error('当前游戏只开放开发方案，不能部署脚本。');
+ if (item.adapterId === 'engine-mod' && item.compiled && item.toolchain?.deployment) return { mode: item.toolchain.deployment.nativeManifestSha256 ? 'native' : 'copy', sourcePrefix: item.toolchain.deployment.nativeManifestSha256 ? '' : 'deploy', destination: '', requires: [], ...item.toolchain.deployment };
  if (['bg3-lua', 'bg3-follower'].includes(item.adapterId) && item.compiled) return { mode: 'bg3', sourcePrefix: 'Mods', destination: 'Mods', requires: [], bg3Module: item.bg3Module };
  if (item.adapterId === 'ue4ss-lua') {
   const entries = report.loaderFiles.UE4SS;

@@ -1,4 +1,5 @@
 node_modules/
+.cache/
 .moddock-tools/
 .moddock-private/
 .demo-data/
@@ -16,6 +17,7 @@ output/bg3-weapon/
 output/bg3-agent/
 output/bg3-extender/
 output/game-environments/
+output/native-toolchains/
 output/download-recovery/
 output/nexus-review*/
 output/nexus-review-tests.log

@@ -12,6 +12,7 @@ const { createServer, loginFixture } = require('./server-fixture.cjs');
 const { accountFixture } = require('./account-fixture.cjs');
 const { createDeepSeek } = require('../studio-ai.cjs');
 const { dll } = require('./bg3-extender-fixture.cjs');
+const { piFixture } = require('./pi-fixture.cjs');
 
 const controls = [{ key: 'threshold', label: 'Threshold', type: 'number', min: 10, max: 90, step: 5, default: 40 }, { key: 'heal', label: 'Heal', type: 'action', shortcut: 'F8' }];
 const draft = { kind: 'bg3-lua', name: 'Healing control', author: 'Player', description: 'User-requested healing controls', controls, code: 'Moddock.OnAction = function(key, settings)\n local host = Osi.GetHostCharacter()\n if key == "heal" and host then Osi.SetHitpoints(host, Osi.GetMaxHitpoints(host), "") end\nend' };
@@ -23,15 +24,10 @@ async function fixture(t) {
  await fs.mkdir(path.join(userData, 'Mods'), { recursive: true }); await fs.mkdir(path.join(userData, 'PlayerProfiles/Public'), { recursive: true });
  await fs.writeFile(path.join(userData, 'PlayerProfiles/Public/modsettings.lsx'), '<save><region id="ModuleSettings"><node id="root"><children><node id="Mods"><children><node id="ModuleShortDesc"><attribute id="UUID" type="FixedString" value="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"/><attribute id="Folder" type="LSString" value="GustavDev"/></node></children></node></children></node></region></save>');
  const account = accountFixture(); account.updateAccount({ membership: { tier: 'pro', expiresAt: null } });
- const steps = [];
+ const pi = await piFixture(t, { game, engine: 'native', result: body => body.messages[0].content.includes('This is the artifact generation stage') ? draft : plan });
+ const steps = pi.requests;
  const server = await createServer({ root: path.join(root, 'data'), port: 0, accounts: account.options, scan: async () => ({ games: [game], roots: [], diagnostics: [] }), installers: { bg3DataPath: userData, processes: async () => [] },
-  studio: { tools: { luac: false }, integration: { python: false }, plan: async () => plan, generate: async () => { throw new Error('Agent must own generation'); }, agent: async payload => {
-   steps.push(payload);
-   if (payload.agentStep === 0) return { type: 'tools', calls: [{ name: 'inspect_game', arguments: {} }, { name: 'search_api', arguments: { query: 'Osi.GetMaxHitpoints Osi.SetHitpoints' } }] };
-   if (payload.agentStep === 1) return { type: 'tools', calls: [{ name: 'check_draft', arguments: { draft: { ...draft, code: 'local x = function(' } } }] };
-   assert.equal(payload.toolHistory.at(-1).result.passed, false);
-   return { type: 'complete', draft };
-  } } });
+  studio: { ...createDeepSeek({ apiKey: pi.key, pi: pi.pi }), tools: { luac: false }, integration: { python: false } } });
  const auth = await loginFixture(server);
  const post = async (route, body = {}) => {
   const response = await auth.fetch(server.url + '/api/' + route, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Moddock-Token': auth.state.token }, body: JSON.stringify({ gameId: game.id, ...body }) });
@@ -57,10 +53,11 @@ test('parameter schemas reject duplicates, arbitrary keys, invalid ranges and un
  for (const invalid of [[controls[0], controls[0]], [{ ...controls[0], step: 0 }], [{ ...controls[1], shortcut: 'Ctrl+R' }], [{ ...controls[0], key: '../path' }]]) assert.throws(() => validateControls(invalid));
  assert.throws(() => valuesFor(controls, { threshold: 41 }), /范围/); assert.throws(() => valuesFor(controls, { threshold: 100 }), /范围/); assert.throws(() => valuesFor(controls, { private: 1 }), /无效/);
 });
-test('AI tool results drive repair, portable BG3 builds install, and settings remain pending until exact game acknowledgement', async t => {
+test('real Pi tools create a portable BG3 build and settings wait for exact game acknowledgement', async t => {
  const x = await fixture(t), thread = await x.turn('按 F8 恢复生命，并提供参数滑条');
- assert.equal(thread.status, 'completed', thread.error); assert.equal(x.steps.length, 3); assert.deepEqual(thread.toolCalls.map(call => call.name), ['inspect_game', 'search_api', 'check_draft', 'check_draft']);
- assert.equal(thread.toolCalls[2].status, 'failed'); assert.equal(thread.toolCalls[3].status, 'completed');
+ assert.equal(thread.status, 'completed', thread.error);
+ for (const name of ['write_project_file', 'validate_project']) assert.ok(thread.toolCalls.some(call => call.name === name && call.status === 'completed'));
+ assert.ok(thread.toolCalls.some(call => call.name === 'search_api' && call.status === 'completed')); assert.ok(thread.toolCalls.some(call => call.name === 'submit_result' && call.status === 'completed')); assert.equal(thread.harness.status, 'completed');
  const saved = (await x.post('studio/read', { id: thread.artifactId })).body; assert.equal(saved.installable, true); assert.equal(saved.toolchain.status, 'passed'); assert.ok(saved.toolchain.checks.some(check => /WebAssembly/.test(check.detail)));
  const exported = (await x.post('studio/export', { id: saved.id })).body; assert.ok(Buffer.from(exported.base64, 'base64').includes(Buffer.from('BootstrapClient.lua')));
  const installed = await x.turn('安装', thread.id); assert.equal(installed.status, 'completed', installed.error);
@@ -85,9 +82,6 @@ test('host Lua transport handles reloads, settings validation, disabled actions 
  const result = await runTool(path.resolve('.moddock-tools/bin/lua'), [path.resolve('test/bg3-controls-sandbox.lua'), path.join(root, '0.lua'), path.join(root, '1.lua')]);
  assert.equal(result.code, 0, result.output); assert.match(result.output, /control contract passed/);
 });
-test('managed model exposes actual bounded tool decisions and forwards host results for the next step', async () => {
- let body;
- const ai = createDeepSeek({ apiKey: 'sk-isolated-test-provider-key-123456', fetch: async (_url, init) => { body = JSON.parse(init.body); return Response.json({ choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ type: 'tools', calls: [{ name: 'read_runtime', arguments: {} }] }) } }] }); } });
- const value = await ai.agent({ kind: 'bg3-lua', prompt: 'Fix my Mod', agentStep: 2, toolHistory: [{ name: 'check_draft', result: { passed: false, detail: 'Syntax error' } }] });
- assert.equal(value.calls[0].name, 'read_runtime'); assert.equal(JSON.parse(body.messages[1].content).toolHistory[0].result.passed, false);
+test('API reference utilities are shared with the Pi harness', async () => {
+ const direct = require('../studio-api.cjs'); assert.equal(apiSearch, direct.apiSearch); assert.equal(checkReferences, direct.checkReferences);
 });

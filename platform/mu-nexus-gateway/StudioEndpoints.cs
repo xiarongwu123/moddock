@@ -53,6 +53,8 @@ public static class StudioEndpoints
         using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(backend, route));
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", config["Studio:BackendToken"]);
         request.Headers.Add("X-Mu-Account-Id", owner);
+        var streamEvents = context.Request.Headers.Accept.ToString().Contains("application/x-ndjson", StringComparison.Ordinal);
+        if (streamEvents) request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/x-ndjson"));
         request.Content = new ByteArrayContent(body.ToArray());
         request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
         HttpResponseMessage response;
@@ -61,6 +63,23 @@ public static class StudioEndpoints
         { throw new ApiException(503, "studio_unavailable", "创作服务暂时无法连接。"); }
         using (response)
         {
+            if (response.IsSuccessStatusCode && response.Content.Headers.ContentType?.MediaType == "application/x-ndjson" && streamEvents)
+            {
+                context.Response.ContentType = "application/x-ndjson; charset=utf-8";
+                context.Response.Headers.CacheControl = "no-store";
+                context.Response.Headers["X-Accel-Buffering"] = "no";
+                await context.Response.StartAsync(context.RequestAborted);
+                await using var source = await response.Content.ReadAsStreamAsync(context.RequestAborted);
+                long total = 0;
+                while ((count = await source.ReadAsync(buffer, context.RequestAborted)) > 0)
+                {
+                    total += count;
+                    if (total > 2 * 1024 * 1024) { context.Abort(); return; }
+                    await context.Response.Body.WriteAsync(buffer.AsMemory(0, count), context.RequestAborted);
+                    await context.Response.Body.FlushAsync(context.RequestAborted);
+                }
+                return;
+            }
             await response.Content.LoadIntoBufferAsync(256 * 1024, context.RequestAborted);
             using var result = JsonDocument.Parse(await response.Content.ReadAsByteArrayAsync(context.RequestAborted));
             if (!response.IsSuccessStatusCode)

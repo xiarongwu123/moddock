@@ -232,8 +232,8 @@ function createAccountClient(options = {}) {
   const call = () => {
    if (!current()) fail(401, 'login_required', '请先登录游匣账号。');
    return request(new URL('api/v1/studio/' + route, base), { method: 'POST', redirect: 'error',
-    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(95000)]) : AbortSignal.timeout(95000),
-    headers: { Authorization: 'Bearer ' + state.accessToken, 'Content-Type': 'application/json', Accept: 'application/json' }, body });
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(310000)]) : AbortSignal.timeout(310000),
+    headers: { Authorization: 'Bearer ' + state.accessToken, 'Content-Type': 'application/json', Accept: 'application/x-ndjson, application/json' }, body });
   };
   let response;
   try {
@@ -249,7 +249,7 @@ function createAccountClient(options = {}) {
    }
   } catch (error) {
    if (signal?.aborted || error instanceof AccountError) throw error;
-   fail(503, 'studio_unavailable', 'MU 创作服务暂时无法连接，请稍后重试。');
+   throw Object.assign(new AccountError(503, 'studio_unavailable', '创作连接暂时中断，正在恢复连接。'), { cause: error });
   }
   if (!current() || signal?.aborted) { await response.body?.cancel(); fail(401, 'login_required', '创作已停止，请重新登录后继续。'); }
   if (!response.ok) {

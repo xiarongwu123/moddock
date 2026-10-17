@@ -15,7 +15,7 @@ const { accountFixture } = require('./account-fixture.cjs');
 const mockFiles = {
  'bepinex-x64': [['winhttp.dll', executable], ['doorstop_config.ini', Buffer.from('fixture')], ['BepInEx/core/BepInEx.dll', executable]],
  'bepinex-x86': [['winhttp.dll', executable], ['doorstop_config.ini', Buffer.from('fixture')], ['BepInEx/core/BepInEx.dll', executable]],
- ue4ss: [['dwmapi.dll', executable], ['ue4ss/UE4SS.dll', executable]],
+ ue4ss: [['dwmapi.dll', executable], ['ue4ss/UE4SS.dll', executable], ['ue4ss/UE4SS-settings.ini', Buffer.from('[EngineVersionOverride]\nMajorVersion = -1\n')], ['ue4ss/LICENSE', Buffer.from('fixture license')], ['ue4ss/Mods/shared/UEHelpers/UEHelpers.lua', Buffer.from('return {}')], ['ue4ss/UE4SS_SDK_Backends/UE4SS.json', Buffer.from('{}')]],
  'ue4ss-configs': [['Wukong/UE4SS-settings.ini', Buffer.from('MajorVersion = 5\nMinorVersion = 0\n')], ['Wukong/VTableLayout.ini', Buffer.from('fixture')]],
  reframework: [['dinput8.dll', executable]],
  smapi: [['SMAPI fixture/internal/windows/install.dat', zipContent([{ name: 'StardewModdingAPI.dll', data: executable }, { name: 'StardewModdingAPI.exe', data: executable }])]],
@@ -30,6 +30,7 @@ async function gameFixture(t, kind, options = {}) {
  const write = async (name, value) => { const file = path.join(game.installPath, name); await fs.mkdir(path.dirname(file), { recursive: true }); await fs.writeFile(file, value); };
  if (kind === 'unity') { game.appId = '892970'; await write('Valheim.exe', executable); await write('UnityPlayer.dll', 'fixture'); await write('Valheim_Data/Managed/Assembly-CSharp.dll', 'fixture'); }
  if (kind === 'wukong') { game.appId = '2358720'; await write('b1/Binaries/Win64/b1-Win64-Shipping.exe', executable); await write('b1/Content/Paks/fixture.pak', 'fixture'); }
+ if (kind === 'ron') { game.appId = '1144200'; await write('ReadyOrNot/Binaries/Win64/ReadyOrNotSteam-Win64-Shipping.exe', executable); await write('ReadyOrNot/Content/Paks/fixture.pak', 'fixture'); }
  if (kind === 're4') { game.appId = '2050650'; await write('re4.exe', executable); await write('re_chunk_000.pak', 'fixture'); }
  if (kind === 'stardew') { game.appId = '413150'; await write('Stardew Valley.exe', executable); await write('Stardew Valley.deps.json', '{"libraries":{"Stardew Valley/1.6.15":{}}}'); }
  if (kind === 'unknown') await write('Game.exe', executable);
@@ -45,7 +46,7 @@ async function gameFixture(t, kind, options = {}) {
  return { root, game, write, installers, manager, context };
 }
 test('different game families select and install their own actual official components without touching saves', async t => {
- try { for (const item of Object.values(components)) await fs.access(path.resolve('output/game-environments', item.name)); }
+ try { for (const id of ['bepinex-x64', 'bepinex-x86', 'ue4ss', 'ue4ss-configs', 'reframework', 'smapi']) await fs.access(path.resolve('output/game-environments', components[id].name)); }
  catch { t.skip('Optional official archives not downloaded; isolated publication tests remain active'); return; }
  for (const [kind, target] of [['unity', 'BepInEx/core/BepInEx.dll'], ['wukong', 'b1/Binaries/Win64/ue4ss/UE4SS.dll'], ['re4', 'dinput8.dll'], ['stardew', 'StardewModdingAPI.dll']]) {
   const x = await gameFixture(t, kind, { official: true });
@@ -62,12 +63,38 @@ test('different game families select and install their own actual official compo
   }
  }
 });
-test('unknown engines and unprofiled Unreal games remain honest source-only routes', async t => {
+test('unknown engines stay unprepared and generic Unreal games enter engine investigation', async t => {
  const x = await gameFixture(t, 'unknown');
  assert.equal((await x.manager.ensure(x.context)).coverage, 'source-only');
  await x.write('Game/Content/Paks/Base.pak', 'fixture');
- const unreal = await x.manager.status(x.game); assert.equal(unreal.coverage, 'source-only'); assert.equal(unreal.canPrepare, false);
+ const unreal = await x.manager.status(x.game); assert.equal(unreal.coverage, 'engine-development'); assert.equal(unreal.canPrepare, false);
  assert.deepEqual(await fs.readdir(x.game.installPath), ['Game', 'Game.exe', 'Saves']);
+});
+test('generic Unreal Shipping executables receive official defaults without a game allowlist', async t => {
+ const x = await gameFixture(t, 'unknown');
+ await x.write('OtherGame/Content/Paks/Base.pak', 'fixture');
+ await x.write('OtherGame/Binaries/Win64/OtherGame-Win64-Shipping.exe', executable);
+ assert.equal((await x.manager.status(x.game)).canPrepare, true);
+ assert.equal((await x.manager.ensure(x.context)).ready, true);
+ assert.match(await fs.readFile(path.join(x.game.installPath, 'OtherGame/Binaries/Win64/ue4ss/UE4SS-settings.ini'), 'utf8'), /MajorVersion = -1/);
+ assert.equal(await fs.readFile(path.join(x.game.installPath, 'Saves/player.sav'), 'utf8'), 'preserve player save');
+});
+test('Ready or Not prepares the pinned official runtime and helpers without Wukong settings or demo Mods', async t => {
+ for (const official of [false, true]) {
+  if (official) { try { await fs.access(path.resolve('output/game-environments', components.ue4ss.name)); } catch { continue; } }
+  const x = await gameFixture(t, 'ron', { official });
+  assert.equal((await x.manager.status(x.game)).canPrepare, true);
+  const result = await x.manager.ensure(x.context); assert.equal(result.ready, true); assert.equal(result.runtimeConfirmed, false);
+  const base = path.join(x.game.installPath, 'ReadyOrNot/Binaries/Win64/ue4ss');
+  const ini = await fs.readFile(path.join(base, 'UE4SS-settings.ini'), 'utf8');
+  assert.match(ini, /\[EngineVersionOverride\]/); assert.doesNotMatch(ini, /^MajorVersion\s*=\s*5\s*$/m);
+  assert.deepEqual(await fs.readdir(path.join(base, 'Mods')), ['shared']);
+  assert.ok((await fs.stat(path.join(base, 'Mods/shared/UEHelpers/UEHelpers.lua'))).size > 0);
+  await assert.rejects(fs.access(path.join(base, 'VTableLayout.ini')));
+  assert.equal(await fs.readFile(path.join(x.game.installPath, 'Saves/player.sav'), 'utf8'), 'preserve player save');
+ }
+ const ambiguous = await gameFixture(t, 'ron'); await ambiguous.write('ReadyOrNot/Binaries/Win64/ReadyOrNot-Win64-Shipping.exe', executable);
+ assert.equal((await ambiguous.manager.status(ambiguous.game)).canPrepare, false);
 });
 test('loader file conflicts and running games block new writes, while partial owned writes roll back', async t => {
  const x = await gameFixture(t, 'unity');

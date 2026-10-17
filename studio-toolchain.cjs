@@ -11,6 +11,7 @@ const { checkLua } = require('./studio-lua.cjs');
 const ACTIVE = new Set(['checking', 'building', 'verifying']);
 const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const ADAPTERS = {
+ 'engine-mod': { name: '按引擎开发', build: '实际源文件与资源修改构建', validation: '引擎入口、静态语法、原文件摘要与加载目录' },
  'ue4ss-lua': { compiler: 'lua', name: 'UE4SS · Lua 5.4', build: 'Lua 语法编译检查', validation: '脚本语法、目录与现有加载器' },
  'reframework-lua': { compiler: 'lua', name: 'REFramework · Lua 5.4', build: 'Lua 语法编译检查', validation: '脚本语法、目录与现有加载器' },
  'bepinex-plugin': { compiler: 'csharp', name: 'BepInEx 5 · Unity Mono', build: 'Roslyn C# 编译', validation: '本机游戏程序集引用与托管 DLL' },
@@ -68,7 +69,7 @@ class StudioToolchain {
   }
   return result;
  }
- async run(owner, game, id, workspace, { signal, current = () => true, onStage = async () => {}, authorize } = {}) {
+ async run(owner, game, id, workspace, { signal, current = () => true, onStage = async () => {}, onEvent = async () => {}, authorize } = {}) {
   const check = () => { if (signal?.aborted || !current()) throw new Error('制作任务已取消'); };
   const { item, files } = await this.studio.preview(owner, game, id); check();
   const adapter = ADAPTERS[item.adapterId], taskId = crypto.randomUUID(), directory = path.join(this.directory(owner, id), taskId), work = path.join(directory, 'work');
@@ -88,6 +89,7 @@ class StudioToolchain {
    const selected = workspace.types.find(type => type.id === item.adapterId);
    if (!selected?.available) { await step('制作路线', 'blocked', selected?.reason || '当前游戏不支持此制作路线'); return await this.finish(owner, id, report); }
    await step('制作路线', 'passed', `${workspace.diagnostic.engine.name} · ${adapter.name}`);
+   if (!['project-plan', 'custom-project'].includes(item.adapterId) && (workspace.diagnostic.antiCheat.length || workspace.diagnostic.onlineOnly)) await step('游戏运行条件', 'blocked', '已保留实际实现；当前存在联网保护特征，尚未确认此版本允许的离线加载方式，暂停构建部署包。');
    let tools = adapter.compiler ? await this.tools.probe(signal) : {};
    if (adapter.compiler === 'csharp' && !tools.csharp.available) {
     await step('自动准备 C# 编译器', 'checking', '首次 C# 创作将按需下载已校验的 Microsoft SDK；无需手动配置。');
@@ -112,7 +114,8 @@ class StudioToolchain {
    } else if (adapter.compiler === 'lua') {
     const key = item.adapterId === 'ue4ss-lua' ? 'UE4SS' : 'REFramework';
     const found = workspace.diagnostic.loaderFiles[key] || [];
-    await step('游戏加载器', found.length === 1 ? 'passed' : 'blocked', found.length === 1 ? `已检测到唯一 ${key} 位置` : `未检测到唯一 ${key} 位置，安装环境尚未就绪`);
+    report.installation = { ready: found.length === 1, dependency: key, detail: found.length === 1 ? `已检测到唯一 ${key} 位置` : `安装前需要准备 ${key}；当前仍可编译并导出实际脚本包。` };
+    await step('游戏加载器', found.length === 1 ? 'passed' : 'pending', report.installation.detail);
    }
    const portableLua = (['ue4ss-lua', 'reframework-lua'].includes(item.adapterId) || item.adapterId === 'bg3-lua' && item.runtime?.control) && !tools.lua.available;
    if (portableLua) await step('编译工具', 'passed', '内置 Lua 5.4 WebAssembly 编译器；无需玩家安装开发工具。');
@@ -141,6 +144,27 @@ class StudioToolchain {
     const result = await runTool(tools.csharp.executable, [tools.csharp.compiler, '/nologo', '/noconfig', '/nostdlib+', '/target:library', '/deterministic+', '/optimize+', '/out:' + output, ...references.map(file => '/reference:' + file), ...sources], { cwd: work, signal, timeout: 45000 });
     await step('C# 编译', result.code === 0 ? 'passed' : 'failed', cleanLog(result.output) || (result.code === 0 ? 'Roslyn 编译通过' : '编译器返回 ' + result.code));
     if (result.code === 0) { const stat = await fs.lstat(output); if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 4 * 1024 * 1024) throw new Error('编译产物超出限制'); compiled = await fs.readFile(output); if (!managedDll(compiled)) throw new Error('编译器没有生成有效的托管 DLL'); await step('托管 DLL', 'passed', `${compiled.length} B；PE 与 CLR 元数据检查通过，未加载程序集`); }
+   } else if (item.adapterId === 'engine-mod') {
+    const predecessors = this.studio.options.lifecycle?.predecessors(owner, game, item) || [];
+    if (predecessors.length > 1) throw new Error('此创作存在多个已安装版本，请先处理旧版本');
+    const native = require('./studio-native-projects.cjs').MODES.has(item.draft.mode), callId = crypto.randomUUID();
+    if (native) await onEvent({ type: 'tool_start', callId, name: 'build_native_mod', detail: '编译实际代码并构建可安装的游戏资源' });
+    let engine;
+    try {
+     engine = native ? await this.studio.native.build(game, item, workspace.context.engineEvidence, { predecessor: predecessors[0], installersRoot: this.studio.options.lifecycle?.installers.root, work, signal, current, authorize, onEvent })
+      : await require('./studio-engines.cjs').compileEngineProject(game, item, workspace.context.engineEvidence, { predecessor: predecessors[0] });
+     if (native) await onEvent({ type: 'tool_end', callId, name: 'build_native_mod', failed: engine.checks.some(check => check.status === 'failed'), detail: engine.checks.map(check => check.detail).join('；') });
+    } catch (error) { if (native) await onEvent({ type: 'tool_end', callId, name: 'build_native_mod', failed: true, detail: error.message }); throw error; }
+    for (const check of engine.checks) await step(check.name, check.status, check.detail);
+    if (!report.checks.some(entry => ['failed', 'blocked'].includes(entry.status))) {
+     const bytes = zipContent([...engine.outputs, { name: 'BUILD.json', data: Buffer.from(JSON.stringify({ gameId: game.id, adapter: item.adapterId, sourceSha256: item.sha256, runtimeVerified: false }, null, 2)) }]);
+     if (bytes.length > 32 * 1024 * 1024) throw new Error('原生 Mod 增量包超过 32 MB 限制');
+     await fs.writeFile(path.join(directory, 'compiled.zip'), bytes, { flag: 'wx' });
+     report.bundle = { sha256: hash(bytes), size: bytes.length, filename: item.draft.name + '-mod.zip' };
+     report.deployment = { baseHashes: engine.baseHashes, generatedCaches: engine.generatedCaches || [], ...(engine.nativeManifestSha256 ? { nativeManifestSha256: engine.nativeManifestSha256 } : {}) };
+     report.outputs.push(...engine.outputs.map(file => ({ name: file.name, size: file.data.length, sha256: hash(file.data) })));
+     await step('引擎 Mod 打包', 'passed', `${engine.outputs.length} 个实际文件；加载入口与原文件版本已核对，游戏内效果待验证。`);
+    }
    } else if (!adapter.compiler) await step('编译阶段', item.adapterId === 'custom-project' ? 'blocked' : 'passed', item.adapterId === 'custom-project' ? '此工程尚无专用编译适配；已保存源码，不执行工程中的构建脚本' : adapter.build);
    await stage('verifying');
    for (const file of files) { check(); if (file.name.endsWith('.json')) { JSON.parse(file.text); await step('JSON · ' + file.name, 'passed', 'JSON 解析通过'); } if (file.image) { pngBytes(file.image); await step('贴图 · ' + file.name, 'passed', 'PNG 尺寸、CRC、解压结构检查通过'); } }
@@ -150,6 +174,14 @@ class StudioToolchain {
     await fs.writeFile(path.join(directory, 'compiled.zip'), bytes, { flag: 'wx' });
     report.bundle = { sha256: hash(bytes), size: bytes.length, filename: item.draft.name + '-compiled.zip' };
     report.outputs.push({ name: 'plugins/' + name, size: compiled.length, sha256: hash(compiled) });
+   }
+   if (['ue4ss-lua', 'reframework-lua'].includes(item.adapterId) && !report.checks.some(entry => ['failed', 'blocked'].includes(entry.status))) {
+    const sources = files.filter(file => file.name.startsWith('mod/')).map(file => ({ name: file.name, data: Buffer.from(file.text || '') }));
+    const bytes = zipContent([...sources, { name: 'BUILD.json', data: Buffer.from(JSON.stringify({ gameId: game.id, adapter: item.adapterId, sourceSha256: item.sha256, runtimeVerified: false, installation: report.installation }, null, 2)) }]);
+    await fs.writeFile(path.join(directory, 'compiled.zip'), bytes, { flag: 'wx' });
+    report.bundle = { sha256: hash(bytes), size: bytes.length, filename: item.draft.name + '-mod.zip' };
+    report.outputs.push(...sources.map(file => ({ name: file.name, size: file.data.length, sha256: hash(file.data) })));
+    await step('脚本 Mod 打包', 'passed', `${sources.length} 个实际加载文件；Lua 编译通过并已打包 ZIP，游戏效果待实测。`);
    }
    if (['bg3-lua', 'bg3-follower'].includes(item.adapterId) && !report.checks.some(entry => ['failed', 'blocked'].includes(entry.status))) {
     const sources = files.filter(file => file.name.startsWith('package/')).map(file => ({ name: file.name.slice(8), data: Buffer.from(file.text) }));
@@ -184,7 +216,7 @@ class StudioToolchain {
   const report = await smallJson(path.join(this.directory(owner, artifactId), buildId, 'report.json'));
   if (report.artifactId !== artifactId || report.gameId !== game.id || report.sourceSha256 !== item.sha256 || report.status !== 'passed' || !report.bundle) throw new Error('没有可导出的已通过编译产物');
   const file = path.join(this.directory(owner, artifactId), buildId, 'compiled.zip'), stat = await fs.lstat(file);
-  if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 8 * 1024 * 1024) throw new Error('编译包无法读取或超出限制');
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 32 * 1024 * 1024) throw new Error('编译包无法读取或超出限制');
   const bytes = await fs.readFile(file); if (hash(bytes) !== report.bundle.sha256) throw new Error('编译包完整性校验失败');
   return { filename: report.bundle.filename, base64: bytes.toString('base64') };
  }

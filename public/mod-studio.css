@@ -86,6 +86,7 @@ body:has([data-studio-root]) .home-backdrop { opacity: 0; }
 .studio-kicker { color: #829576; font-size: 10px; letter-spacing: 1.2px; }
 .studio-welcome h3 { font-size: clamp(24px, 2.3vw, 30px); font-weight: 550; line-height: 1.5; letter-spacing: -.7px; margin: 0 0 10px; }
 .studio-welcome p { color: #a0a9a1; font-size: 13px; line-height: 1.9; margin: 0; }
+.studio-welcome .studio-engine-coverage { margin-top: 18px; color: #758274; font-size: 11px; line-height: 1.9; }
 .studio-suggestions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 16px; flex-shrink: 0; }
 .studio-suggestions button { color: #a0a9a1; border-radius: 8px; padding: 8px 13px; font-size: 12px; line-height: 1.6; transition: background 160ms ease, color 160ms ease; }
 .studio-suggestions button:hover { color: #dfe8d9; background: #ffffff08; }
@@ -179,7 +180,7 @@ body:has([data-studio-root]) .home-backdrop { opacity: 0; }
 .mod-studio :is(button, select, summary):focus-visible { outline: 1px solid #b9dc82; outline-offset: 3px; }
 .mod-studio button:disabled { opacity: .45; cursor: default; }
 .game-library-tabs .studio-pro { margin-left: 5px; font-size: 8px; padding: 2px 4px; }
-.studio-simple { max-width: 860px; }
+.studio-simple { max-width: 900px; }
 .studio-simple .studio-heading { min-height: 40px; margin-bottom: 20px; }
 .studio-simple .studio-heading:has(.studio-selected-game) { flex-direction: row; align-items: center; gap: 16px; }
 .studio-simple .studio-thread-controls { flex-direction: row; gap: 16px; }
@@ -187,10 +188,13 @@ body:has([data-studio-root]) .home-backdrop { opacity: 0; }
 .studio-simple .studio-thread-controls .text-link { color: #a0a9a1; }
 .studio-simple .studio-chat-layout { display: flex; flex-direction: column; gap: 18px; }
 .studio-simple .studio-chat-layout > * { width: 100%; }
-.studio-simple .studio-conversation { height: clamp(400px, calc(100dvh - 260px), 800px); }
+.studio-simple .studio-conversation { height: clamp(440px, calc(100dvh - 245px), 900px); }
+.studio-simple .studio-chat-scroll { min-height: 0; padding: 20px 12px 32px; scrollbar-gutter: stable; }
+.studio-simple .studio-message.is-user { width: fit-content; max-width: 82%; padding: 13px 18px; margin-bottom: 28px; border-color: #ffffff0d; background: #ffffff04; border-radius: 14px 14px 4px 14px; }
+.studio-simple .studio-message.is-user .studio-message-label { display: none; }
+.studio-simple .studio-message.is-assistant { max-width: 100%; }
 .studio-simple .studio-conversation.is-empty { height: auto; min-height: clamp(360px, calc(100dvh - 285px), 660px); justify-content: center; }
 .studio-simple .is-empty .studio-chat-scroll { flex: 0 0 auto; min-height: 0; overflow: visible; padding: 0 0 32px; }
-.studio-simple .studio-chat-layout:has(.studio-completion) .studio-conversation { height: 400px; }
 .studio-selected-game { display: flex; align-items: center; gap: 10px; min-width: 0; max-width: 55%; border-radius: 8px; padding: 10px 0; color: #aab6a5; font-size: 12px; text-align: left; }
 .studio-selected-game > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .studio-selected-game svg { width: 17px; height: 17px; color: #9dbb7d; flex-shrink: 0; }
@@ -220,15 +224,19 @@ body:has([data-studio-root]) .home-backdrop { opacity: 0; }
 .studio-guide li > span { color: #5c7150; font-size: 11px; padding-top: 2px; }
 .studio-guide h3 { font-size: 12px; color: #b5c4a8; font-weight: 500; margin: 0 0 8px; }
 .studio-guide p { font-size: 11px; color: #718365; line-height: 1.9; margin: 0; }
-.studio-completion { order: -1; border: 1px solid #b9dc8233; border-radius: 14px; background: #141b15; padding: 23px 26px; }
-.studio-completion-heading { display: flex; gap: 13px; align-items: center; }
-.studio-completion-icon { display: grid; place-items: center; width: 36px; height: 36px; background: #b9dc820b; color: #b9dc82; border: 1px solid #b9dc8230; border-radius: 10px; }
-.studio-completion-icon svg { width: 18px; height: 18px; }
-.studio-completion-heading h3 { font-size: 18px; font-weight: 500; margin: 6px 0 0; }
-.studio-completion > p { color: #91a187; font-size: 12px; line-height: 1.9; }
-.studio-completion > .studio-result-actions { margin-top: 18px; }
-.studio-completion > .studio-result-actions .btn { padding: 11px 16px; font-size: 12px; }
-.studio-completion > .studio-technical { margin-top: 18px; }
+.studio-completion { border: 1px solid #ffffff12; border-radius: 18px; background: linear-gradient(140deg, #b9dc8208, transparent 55%), #151a17; padding: 28px; margin-top: 24px; }
+.studio-completion-heading { display: flex; gap: 16px; align-items: center; }
+.studio-completion-heading > div { min-width: 0; }
+.studio-completion-icon { display: grid; place-items: center; flex-shrink: 0; width: 44px; height: 48px; background: #b9dc820c; color: #bbdca0; border: 1px solid #b9dc821c; border-radius: 10px; }
+.studio-completion-icon svg { width: 22px; height: 22px; stroke-width: 1.4; }
+.studio-completion-heading .studio-kicker { color: #97aa89; font-size: 10px; letter-spacing: .4px; }
+.studio-completion-heading h3 { color: #e4eade; font-size: 23px; line-height: 1.5; font-weight: 550; letter-spacing: -.4px; margin: 6px 0 0; overflow-wrap: anywhere; }
+.studio-completion > p { color: #abb5a6; font-size: 13px; line-height: 1.95; margin: 22px 0; }
+.studio-completion > .studio-result-actions { margin-top: 24px; gap: 10px; }
+.studio-completion > .studio-result-actions .btn { border-radius: 9px; padding: 12px 18px; font-size: 12px; }
+.studio-completion > .studio-result-actions .btn:not(.primary) { background: transparent; border-color: #ffffff1c; color: #b9c3b5; }
+.studio-completion > .studio-result-hint { font-size: 11px; color: #83917c; margin: 14px 0 0; }
+.studio-completion > .studio-technical { margin: 24px 0 0; padding-top: 16px; }
 .studio-completion .studio-game-info { border-top: 1px solid var(--studio-border); margin-top: 14px; padding-top: 14px; }
 .studio-help { color: #929c91; font-size: 11px; margin-top: 19px; }
 .studio-help > summary { cursor: pointer; }
@@ -254,3 +262,52 @@ body:has([data-studio-root]) .home-backdrop { opacity: 0; }
 .studio-environment p { margin:0; font-size:12px; line-height:1.6; color:#9dab97; }
 .studio-environment button { flex-shrink:0; }
 @media(max-width:650px) { .studio-environment { align-items:flex-start; flex-direction:column; gap:10px; } }
+.studio-process { margin: 26px 0; color: #a8b3a2; font-size: 12px; }
+.studio-process > details > summary { display: flex; align-items: center; gap: 12px; min-height: 34px; cursor: pointer; list-style: none; }
+.studio-process summary::-webkit-details-marker { display: none; }
+.studio-process-mark { display: grid; place-items: center; width: 28px; height: 28px; flex-shrink: 0; color: #b9dc82; background: #b9dc820a; border-radius: 50%; }
+.studio-process-mark svg { width: 15px; height: 15px; }
+.studio-process:not(.is-running) .studio-process-mark { color: #8a9f7b; background: #b9dc8206; }
+.studio-process.is-failed .studio-process-mark { color: #cfab88; }
+.studio-process [data-studio-thought] { flex: 1; min-width: 0; }
+.studio-process .thought-line { max-width: 100%; }
+.studio-process .thought-line__head { gap: 8px; }
+.studio-process .thought-line__timer { color: #74806e; font-size: 10px; }
+.studio-process-toggle { display: flex; align-items: center; flex-shrink: 0; gap: 6px; color: #7c8976; font-size: 10px; }
+.studio-process-toggle svg, .studio-process-thinking summary > svg { width: 12px; height: 12px; transition: transform 180ms ease; }
+.studio-process > details[open] > summary .studio-process-toggle svg, .studio-process-thinking[open] summary > svg { transform: rotate(90deg); }
+.studio-process > details > summary:hover .studio-process-toggle { color: #bdcbb2; }
+.studio-process-body { margin: 12px 0 0 14px; border-left: 1px solid #ffffff10; padding: 2px 0 2px 25px; }
+.studio-process-steps { display: grid; gap: 4px; list-style: none; margin: 0; padding: 0; max-height: 260px; overflow: auto; scrollbar-width: thin; }
+.studio-process-step { display: flex; align-items: center; gap: 10px; min-height: 32px; line-height: 1.6; padding: 3px 6px 3px 0; }
+.studio-process-step-mark { display: grid; place-items: center; color: #788e69; width: 16px; flex-shrink: 0; }
+.studio-process-step-mark svg { width: 13px; height: 13px; }
+.studio-process-step strong { flex: 1; min-width: 0; color: #a9b4a3; font-size: 11px; font-weight: 400; }
+.studio-process-step > span:last-child { color: #74816d; font-size: 10px; white-space: nowrap; }
+.studio-process-step.is-running strong, .studio-process-step.is-running .studio-process-step-mark { color: #c0d5a7; }
+.studio-process-step.is-failed .studio-process-step-mark { color: #cfab88; }
+.studio-process-thinking { margin-top: 12px; padding-top: 12px; border-top: 1px solid #ffffff0a; }
+.studio-process-thinking summary { display: flex; align-items: center; gap: 8px; color: #8b9b81; font-size: 11px; list-style: none; cursor: pointer; }
+.studio-process-thinking summary > span { margin-left: auto; color: #b9dc82; font-size: 10px; }
+.studio-process-thinking summary > svg { margin-left: auto; }
+.studio-process-thinking summary > span + svg { margin-left: 0; }
+.studio-process-thinking > div { max-height: 240px; overflow: auto; scrollbar-width: thin; padding-right: 10px; }
+.studio-process-thinking p { white-space: pre-wrap; overflow-wrap: anywhere; color: #8f9c87; font-size: 12px; line-height: 1.9; margin: 14px 0; }
+.studio-process-thinking ol { padding-left: 18px; color: #8f9c87; font-size: 12px; line-height: 1.9; margin: 14px 0; }
+.studio-process-waiting { color: #84917b; font-size: 11px; margin: 6px 0; }
+@media(max-width:650px) {
+ .studio-simple .studio-heading { gap: 8px; }
+ .studio-simple .studio-thread-controls { gap: 6px; }
+ .studio-simple .studio-thread-controls select { max-width: 105px; padding-left: 0; }
+ .studio-simple .studio-thread-controls .text-link { font-size: 10px; }
+ .studio-simple .studio-chat-scroll { padding: 12px 2px 24px; }
+ .studio-simple .studio-composer { margin: 0; }
+ .studio-completion { padding: 20px; border-radius: 14px; }
+ .studio-completion-heading { gap: 12px; }
+ .studio-completion-heading h3 { font-size: 19px; }
+ .studio-completion > p { font-size: 12px; }
+ .studio-process > details > summary { gap: 8px; }
+ .studio-process-toggle { font-size: 0; gap: 0; }
+ .studio-process-body { padding-left: 17px; }
+}
+@media(prefers-reduced-motion:reduce) { .studio-process-toggle svg, .studio-process-thinking summary > svg { transition: none; } }

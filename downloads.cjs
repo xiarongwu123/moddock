@@ -2,7 +2,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { downloadAllowed } = require('./sources.cjs');
-const MAX_BYTES = 5 * 1024 ** 3;
+const { LIMITS, assertSize } = require('./archive-limits.cjs');
 function filename(value) { const name = String(value || 'mod.zip').split(/[\\/]/).pop().replace(/[<>:"|?*\x00-\x1f]/g, '_').replace(/[. ]+$/g, '').slice(0, 150); return !name || /^(con|prn|aux|nul|com\d|lpt\d)(\.|$)/i.test(name) ? 'mod-' + (name || 'file.zip') : name; }
 class Downloads {
  constructor(root, sources, options = {}) { this.root = path.resolve(root, 'downloads'); this.sources = sources; this.clients = new Map(); this.verifications = new Map(); this.fetch = options.fetch || globalThis.fetch; this.jobs = []; this.controllers = new Map(); this.persist = Promise.resolve(); this.authorizations=new Map(); this.onCompleted=options.onCompleted; this.onAuthorizationRequired=options.onAuthorizationRequired; this.maxParallel=options.maxParallel||3; this.beforeDownload=options.beforeDownload; }
@@ -35,14 +35,14 @@ class Downloads {
  async importCreation(game, creation, bytes, owner) {
   const resourceId = `studio:${creation.id}` + (creation.compiled ? `:${creation.buildId}` : '');
   const existing = this.jobs.find(job => job.resourceId === resourceId && job.creationOwner === owner && job.gameId === game.id && job.status === 'completed');
-  if (existing) { const saved = await this.completedFile(existing.id); const hash = crypto.createHash('sha256').update(await fs.readFile(saved.file)).digest('hex'); if (hash !== creation.sha256) throw new Error('已导入的创作文件发生变化，请保留并检查该文件'); return this.view(owner).find(job => job.id === existing.id); }
-  if (!Buffer.isBuffer(bytes) || bytes.length > (creation.compiled && /^[a-f0-9-]{36}$/.test(creation.buildId) ? 8 * 1024 * 1024 : 256 * 1024) || crypto.createHash('sha256').update(bytes).digest('hex') !== creation.sha256) throw new Error('创作包校验失败');
+  if (existing) { const saved = await this.completedFile(existing.id); const hash = crypto.createHash('sha256').update(await fs.readFile(saved.file)).digest('hex'); if (hash !== creation.sha256) throw new Error('已导入的创作文件发生变化，请保留并检查该文件'); if (creation.compiled && creation.toolchain && !existing.studio?.toolchain) { existing.studio ||= {}; existing.studio.toolchain = { id: creation.toolchain.id, status: creation.toolchain.status, deployment: creation.toolchain.deployment }; await this.save(); } return this.view(owner).find(job => job.id === existing.id); }
+  if (!Buffer.isBuffer(bytes) || bytes.length > (creation.compiled && /^[a-f0-9-]{36}$/.test(creation.buildId) ? 32 * 1024 * 1024 : 256 * 1024) || crypto.createHash('sha256').update(bytes).digest('hex') !== creation.sha256) throw new Error('创作包校验失败');
   const id = crypto.randomUUID(), dir = path.join(this.root, id), name = filename(creation.draft.name + '.zip');
   await fs.mkdir(dir);
   try { await fs.writeFile(path.join(dir, name), bytes, { flag: 'wx' }); }
   catch (error) { await fs.rm(dir, { recursive: true, force: true }); throw error; }
   const job = { id, name: creation.draft.name, gameId: game.id, gameName: game.name, game, source: 'studio', creationOwner: owner,
-   resourceId, studio: { artifactId: creation.id, buildId: creation.buildId, compiled: creation.compiled, lineage: creation.lineage, runtime: creation.runtime, bg3Module: creation.bg3Module, adapterId: creation.adapterId, installable: creation.installable, manifest: creation.manifest, draft: { kind: creation.draft.kind }, controls: creation.draft.controls }, fileId: '1', version: '1.0.0', filename: name, path: path.join(dir, name),
+   resourceId, studio: { artifactId: creation.id, buildId: creation.buildId, compiled: creation.compiled, lineage: creation.lineage, runtime: creation.runtime, bg3Module: creation.bg3Module, adapterId: creation.adapterId, installable: creation.installable, manifest: creation.manifest, draft: { kind: creation.draft.kind }, controls: creation.draft.controls, ...(creation.compiled && creation.toolchain ? { toolchain: { id: creation.toolchain.id, status: creation.toolchain.status, deployment: creation.toolchain.deployment } } : {}) }, fileId: '1', version: '1.0.0', filename: name, path: path.join(dir, name),
    status: 'completed', bytes: bytes.length, total: bytes.length, progress: 100, sha256: creation.sha256,
    created: new Date().toISOString(), finished: new Date().toISOString(), message: '本地创作内容包 · SHA-256 校验通过' };
   this.jobs.unshift(job);
@@ -94,17 +94,17 @@ class Downloads {
     if (message && (j.message !== message || !!j.verificationRequired !== verificationRequired)) { j.message = message; j.verificationRequired = verificationRequired; await this.save(); }
    } }); j.version=file.version||'';
    if (ctrl.signal.aborted) throw new Error('cancelled');
-   if (file.size > MAX_BYTES) throw new Error('文件超过当前 5 GB 下载限制');
+   assertSize(file.size, LIMITS.downloadBytes, '下载文件体积', file.name || j.name);
    await this.beforeDownload?.(file);
    j.filename = filename(file.name); j.name = file.label || file.name || j.name;
    const response = file._open ? await file._open(ctrl.signal) : await this.response(file._url, ctrl);
    const length = Number(response.headers.get('content-length') || 0); j.total = length || file.size || null;
-   if (j.total > MAX_BYTES) { await response.body?.cancel(); throw new Error('文件超过当前 5 GB 下载限制'); }
+   if (j.total > LIMITS.downloadBytes) { await response.body?.cancel(); assertSize(j.total, LIMITS.downloadBytes, '下载文件体积', j.filename); }
    resetIdle(); handle = await fs.open(partial, 'wx'); const sha = crypto.createHash('sha256'), md5 = crypto.createHash('md5'); let last = 0;
    j.message = '正在下载';
    for await (const chunk of response.body) {
     if (ctrl.signal.aborted) throw new Error('cancelled');
-    resetIdle(); j.bytes += chunk.length; if (j.bytes > MAX_BYTES) throw new Error('下载文件超过 5 GB 限制');
+    resetIdle(); j.bytes += chunk.length; assertSize(j.bytes, LIMITS.downloadBytes, '下载文件体积', j.filename);
     await handle.writeFile(chunk); sha.update(chunk); md5.update(chunk); j.progress = j.total ? Math.min(99, Math.floor(j.bytes / j.total * 100)) : null;
     if (Date.now() - last > 1000) { await this.save(); last = Date.now(); }
    }

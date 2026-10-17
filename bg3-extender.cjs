@@ -43,7 +43,7 @@ async function unpack(bytes, release = RELEASE) {
 }
 async function download(fetcher, release, signal) {
  let url = release.url;
- const allowed = new Set(['github.com', 'release-assets.githubusercontent.com', 'objects.githubusercontent.com']);
+ const allowed = new Set(['github.com', 'release-assets.githubusercontent.com', 'objects.githubusercontent.com', 'builds.bepinex.dev']);
  for (let redirects = 0; redirects <= 5; redirects++) {
   const parsed = new URL(url);
   if (parsed.protocol !== 'https:' || parsed.username || parsed.password || !allowed.has(parsed.hostname)) throw new Error('官方组件下载地址无效');

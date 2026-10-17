@@ -32,6 +32,13 @@ class StudioLifecycle {
   return this.downloads.jobs.find(job => job.creationOwner === owner && job.gameId === game.id && job.source === 'studio' &&
    (job.studio?.artifactId === artifact.id || job.resourceId === `studio:${artifact.id}`) && (!buildId || job.studio?.buildId === buildId));
  }
+ predecessors(owner, game, item) {
+  return this.installers.state.mods.filter(mod => {
+   const old = this.downloads.jobs.find(job => job.id === mod.jobId);
+   return mod.gameId === game.id && old?.source === 'studio' && old.creationOwner === owner &&
+    (old.studio?.artifactId === item.id || item.lineage?.conversationId && old.studio?.lineage?.conversationId === item.lineage.conversationId);
+  });
+ }
  async persist(owner, id, deployment) {
   deployment.updated = new Date().toISOString();
   const file = path.join(this.studio.recordPath(owner, id), 'deployment.json'), temporary = file + '.' + crypto.randomUUID() + '.tmp';
@@ -55,11 +62,7 @@ class StudioLifecycle {
    const deployment = { ...item.deployment, status: 'installed', modId: existing.id, jobId: job.id, buildId: item.buildId, sha256: item.sha256, message: '此版本已安装并启用，托管文件校验通过。' };
    await this.persist(owner, artifactId, deployment); return deployment;
   }
-  const predecessors = this.installers.state.mods.filter(mod => {
-   const old = this.downloads.jobs.find(job => job.id === mod.jobId);
-   return mod.gameId === game.id && old?.source === 'studio' && old.creationOwner === owner &&
-    (old.studio?.artifactId === artifactId || item.lineage?.conversationId && old.studio?.lineage?.conversationId === item.lineage.conversationId);
-  });
+  const predecessors = this.predecessors(owner, game, item);
   if (predecessors.length > 1) throw new Error('此对话有多个已安装版本，请先在已安装 Mod 中处理');
   const previous = predecessors[0] && structuredClone(predecessors[0]); let removed = false, plan;
   await this.permission(context, 'library.manage');
@@ -68,14 +71,14 @@ class StudioLifecycle {
    this.check(context);
    plan = await this.installers.prepare(game, job.id, rule);
    await this.permission(context, 'library.manage');
-   const mod = await this.installers.apply(game, plan.id);
+   const mod = await this.installers.apply(game, plan.id, item.adapterId === 'engine-mod' && plan.files.every(file => !file.originalHash || rule.baseHashes?.[file.destination] === file.originalHash));
    const deployment = { status: 'installed', modId: mod.id, jobId: job.id, buildId: item.buildId, sha256: item.sha256, message: previous ? '当前版本已安装并启用，已替换此对话的上一版本；文件校验通过。' : '产物已安装并启用，文件校验通过。可以继续说“启动游戏并检查日志”。' };
    await this.persist(owner, artifactId, deployment); return deployment;
   } catch (error) {
    if (removed && !this.installers.state.mods.some(mod => mod.jobId === job.id && mod.gameId === game.id)) {
     try {
      const restore = await this.installers.prepare(game, previous.jobId, previous.profile);
-     try { const mod = await this.installers.apply(game, restore.id); if (previous.status === 'disabled') await this.installers.action(game, mod.id, 'disable'); }
+     try { const mod = await this.installers.apply(game, restore.id, restore.files.every(file => !file.originalHash || previous.profile.baseHashes?.[file.destination] === file.originalHash)); if (previous.status === 'disabled') await this.installers.action(game, mod.id, 'disable'); }
      finally { await this.installers.discard(restore.id); }
     } catch (rollback) { throw new Error('安装未完成，恢复上一版本失败：' + rollback.message); }
    }
@@ -127,7 +130,7 @@ class StudioLifecycle {
   await this.persist(owner, artifactId, deployment); return deployment;
  }
  async runtime({ owner, game, artifact }) {
-  const job = this.jobFor(owner, game, artifact, ['bepinex-plugin', 'bg3-lua', 'bg3-follower'].includes(artifact.adapterId) ? artifact.toolchain?.id : undefined);
+  const job = this.jobFor(owner, game, artifact, ['bepinex-plugin', 'bg3-lua', 'bg3-follower', 'engine-mod'].includes(artifact.adapterId) ? artifact.toolchain?.id : undefined);
   const mod = job && this.installers.state.mods.find(mod => mod.gameId === game.id && mod.jobId === job.id && mod.status === 'enabled');
   if (!mod) return { status: 'not_installed', detail: '当前产物尚未安装并启用，没有对应的游戏运行证据。' };
   const deployment = artifact.deployment;

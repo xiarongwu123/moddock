@@ -3,6 +3,8 @@ const github = (repository, tag, name, size, sha256) => ({ repository, tag, name
  url: `https://github.com/${repository}/releases/download/${tag}/${name}`,
  page: `https://github.com/${repository}/releases/tag/${tag}` });
 const components = {
+ 'bepinex-il2cpp-x64': { name: 'BepInEx-Unity.IL2CPP-win-x64-6.0.0-be.788+5b766a3.zip', size: 34336405, sha256: 'f4cc496bd098a0df4164b81e3737297707f13a47c2478dba2f60eefab784817a', url: 'https://builds.bepinex.dev/projects/bepinex_be/788/BepInEx-Unity.IL2CPP-win-x64-6.0.0-be.788%2B5b766a3.zip', page: 'https://builds.bepinex.dev/projects/bepinex_be/788' },
+ 'bepinex-il2cpp-x86': { name: 'BepInEx-Unity.IL2CPP-win-x86-6.0.0-be.788+5b766a3.zip', size: 31440336, sha256: 'd5954a5993ec39cd1133603d85bff93875d30b6411b712cc13dcf03c8e08a4d3', url: 'https://builds.bepinex.dev/projects/bepinex_be/788/BepInEx-Unity.IL2CPP-win-x86-6.0.0-be.788%2B5b766a3.zip', page: 'https://builds.bepinex.dev/projects/bepinex_be/788' },
  'bepinex-x64': github('BepInEx/BepInEx', 'v5.4.23.5', 'BepInEx_win_x64_5.4.23.5.zip', 639118, '82f9878551030f54657792c0740d9d51a09500eeae1fba21106b0c441e6732c4'),
  'bepinex-x86': github('BepInEx/BepInEx', 'v5.4.23.5', 'BepInEx_win_x86_5.4.23.5.zip', 638544, '37651c79e40d6f909572a4f461ac25350bb3ef8fe7fbd29f1aa8791a33b84c82'),
  ue4ss: github('UE4SS-RE/RE-UE4SS', 'experimental-latest', 'UE4SS_v3.0.1-1176-g1ba38db4.zip', 8741395, 'e615ee7a2c24344ea5aeef85183d6cfd550f4f6352225976679f9fefffd0b9a5'),

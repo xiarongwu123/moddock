@@ -2,7 +2,7 @@ const activeJobs = new Set(['queued', 'running', 'authorization_required']);
 const activeConnections = new Set(['connecting', 'waiting', 'reconnecting', 'saving']);
 
 function hasActiveWork(state) {
- return state?.jobs?.some(job => activeJobs.has(job.status)) || activeConnections.has(state?.nexusSso?.status);
+ return state?.jobs?.some(job => activeJobs.has(job.status)) || activeConnections.has(state?.nexusSso?.status) || state?.installations?.progress?.status === 'running';
 }
 
 function createStatePoller({ read, apply, isActive, isPaused = () => false, visibility = document,

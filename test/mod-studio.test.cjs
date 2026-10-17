@@ -273,6 +273,32 @@ test('automatic planning and generation choose an adapter, save the artifact and
  assert.equal((await x.post('studio/list')).body.items.length, 2);
  assert.equal((await x.post('studio/prepare', { id: second.artifactId })).status, 200);
 });
+test('a Mod request rejects a document downgrade and compiles a real Lua package even before a local loader is installed', async t => {
+ let plans = 0;
+ const x = await fixture(t, { variant: 'unreal', studio: {
+  plan: async () => ({ ...creationPlan, kind: ++plans === 1 ? 'project-plan' : 'ue4ss-lua' }),
+  generate: async () => ({ kind: 'ue4ss-lua', name: 'Executable helper', author: 'Fixture', code: 'RegisterHook("/Script/Engine.PlayerController:ClientRestart", function(Context) local pawn = Context:get() if pawn:IsValid() then print(pawn:GetFullName()) end end)' }),
+  tools: { luac: false },
+ } });
+ await fs.rm(path.join(x.game.installPath, 'Game/Binaries/Win64/ue4ss/UE4SS.dll'));
+ const thread = await completeTurn(x, { message: '制作实际脚本 Mod，不要开发方案' });
+ assert.equal(thread.status, 'completed', thread.error); assert.equal(plans, 2);
+ const saved = (await x.post('studio/read', { id: thread.artifactId })).body;
+ assert.equal(saved.adapterId, 'ue4ss-lua'); assert.equal(saved.installable, true); assert.equal(saved.toolchain.installation.ready, false);
+ assert.ok(saved.toolchain.bundle); assert.ok(saved.files.some(file => file.name.endsWith('Scripts/main.lua')));
+ assert.ok(!saved.files.some(file => file.name === 'MODDING_PLAN.md'));
+ const bundle = (await x.post('studio/export', { id: saved.id, buildId: saved.toolchain.id })).body;
+ assert.ok(Buffer.from(bundle.base64, 'base64').includes(Buffer.from('RegisterHook')));
+ assert.equal((await x.post('studio/prepare', { id: saved.id })).status, 400);
+});
+test('an unsupported game retains the idea without manufacturing a plan as a completed Mod', async t => {
+ let called = false;
+ const x = await fixture(t, { variant: 'unknown', studio: { plan: async () => { called = true; return { ...creationPlan, kind: 'project-plan' }; }, generate: async () => ({}) } });
+ const thread = await completeTurn(x, { message: '开发一个可安装的战斗 Mod' });
+ assert.equal(thread.status, 'failed'); assert.equal(thread.artifactId, null); assert.equal(called, false);
+ assert.match(thread.error, /制作适配/); assert.equal(thread.messages.filter(message => message.role === 'user').length, 1);
+ assert.deepEqual((await x.post('studio/list')).body.items, []);
+});
 test('clarifying questions stay in the conversation and only generate after an answer', async t => {
  let plans = 0, generations = 0;
  const x = await fixture(t, { variant: 'unreal', studio: {
@@ -307,7 +333,7 @@ test('invalid kinds and malformed steps are automatically replanned with feedbac
   },
   generate: async payload => { generations++; assert.equal(payload.kind, 'project-plan'); return { kind: payload.kind, name: 'Companion development plan', author: 'Player', plan: 'A new companion requires verified game APIs and a dedicated resource pack adapter.' }; },
  } });
- const thread = await completeTurn(x, { message: 'Create a Chinese companion; choose the details yourself.' });
+ const thread = await completeTurn(x, { message: 'Create a development plan for a Chinese companion; choose the details yourself.' });
  assert.equal(thread.status, 'completed'); assert.equal(generations, 1); assert.equal(requests.length, 3);
  assert.equal(requests[1].previousPlan.kind, 'dialogue'); assert.match(requests[1].validation.error, /不支持/);
  assert.deepEqual(requests[1].validation.allowedKinds, ['project-plan', 'custom-project']);
@@ -343,7 +369,7 @@ test('delegated creative choices do not cause repeated questions for source-only
   plan: async payload => { requests.push(payload); return requests.length === 1 ? { title: 'Companion', summary: 'Choose a look.', questions: ['Which appearance?'] } : { ...creationPlan, kind: 'project-plan' }; },
   generate: async () => ({ kind: 'project-plan', name: 'Companion', author: 'Player', plan: 'Choose a default appearance and document missing game API evidence.' }),
  } });
- const thread = await completeTurn(x, { message: '做一个人物 Mod，你自己决定就可以了。' });
+ const thread = await completeTurn(x, { message: '给我一份开发方案，做一个人物 Mod，你自己决定就可以了。' });
  assert.equal(thread.status, 'completed'); assert.equal(requests.length, 2); assert.equal(thread.plan.questions.length, 0);
  assert.equal(requests[0].capability.creativeDefaultsDelegated, true); assert.match(requests[1].validation.error, /采用合理默认值/);
  assert.equal(thread.planningAttempts[0].accepted, false); assert.equal(thread.planningAttempts[1].accepted, true);
@@ -363,11 +389,11 @@ test('cancelling automatic replanning prevents later retries and artifact genera
  assert.equal(stopped.planningAttempts.length, 1); assert.equal(stopped.messages[0].content, 'Create an exploration helper.');
 });
 test('a saved idea can resume after the future service is configured', async t => {
- const x = await fixture(t, { variant: 'unknown' }), waiting = await completeTurn(x, { message: 'Create a new quest.' });
+ const x = await fixture(t, { variant: 'unknown' }), waiting = await completeTurn(x, { message: '只输出源码，做一个新任务工程。' });
  x.service.studio.options.plan = async () => ({ ...creationPlan, kind: 'custom-project' });
  x.service.studio.options.generate = async () => ({ kind: 'custom-project', name: 'Quest project', author: 'Player', files: [{ name: 'quest.json', text: '{"name":"New quest"}' }] });
  const completed = await completeTurn(x, { id: waiting.id, resume: true });
- assert.equal(completed.status, 'completed'); assert.equal(completed.messages.filter(message => message.role === 'user').length, 1);
+ assert.equal(completed.status, 'blocked'); assert.equal(completed.messages.filter(message => message.role === 'user').length, 1);
  assert.equal((await x.post('studio/read', { id: completed.artifactId })).body.installable, false);
 });
 test('stopping an automatic creation cancels a pending model and preserves the idea', async t => {
@@ -439,9 +465,10 @@ test('legacy selected projects can enter the conversation toolchain with owner a
 test('missing compilers and unsupported build adapters preserve source without claiming validation passed', async t => {
  for (const variant of ['unity','unknown']) {
   const x = await fixture(t, { variant, studio: { plan: async () => ({ ...creationPlan, kind: ({ unreal: 'ue4ss-lua', unity: 'bepinex-plugin', unknown: 'custom-project' })[variant] }), generate: async () => ({ kind: ({ unreal: 'ue4ss-lua', unity: 'bepinex-plugin', unknown: 'custom-project' })[variant], name: 'Build fixture', author: 'Fixture', code: 'print(1)', files: [{ name: 'main.txt', text: 'No registered build adapter.' }] }), tools: { luac: false, dotnet: false } } });
-  const thread = await completeTurn(x, { message: '制作一个探索助手' });
+  const thread = await completeTurn(x, { message: variant === 'unknown' ? '只输出源码，制作一个探索助手' : '制作一个探索助手' });
   const saved = (await x.post('studio/read', { id: thread.artifactId })).body;
   assert.equal(saved.toolchain.status, 'blocked'); assert.equal(saved.toolchain.runtime.status, 'not_run');
+  assert.equal(thread.status, 'blocked');
   assert.ok(saved.toolchain.checks.some(check => check.status === 'blocked'));
   assert.equal((await x.post('studio/export', { id: saved.id })).status, 200);
   assert.equal((await x.post('studio/export', { id: saved.id, buildId: saved.toolchain.id })).status, 400);

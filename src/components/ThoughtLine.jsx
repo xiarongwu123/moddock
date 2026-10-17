@@ -163,7 +163,7 @@ export default function ThoughtLine({
     setAnnounce(showTimer ? `${doneText} ${spoken(dsRef.current)}` : doneText);
     latest.current.onSettle?.(dsRef.current / 10);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isWorking]);
+  }, [isWorking, label, doneText, showTimer]);
 
   const toggle = hasTrace && collapsible;
   const head = (

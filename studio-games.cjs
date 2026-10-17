@@ -27,7 +27,10 @@ async function resolveStudioGame(selected, games = []) {
   if (entries.length > 500) throw new Error('目录内容较多，请选择具体游戏文件夹或启动文件');
   const candidates = [];
   for (const entry of entries.filter(entry => entry.isFile())) if (await nativeFile(path.join(directory, entry.name))) candidates.push(path.relative(root, path.join(directory, entry.name)).split(path.sep).join('/'));
-  if (!candidates.length) throw new Error('没有找到游戏原生启动文件，请选择具体游戏文件夹');
+  if (!candidates.length) {
+   const diagnostic = await require('./game-diagnostics.cjs').diagnoseGame({ installPath: root });
+   if (!require('./studio-engines.cjs').familyFor(diagnostic.engine.key)) throw new Error('没有找到游戏启动文件或可识别的游戏引擎项目，请选择具体游戏文件夹');
+  }
   if (candidates.length === 1) executable = candidates[0];
  }
  return { id: 'local-' + crypto.createHash('sha256').update(pathKey(root)).digest('hex').slice(0, 20), name: path.basename(root).replace(/\.app$/i, ''),

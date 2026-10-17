@@ -10,6 +10,7 @@ const creationReady = s => !!s.saved && s.saved.toolchain?.status === 'passed' &
 const suggestions = ['我想增加一个有独特能力的新装备，并设计获取方式', '我想调整游戏里的一个机制，让探索更有趣', '我想做一个符合游戏世界观的新角色或剧情'];
 const suggestionLabels = ['加一件新装备', '调整游戏机制', '创作角色与剧情'];
 const runActions = new Set(['send', 'resume', 'try']);
+const activityNames = { build_native_mod: '编译并打包游戏 Mod', prepare_native_tools: '准备游戏制作工具', extract_game_code: '读取游戏玩法接口', generate_interop: '生成游戏接口', inspect_game: '检查游戏环境', list_game_files: '调查游戏资源', read_game_file: '读取玩法代码', search_api: '核对实现方式', read_runtime: '查看运行反馈', check_draft: '检查制作文件', read: '查阅制作资料', read_reference: '查阅游戏资料', run_agent: '分析实现方案', write_project_file: '编写制作文件', read_project_file: '读取制作文件', list_project_files: '查看制作文件', validate_project: '编译与修正', submit_result: '整理创作结果' };
 const runKey = thread => thread && `${thread.id}:${thread.messages.filter(message => message.role === 'user').at(-1)?.id || thread.created}`;
 const mascot = (className = '', alt = '', mode = className === 'studio-message-avatar' ? 'quiet' : 'idle') => `<img class="studio-mascot ${className}" src="/youxia-ai-mascot.svg#${mode}" alt="${alt}" width="96" height="96">`;
 
@@ -39,18 +40,30 @@ export function createModStudio({ api, render, esc, icon, getGame, getGames, cha
   const startedAt = s.activityStartedAt ?? Date.parse(lastIdea?.created || thread?.created);
   if (!Number.isFinite(startedAt)) return null;
   const command = pending ? s.busy === 'try' : !!thread.command;
-  const failed = !!s.error || ['failed', 'cancelled', 'interrupted', 'awaiting_service'].includes(thread?.status);
-  const doneLabel = s.error ? '这次遇到了点问题，用时' : ({ failed: '这次还没做好，用时', cancelled: '先歇一会儿，用时', interrupted: '创作已中断，用时', awaiting_service: '还没连上创作服务，用时', clarifying: '等你补充一点细节，用时' })[thread?.status] || (command ? '这一步处理好了，用时' : '这一版做好了，用时');
-  return { key: startedAt, working, startedAt, label: command ? '匣仔正在处理' : '匣仔正在琢磨你的点子', doneLabel,
+  const failed = !!s.error || ['blocked', 'failed', 'cancelled', 'interrupted', 'awaiting_service'].includes(thread?.status);
+  const doneLabel = s.error ? '这次遇到了点问题，用时' : ({ blocked: '制作还需要处理一些问题，用时', failed: '这次还没做好，用时', cancelled: '先歇一会儿，用时', interrupted: '创作已中断，用时', awaiting_service: '还没连上创作服务，用时', clarifying: '等你补充一点细节，用时' })[thread?.status] || (command ? '这一步处理好了，用时' : '这一版做好了，用时');
+  const current = thread?.toolCalls?.findLast(tool => tool.status === 'running');
+  const stage = { analyzing: '正在了解你的想法', planning: '正在构思玩法', generating: '正在制作你的 Mod', validating: '正在检查制作文件', checking: '正在检查游戏环境', building: '正在编译制作文件', verifying: '正在验证制作结果', repairing: '正在调整制作内容', deploying: '正在安装到游戏', launching: '正在启动游戏', observing: '正在查看运行反馈' }[thread?.status];
+  const label = thread?.harness?.connection?.status === 'reconnecting' ? '连接中断，正在自动重连' : current ? activityNames[current.name] || '正在处理创作内容' : thread?.harness?.modelStatus === 'thinking' ? '正在思考实现方式' : stage || '正在准备创作';
+  return { key: startedAt, working, startedAt, label, doneLabel,
    elapsed: working ? undefined : Math.max(0, ((s.activityEndedAt || Date.parse(thread?.updated) || startedAt) - startedAt) / 1000),
-   color: !working && failed ? '#cfab88' : '#b9dc82', glyphColor: !working && failed ? '#cfab88' : '#b9dc82', fontSize: 13, collapsible: false, showTimer: true };
+   color: !working && failed ? '#cfab88' : '#aeb9ac', fontSize: 12, glyph: 'none', shimmer: false, settleBlur: 0, collapsible: false, showTimer: true };
  }
  function thought(s) {
   const props = thoughtProps(s);
   const tools = s.thread?.toolCalls || [];
-  const trace = tools.length ? `<details class="studio-technical" data-help-key="studio:tools:${s.thread.id}"><summary>${tools.length} 次本机工具调用</summary>${tools.map(tool => `<p><strong>${esc(({inspect_game:'检查游戏',search_api:'查询 BG3 接口',read_runtime:'读取本次运行反馈',check_draft:'编译检查脚本'})[tool.name] || tool.name)}</strong>${tool.query ? ` · ${esc(tool.query)}` : ''}<br>${esc(tool.detail)}</p>`).join('')}</details>` : '';
-  const mode = props?.working ? (['generating', 'building', 'repairing', 'deploying', 'launching'].includes(s.thread?.status) ? 'working' : 'thinking') : s.thread?.status === 'completed' ? 'happy' : 'idle';
-  return (props ? `<div class="studio-activity">${mascot('studio-activity-mascot', '', mode)}<div data-studio-thought>${esc(props.working ? props.label : props.doneLabel)}</div></div>` : '') + trace;
+  const harness = s.thread?.harness;
+  const statusName = status => ({ running: '进行中', completed: '已完成', failed: '未完成', cancelled: '已停止', interrupted: '已中断' })[status] || '等待处理';
+  const toolRows = tools.map(tool => `<li class="studio-process-step is-${esc(tool.status)}"><span class="studio-process-step-mark" aria-hidden="true">${icon(tool.status === 'completed' ? 'check' : tool.status === 'running' ? 'loader' : 'info', tool.status === 'running' ? 'spinning' : '')}</span><strong>${esc(activityNames[tool.name] || '处理创作内容')}</strong><span>${esc(statusName(tool.status))}${Number.isFinite(tool.durationMs) && tool.durationMs >= 1000 ? ` · ${(tool.durationMs / 1000).toFixed(1)} 秒` : ''}</span></li>`).join('');
+  const thoughts = harness?.thinking || [];
+  const displayThought = text => String(text || '').replace(/\bpi[ -]?agent\b/gi, '创作助手').replace(/\bskills?\b/gi, '制作资料');
+  const thinking = thoughts.length ? `<details class="studio-process-thinking" data-help-key="studio:thinking:${s.thread.id}"><summary>思考记录${props?.working && harness.modelStatus === 'thinking' ? '<span>思考中</span>' : ''}${icon('chevron')}</summary><div>${thoughts.map(thought => `<p>${esc(displayThought(thought.text))}</p>`).join('')}</div></details>` : '';
+  const plan = s.thread?.plan?.steps?.length ? `<details class="studio-process-thinking" data-help-key="studio:plan:${s.thread.id}"><summary>制作方案${icon('chevron')}</summary><ol>${s.thread.plan.steps.map(step => `<li>${esc(step)}</li>`).join('')}</ol></details>` : '';
+  const records = s.thread?.messages.filter(message => message.role === 'system') || [];
+  const history = records.length ? `<details class="studio-process-thinking" data-help-key="studio:logs:${s.thread.id}"><summary>处理记录${icon('chevron')}</summary><div>${records.map(message => `<p>${esc(displayThought(message.content))}</p>`).join('')}</div></details>` : '';
+  if (!props) return '';
+  const status = props.working ? 'running' : s.thread?.status || 'completed';
+  return `<section class="studio-process is-${esc(status)}" aria-label="创作进度" data-status="${esc(status)}"><details data-help-key="studio:process:${s.thread?.id || 'new'}"><summary><span class="studio-process-mark" aria-hidden="true">${icon(props.working ? 'sparkles' : status === 'completed' ? 'check' : 'info')}</span><span data-studio-thought>${esc(props.working ? props.label : props.doneLabel)}</span><span class="studio-process-toggle">查看过程${icon('chevron')}</span></summary><div class="studio-process-body">${tools.length ? `<ol class="studio-process-steps" aria-label="处理记录">${toolRows}</ol>` : props.working ? '<p class="studio-process-waiting">正在准备创作资料…</p>' : ''}${thinking}${plan}${history}</div></details></section>`;
  }
  function clearThought() {
   const root = thoughtRoot; thoughtRoot = null; thoughtHost = null;
@@ -78,7 +91,7 @@ export function createModStudio({ api, render, esc, icon, getGame, getGames, cha
    placeholder: s.thread ? '接着聊，想改哪里？' : '说说你想做的 Mod…',
    sources: [], commands: [], models: [], efforts: [], busy, disabled: !!s.busy && !runActions.has(s.busy), stopDisabled: !!s.busy,
    hint: busy ? '正在创作，可停止生成' : 'Enter 发送 · Shift+Enter 换行',
-   background: '#1a1e1b', color: '#dfe8d9', menuBackground: '#19221a', sparkColor: '#b9dc82', width: 820, radius: 16, maxRows: 5,
+   background: '#181d1b', color: '#dfe8d9', menuBackground: '#19221a', sparkColor: '#b9dc82', width: 820, radius: 18, maxRows: 5,
    onChange: text => { s.idea = text; s.drafts.set(s.thread?.id || 'new', text); mountPrompt(container); },
    onSend: text => { if (!s.busy && !active(s.thread?.status) && getGame()?.id === gameId) { s.idea = text; return request('send'); } },
    onStop: () => request('cancel'),
@@ -113,14 +126,14 @@ export function createModStudio({ api, render, esc, icon, getGame, getGames, cha
  function toolReport(report, detailed = false) {
   if (!report) return '<div class="studio-tool-report"><p>尚无构建记录。可直接说“编译并验证”。</p></div>';
   const status = { passed: '文件验证通过', blocked: '制作条件未就绪', failed: '验证未通过', cancelled: '已取消', interrupted: '已中断', checking: '检查环境中', building: '编译中', verifying: '验证中' }[report.status] || report.status;
-  const checks = detailed ? report.checks : report.checks.filter(check => ['blocked','failed'].includes(check.status));
-  return `<section class="studio-tool-report is-${esc(report.status)}"><div class="studio-section-head"><h3>制作与验证</h3><span class="studio-tag">${esc(status)}</span></div><p>${esc(report.summary || report.adapterName)}</p>${checks.map(check => `<div class="studio-tool-check is-${esc(check.status)}"><strong>${check.status === 'passed' ? '✓' : check.status === 'blocked' ? '·' : '!'} ${esc(check.name)}</strong><${detailed ? 'pre' : 'p'}>${esc(check.detail)}</${detailed ? 'pre' : 'p'}></div>`).join('')}<p class="studio-fineprint">${esc(report.runtime.detail)}</p>${report.bundle ? `<p class="studio-fineprint">已生成编译包 · ${report.outputs.map(output => esc(output.name)).join(' / ')}</p>` : ''}</section>`;
+  const checks = detailed ? report.checks : report.checks.filter(check => ['blocked','failed','pending'].includes(check.status));
+  return `<section class="studio-tool-report is-${esc(report.status)}"><div class="studio-section-head"><h3>制作与验证</h3><span class="studio-tag">${esc(status)}</span></div><p>${esc(report.summary || report.adapterName)}</p>${checks.map(check => `<div class="studio-tool-check is-${esc(check.status)}"><strong>${check.status === 'passed' ? '✓' : ['blocked','pending'].includes(check.status) ? '·' : '!'} ${esc(check.name)}</strong><${detailed ? 'pre' : 'p'}>${esc(check.detail)}</${detailed ? 'pre' : 'p'}></div>`).join('')}<p class="studio-fineprint">${esc(report.runtime.detail)}</p>${report.bundle ? `<p class="studio-fineprint">已生成编译包 · ${report.outputs.map(output => esc(output.name)).join(' / ')}</p>` : ''}</section>`;
  }
  function result(s, busy) {
   const saved = s.saved;
   if (!saved || creating(s.thread)) return '';
-  const ready = creationReady(s), kept = saved.library && (!['bepinex-plugin', 'bg3-lua', 'bg3-follower'].includes(saved.adapterId) || saved.library.buildId === saved.toolchain?.id);
-  return `<section class="studio-result studio-completion" aria-label="生成结果"><div class="studio-completion-heading"><span class="studio-completion-icon">${icon(ready ? 'check' : 'info')}</span><div><span class="studio-kicker">${ready ? (saved.adapterId === 'project-plan' ? '开发方案已生成' : '已完成') : '还需要处理一些问题'}</span><h3>${esc(saved.draft.name)}</h3></div></div><p>${esc(saved.draft.description || saved.summary)}</p>${ready && saved.installable ? `<p>进游戏试一试。没达到预期，继续告诉我你看到的情况。</p><div class="studio-result-actions"><button class="btn primary" data-studio-action="try" ${busy ? 'disabled' : ''}>${icon('play')}进游戏确认</button><button class="btn" data-studio-action="keep" ${busy || kept ? 'disabled' : ''}>${icon('box')}${kept ? '已存入 Mod 库' : '满意，存进 Mod 库'}</button>${kept ? '<button class="text-link" data-studio-action="library">打开 Mod 库</button>' : ''}</div>` : `<p>${ready ? '开发方案已生成，可预览或导出；尚未生成可安装的 Mod。' : '这次制作还没有通过验证，可以继续对话调整。'}</p>`}${s.saved.deployment?.runtime ? `<p class="studio-fineprint">${esc(s.saved.deployment.runtime.detail)}</p>` : ''}<details class="studio-technical" data-help-key="studio:artifact:${saved.id}"><summary>查看制作详情</summary><div class="studio-result-actions"><button class="btn small" data-studio-action="product" ${busy ? 'disabled' : ''}>查看文件与预览</button><button class="btn small" data-studio-action="export" ${busy ? 'disabled' : ''}>导出 ZIP</button>${saved.toolchain?.bundle ? `<button class="btn small" data-studio-action="export-build" ${busy ? 'disabled' : ''}>导出编译包</button>` : ''}</div>${toolReport(saved.toolchain)}${gameInfo(s)}</details></section>`;
+  const ready = creationReady(s), kept = saved.library && (!['bepinex-plugin', 'bg3-lua', 'bg3-follower', 'engine-mod'].includes(saved.adapterId) || saved.library.buildId === saved.toolchain?.id);
+  return `<section class="studio-result studio-completion" aria-label="生成结果"><div class="studio-completion-heading"><span class="studio-completion-icon">${icon(ready ? 'box' : 'info')}</span><div><span class="studio-kicker">${ready ? (saved.adapterId === 'project-plan' ? '开发方案已生成' : '制作完成 · 待游戏内确认') : '还需要处理一些问题'}</span><h3>${esc(saved.draft.name)}</h3></div></div><p>${esc(saved.draft.description || saved.summary)}</p>${ready && saved.installable ? `<div class="studio-result-actions"><button class="btn primary" data-studio-action="try" ${busy ? 'disabled' : ''}>${icon('play')}进游戏试试</button><button class="btn" data-studio-action="keep" ${busy || kept ? 'disabled' : ''}>${icon('box')}${kept ? '已存入 Mod 库' : '存入 Mod 库'}</button>${kept ? '<button class="text-link" data-studio-action="library">打开 Mod 库</button>' : ''}</div><p class="studio-result-hint">试玩后，告诉我效果怎么样，我们可以继续调整。</p>` : `<p class="studio-result-hint">${ready ? '这是你要求的文档或源码，可查看内容或导出。' : '这次制作还没有通过验证，可以继续对话调整。'}</p>`}${s.saved.deployment?.runtime ? `<p class="studio-fineprint">${esc(s.saved.deployment.runtime.detail)}</p>` : ''}<details class="studio-technical" data-help-key="studio:artifact:${saved.id}"><summary>文件与制作详情</summary><div class="studio-result-actions"><button class="btn small" data-studio-action="product" ${busy ? 'disabled' : ''}>查看文件与预览</button><button class="btn small" data-studio-action="export" ${busy ? 'disabled' : ''}>导出 ZIP</button>${saved.toolchain?.bundle ? `<button class="btn small" data-studio-action="export-build" ${busy ? 'disabled' : ''}>导出编译包</button>` : ''}</div>${toolReport(saved.toolchain)}${gameInfo(s)}</details></section>`;
  }
  function gameInfo(s) {
   const a = s.thread?.analysis;
@@ -128,10 +141,9 @@ export function createModStudio({ api, render, esc, icon, getGame, getGames, cha
  }
  function conversation(s) {
   const thread = s.thread;
-  if (!thread) return thought(s) || `<div class="studio-welcome">${mascot('studio-welcome-mascot', '挥手的匣仔')}<h3>想给游戏加点什么？</h3><p>和匣仔聊聊，把你的想法做成 Mod。</p></div>`;
+  if (!thread) return thought(s) || `<div class="studio-welcome">${mascot('studio-welcome-mascot', '挥手的匣仔')}<h3>想给游戏加点什么？</h3><p>说出你想要的玩法，AiMod 在游戏里帮你做出来。</p><p class="studio-engine-coverage">Unity · 虚幻 · Godot · RPG Maker · Ren'Py · GameMaker<br>这些引擎做的单机游戏，都可以试试。</p></div>`;
   const history = thread.messages.filter(message => message.role !== 'system');
-  const records = thread.messages.filter(message => message.role === 'system');
-  return `${history.map(message => `<article class="studio-message is-${message.role}"><div class="studio-message-label">${message.role === 'user' ? '你' : `${mascot('studio-message-avatar')}<strong>匣仔</strong><small>游匣 AI</small>`}</div><div class="studio-message-text">${esc(message.content)}</div></article>`).join('')}${thread.plan?.steps.length ? `<details class="studio-technical" data-help-key="studio:plan:${thread.id}"><summary>看看制作方案</summary><ol>${thread.plan.steps.map(step => `<li>${esc(step)}</li>`).join('')}</ol></details>` : ''}${thread.capability?.mode === 'source-only' ? `<p class="studio-capability" role="note">${esc(thread.capability.message)}</p>` : ''}${thought(s)}${['awaiting_service','cancelled','interrupted','failed'].includes(thread.status) ? `<div class="studio-continuation">${mascot('studio-continuation-mascot')}<span>${thread.status === 'awaiting_service' ? '暂时还没连上创作服务，你的点子已经存好啦。' : thread.status === 'failed' ? '这次卡住了，你的点子还在。我们可以继续调整。' : '你的点子已经存好，随时可以接着做。'}</span><button class="btn small" data-studio-action="resume" ${s.busy ? 'disabled' : ''}>接着做</button></div>` : ''}${records.length ? `<details class="studio-technical" data-help-key="studio:logs:${thread.id}"><summary>制作记录 · ${records.length}</summary>${records.map(message => `<p>${esc(message.content)}</p>`).join('')}</details>` : ''}`;
+  return `${history.map(message => `<article class="studio-message is-${message.role}" aria-label="${message.role === 'user' ? '你的想法' : '匣仔的回复'}"><div class="studio-message-label">${message.role === 'user' ? '你' : `${mascot('studio-message-avatar')}<strong>匣仔</strong><small>游匣 AI</small>`}</div><div class="studio-message-text">${esc(message.content)}</div></article>`).join('')}${thread.capability?.mode === 'source-only' ? `<p class="studio-capability" role="note">${esc(thread.capability.message)}</p>` : ''}${thought(s)}${['awaiting_service','cancelled','interrupted','failed','blocked'].includes(thread.status) ? `<div class="studio-continuation">${mascot('studio-continuation-mascot')}<span>${thread.status === 'awaiting_service' ? '暂时还没连上创作服务，你的点子已经存好啦。' : ['failed','blocked'].includes(thread.status) ? '这次卡住了，你的点子还在。我们可以继续调整。' : '你的点子已经存好，随时可以接着做。'}</span><button class="btn small" data-studio-action="resume" ${s.busy ? 'disabled' : ''}>接着做</button></div>` : ''}`;
  }
  function guide() {
   return `<ol class="studio-guide" aria-label="使用方式">${[['选个游戏', '从列表选一款，或直接拖入本机游戏。'], ['聊聊点子', '想要什么效果，直接告诉匣仔就好。'], ['进游戏试试', '把实际看到的情况告诉匣仔，一起调整。'], ['收藏你的作品', '满意后存进 Mod 库，下次接着玩。']].map(([title, description], index) => `<li><span>0${index + 1}</span><div><h3>${title}</h3><p>${description}</p></div></li>`).join('')}</ol>`;
@@ -144,7 +156,7 @@ export function createModStudio({ api, render, esc, icon, getGame, getGames, cha
   const content = mainPanel(game), s = game && state(game.id), environment = s?.environment;
   if (!getStatus()?.allowed || !environment?.applicable || environment.ready) return content;
   const canPrepare = environment.canPrepare ?? environment.supported;
-  const message = s.busy === 'environment' || s.busy === 'start' ? '正在准备，请稍候…' : environment.status === 'conflict' ? '游戏文件需要检查，处理后就能继续准备。' : canPrepare ? '开始创作前，需要先准备一下。' : '可以先聊想法、生成方案，暂时无法自动准备游戏。';
+  const message = s.busy === 'environment' || s.busy === 'start' ? '正在准备，请稍候…' : environment.status === 'conflict' ? '游戏文件需要检查，处理后就能继续准备。' : canPrepare ? '开始创作前，需要先准备一下。' : '发送想法后，将自动调查这款游戏的实现方式。';
   return `<section class="studio-environment" aria-label="创作提示"><p role="status">${message}</p><button class="btn small" data-studio-action="${environment.status === 'conflict' || !canPrepare ? 'check-environment' : 'environment'}" ${s.busy || active(s.thread?.status) ? 'disabled' : ''}>${!canPrepare || environment.status === 'conflict' ? '重新检查' : '自动准备'}</button></section>` + content;
  }
  function mainPanel(game) {
@@ -157,12 +169,14 @@ export function createModStudio({ api, render, esc, icon, getGame, getGames, cha
    <header class="studio-heading">${header}</header>
    ${!s?.ready ? selection(game) : `<div class="studio-chat-layout">
     <section class="studio-conversation ${empty ? 'is-empty' : ''}" aria-label="创作对话">
-     <div class="studio-chat-scroll" data-studio-scroll data-chat-id="${t?.id || 'new'}" aria-live="polite" aria-busy="${running}">${s.busy === 'load' ? '<p class="studio-loading">正在读取创作记录…</p>' : conversation(s)}</div>
+     <div class="studio-chat-scroll" data-studio-scroll data-chat-id="${t?.id || 'new'}" aria-live="polite" aria-busy="${running}">${s.busy === 'load' ? '<p class="studio-loading">正在读取创作记录…</p>' : conversation(s)}${result(s, disabled)}</div>
      ${s.error || t?.error ? `<div class="studio-error" role="alert">${esc(s.error || t.error)}</div>` : ''}
+     ${t?.harness?.connection?.status === 'reconnecting' && running ? '<p class="studio-service-status" role="status">网络暂时中断，正在自动重连。代码和进度已保留，恢复后会继续。</p>' : ''}
+     ${t?.diagnostic || t?.diagnostics?.length ? `<details class="studio-technical studio-diagnostics" data-help-key="studio:diagnostics:${t.id}"><summary>查看${t.diagnostic ? '错误详情' : '连接日志'}</summary><div>${t.diagnostic ? `<p>失败阶段：${esc(({ model: '模型请求', creation: '创作执行', worker: '创作进程', transport: '网络传输', build: '编译与验证', planning: '玩法规划', generating: '制作文件', generate: '制作文件', plan: '玩法规划', repair: '修复制作文件' })[t.diagnostic.stage] || t.diagnostic.stage)}</p><p>错误码：<code>${esc(t.diagnostic.code)}</code>${t.diagnostic.upstreamStatus ? ` · HTTP ${esc(t.diagnostic.upstreamStatus)}` : ''}</p><p>请求编号：<code>${esc(t.diagnostic.traceId)}</code></p><pre>${esc(t.diagnostic.reason)}</pre>` : '<p>连接中断与恢复记录已保存。</p>'}<button class="btn small" data-studio-action="export-logs">导出诊断日志</button></div></details>` : ''}
      <div class="studio-composer" data-studio-prompt></div>
      ${empty ? `<div class="studio-suggestions" aria-label="试试这些想法">${suggestionLabels.map((label, index) => `<button type="button" data-studio-suggestion="${index}">${esc(label)}</button>`).join('')}</div>` : ''}
      ${!getStatus()?.aiAvailable ? '<p class="studio-service-status" role="status">点子会保留，等待创作服务连接。</p>' : ''}
-    </section>${result(s, disabled)}
+    </section>
    </div><details class="studio-help"><summary>使用指南</summary>${guide()}</details>`}
   </div>`;
  }
@@ -186,7 +200,7 @@ export function createModStudio({ api, render, esc, icon, getGame, getGames, cha
   if (s.busy) return;
   if (action === 'cancel') { try { await api('studio/cancel', { gameId: game.id }); await poll(game); } catch (error) { s.error = error.message; update(); } return; }
   if (action === 'refresh') { await poll(game); return; }
-  if (active(s.thread?.status)) return;
+  if (active(s.thread?.status) && action !== 'export-logs') return;
   if (action === 'library') { await openLibrary?.(game); return; }
   if (action === 'send' && !s.idea.trim()) return;
   if (runActions.has(action)) { s.activityStartedAt = Date.now(); s.activityEndedAt = null; }
@@ -206,6 +220,11 @@ export function createModStudio({ api, render, esc, icon, getGame, getGames, cha
    if (action === 'keep' && s.saved) { await api('studio/library', { gameId: game.id, id: s.saved.id }); if (!same(ticket)) return; s.saved = await api('studio/read', { gameId: game.id, id: s.saved.id }); if (!same(ticket)) return; await refresh(); }
    if (action === 'prepare' && s.saved) { const plan = await api('studio/prepare', { gameId: game.id, id: s.saved.id }); if (same(ticket)) { await refresh(); if (same(ticket)) openPlan(plan); } }
    if (action === 'product' && s.saved) { const payload = await api('studio/preview', { gameId: game.id, id: s.saved.id }); if (same(ticket)) openPreview(payload); }
+   if (action === 'export-logs' && s.thread) {
+    const logs = await api('studio/conversations/logs', { gameId: game.id, id: s.thread.id });
+    const url = URL.createObjectURL(new Blob([JSON.stringify(logs, null, 2)], { type: 'application/json' }));
+    const link = document.createElement('a'); link.href = url; link.download = `Moddock-creation-${s.thread.id}.json`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+   }
    if (['export','export-build'].includes(action) && s.saved) await exportFile(game, s.saved.id, action === 'export-build' ? s.saved.toolchain?.id : undefined, ticket);
   } catch (error) { if (same(ticket)) { s.error = error.message; if (runActions.has(action)) s.activityEndedAt = Date.now(); } }
   finally { if (same(ticket)) { s.busy = ''; update(); schedule(game); if (['new','start'].includes(action)) document.getElementById('studio-idea')?.focus({ preventScroll: true }); } }

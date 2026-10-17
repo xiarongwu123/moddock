@@ -13,7 +13,7 @@ public sealed class GatewayHostingStartup : IHostingStartup
     {
         services.AddHttpClient("NexusBackend", client => client.Timeout = TimeSpan.FromSeconds(30))
             .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
-        services.AddHttpClient("StudioBackend", client => client.Timeout = TimeSpan.FromSeconds(90))
+        services.AddHttpClient("StudioBackend", client => client.Timeout = TimeSpan.FromSeconds(190))
             .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
         services.AddTransient<IStartupFilter, GatewayStartupFilter>();
     });

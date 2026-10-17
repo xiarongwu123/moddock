@@ -9,6 +9,8 @@ const { createStudioService } = require('../platform/studio-service.cjs');
 const { accountFixture } = require('./account-fixture.cjs');
 const { createServer } = require('../server.cjs');
 const { loginFixture } = require('./server-fixture.cjs');
+const { piFixture } = require('./pi-fixture.cjs');
+const { createDeepSeek } = require('../studio-ai.cjs');
 const token = 'a'.repeat(64);
 const payload = { prompt: 'Make a blue sword', types: [{ id: 'project-plan', available: true }],
  context: { game: { name: 'Fixture' } }, messages: [{ role: 'user', content: 'Make a blue sword' }] };
@@ -27,6 +29,11 @@ test('creation payload omits local paths, credentials and transport identities',
  const text = JSON.stringify(data);
  for (const value of ['/private/', 'private-test-key', 'accountId', 'signal']) assert.ok(!text.includes(value));
  assert.equal(data.context.game.name, 'Fixture');
+ assert.equal(data.harness, 'pi-agent');
+});
+test('interactive creation rejects an old backend without Pi events', async () => {
+ const ai = createMuStudioAI(async () => Response.json({ title: 'Legacy model result' }));
+ await assert.rejects(ai.plan({ ...payload, onEvent() {} }), { code: 'PI_RUNTIME_REQUIRED' });
 });
 test('private creation service authenticates transport and bounds routes and input before calling AI', async t => {
  let calls = 0;
@@ -49,11 +56,13 @@ test('private creation service limits concurrent owner work and masks raw provid
  release(); const failed = await pending; assert.equal(failed.status, 503);
  assert.deepEqual(await failed.json(), { code: 'studio_unavailable' });
 });
-test('private creation gateway accepts bounded BG3 tool rounds and rejects other kinds or orphan results', async t => {
- let seen;
- const x = await service(t, { agent: async value => { seen = value; return { type: 'tools', calls: [{ name: 'inspect_game', arguments: {} }] }; } });
+test('legacy BG3 transport delegates authoring to Pi while new clients cannot inject tool rounds', async t => {
+ let calls = 0;
+ const x = await service(t, { generate: async () => { calls++; return { kind: 'bg3-lua', code: 'verified fixture' }; } });
  const body = { ...payload, kind: 'bg3-lua', agentStep: 0, toolHistory: [] };
- const accepted = await x.request('generate', body); assert.equal(accepted.status, 200); assert.equal((await accepted.json()).type, 'tools'); assert.equal(seen.accountId, 'alice');
+ assert.equal((await (await x.request('generate', body)).json()).type, 'tools'); assert.equal(calls, 0);
+ const completed = await (await x.request('generate', { ...body, agentStep: 1 })).json(); assert.equal(completed.type, 'complete'); assert.equal(completed.draft.kind, 'bg3-lua'); assert.equal(calls, 1);
+ assert.equal((await x.request('generate', { ...body, harness: 'pi-agent' })).status, 400);
  for (const invalid of [{ ...body, agentStep: 7 }, { ...body, kind: 'dialogue' }, { ...body, toolHistory: null }, { ...body, agentStep: undefined }, { ...body, accountId: 'other-owner' }]) assert.equal((await x.request('generate', invalid)).status, 400);
 });
 test('private creation cancellation propagates to the model and releases owner capacity', async t => {
@@ -63,6 +72,20 @@ test('private creation cancellation propagates to the model and releases owner c
  const controller = new AbortController();
  const pending = fetch(x.url + '/plan', { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'X-Mu-Account-Id': 'alice' }, body: JSON.stringify(payload), signal: controller.signal });
  const rejected = assert.rejects(pending); await ready; controller.abort(); await rejected; await cancelled;
+});
+test('private Pi events arrive before the final result and streaming rate errors close cleanly', async t => {
+ let release;
+ const x = await service(t, { plan: async ({ onEvent }) => {
+  onEvent({ type: 'thinking_delta', agent: 'Pi', delta: '实时思考' });
+  await new Promise(resolve => { release = resolve; }); return { title: 'Plan' };
+ } });
+ const response = await x.request('plan', payload, { Accept: 'application/x-ndjson' }), reader = response.body.getReader();
+ const first = new TextDecoder().decode((await reader.read()).value); assert.match(first, /实时思考/); assert.ok(!first.includes('"type":"result"'));
+ release(); let remaining = ''; for (;;) { const chunk = await reader.read(); if (chunk.done) break; remaining += new TextDecoder().decode(chunk.value); }
+ assert.match(remaining, /"type":"result"/);
+ const failing = await service(t, { plan: async () => { throw new Error('HTTP 429 private upstream'); } });
+ const error = await failing.request('plan', payload, { Accept: 'application/x-ndjson' });
+ assert.deepEqual((await error.text()).trim(), '{"type":"error","code":"studio_rate_limited"}');
 });
 test('MU creation requests reuse login, refresh once, preserve cancellation and sanitize service failures', async () => {
  const account = accountFixture(); let calls = 0;
@@ -100,8 +123,10 @@ test('default logged-in MU studio creates a validated artifact without a local p
  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'moddock-mu-studio-'));
  const account = accountFixture(); account.updateAccount({ membership: { tier: 'pro', expiresAt: null } });
  const routes = [];
- const backend = await service(t, { plan: async () => ({ title: 'Plan', summary: 'A development plan.', kind: 'project-plan', steps: ['Inspect game APIs'], requirements: [] }),
-  generate: async () => ({ kind: 'project-plan', name: 'Blue sword plan', author: 'Player', description: 'A development plan', plan: 'Inspect the actual game APIs before implementation.' }) });
+ const pi = await piFixture(t, { result: body => body.messages[0].content.includes('This is the artifact generation stage')
+  ? { kind: 'project-plan', name: 'Blue sword plan', author: 'Player', description: 'A development plan', plan: 'Inspect the actual game APIs before implementation.' }
+  : { title: 'Plan', summary: 'A development plan.', kind: 'project-plan', steps: ['Inspect game APIs'], requirements: [] } });
+ const backend = await service(t, createDeepSeek({ apiKey: pi.key, pi: pi.pi }));
  const game = { id: 'fixture', name: 'Custom Game', installPath: path.join(root, 'game'), real: true };
  await fs.mkdir(game.installPath);
  const local = await createServer({ root: path.join(root, 'data'), port: 0, nexusPlatformDisabled: true, scan: async () => ({ games: [game], diagnostics: [] }),
@@ -109,13 +134,14 @@ test('default logged-in MU studio creates a validated artifact without a local p
    const route = new URL(url).pathname;
    if (!route.startsWith('/api/v1/studio/')) return account.options.fetch(url, init);
    assert.match(init.headers.Authorization, /^Bearer access-secret-/); routes.push(route);
-   return fetch(backend.url + route.slice('/api/v1/studio'.length), { ...init, headers: { Authorization: 'Bearer ' + token, 'X-Mu-Account-Id': 'fixture-user' } });
+   return fetch(backend.url + route.slice('/api/v1/studio'.length), { ...init, headers: { Authorization: 'Bearer ' + token, 'X-Mu-Account-Id': 'fixture-user', Accept: init.headers.Accept } });
   } } });
  t.after(async () => { await local.studio.conversations.settle(); local.server.closeAllConnections(); await new Promise(resolve => local.server.close(resolve)); await local.downloads.persist; await fs.rm(root, { recursive: true, force: true }); });
  const auth = await loginFixture(local); assert.equal(auth.state.studio.aiAvailable, true);
- const response = await auth.fetch(local.url + '/api/studio/conversations/send', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Moddock-Token': auth.state.token }, body: JSON.stringify({ gameId: game.id, message: 'Make a blue sword. Choose details yourself.' }) });
+ const response = await auth.fetch(local.url + '/api/studio/conversations/send', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Moddock-Token': auth.state.token }, body: JSON.stringify({ gameId: game.id, message: 'Create a development plan for a blue sword. Choose details yourself.' }) });
  assert.equal(response.status, 202); const accepted = await response.json(); await local.studio.conversations.settle();
  const item = await local.studio.conversations.read('fixture-user', game, accepted.id);
  assert.equal(item.status, 'completed', item.error); assert.ok(item.artifactId);
+ assert.equal(item.harness.name, 'pi-agent'); assert.equal(item.harness.status, 'completed'); assert.ok(item.harness.thinking.some(thought => thought.text.includes('真实'))); assert.ok(item.toolCalls.some(call => call.name === 'submit_result' && call.status === 'completed'));
  assert.deepEqual(routes, ['/api/v1/studio/plan', '/api/v1/studio/generate']);
 });

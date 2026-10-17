@@ -198,7 +198,7 @@ async function createServer(options = {}) {
     if (req.method === 'GET' && url.pathname === '/api/account/plans') return send(await accounts.plans(sessionId));
     if (req.method === 'GET' && url.pathname === '/api/account/orders') return send(await accounts.orders(sessionId));
     if (req.method === 'GET' && url.pathname.startsWith('/api/account/orders/')) return send(await accounts.order(sessionId, decodeURIComponent(url.pathname.slice('/api/account/orders/'.length))));
-    if (req.method === 'GET' && url.pathname === '/api/state') return send({ scan: scanResult, token, games: scanResult.games, sourceGames: onlineGames(), providers, connections: await connections.status(profile.id), nexusSso: sso.status(profile.id), jobs: downloads.view(profile.id), installations: installers.view(onlineGames()), studio: studio.status(profile), scanPaths: config.scanPaths, canChooseScanDirectory: typeof options.chooseScanDirectory === 'function', mappings: config.mappings, downloadPath: downloads.root, autoImport:config.autoImport!==false, recipes, nxmStatus: nxmStatus?.owner === profile.id ? nxmStatus : null, nexusAuthorizationWindow:!!options.authorize, nxmProtocol:options.protocolStatus?.()||false });
+    if (req.method === 'GET' && url.pathname === '/api/state') return send({ scan: scanResult, token, games: scanResult.games, sourceGames: onlineGames(), providers, connections: await connections.status(profile.id), nexusSso: sso.status(profile.id), jobs: downloads.view(profile.id), installations: installers.view(onlineGames(),profile.id), studio: studio.status(profile), scanPaths: config.scanPaths, canChooseScanDirectory: typeof options.chooseScanDirectory === 'function', mappings: config.mappings, downloadPath: downloads.root, autoImport:config.autoImport!==false, recipes, nxmStatus: nxmStatus?.owner === profile.id ? nxmStatus : null, nexusAuthorizationWindow:!!options.authorize, nxmProtocol:options.protocolStatus?.()||false });
     if (req.method !== 'POST' || req.headers['x-moddock-token'] !== token) return send({ error: '请求未授权' }, 403);
     if (req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) return send({ error: '请求来源无效' }, 403);
     const bodyLimit = ['/api/studio/save', '/api/studio/generate'].includes(url.pathname) ? 128 * 1024 : 16384;
@@ -287,6 +287,7 @@ async function createServer(options = {}) {
      if (url.pathname === '/api/studio/prepare-environment') return send(await ensureEnvironment(target));
      if (url.pathname === '/api/studio/conversations/list') return send({ items: await studio.conversations.list(owner, target) });
      if (url.pathname === '/api/studio/conversations/read') return send(await studio.conversations.read(owner, target, body.id));
+     if (url.pathname === '/api/studio/conversations/logs') return send(await studio.conversations.diagnostics(owner, target, body.id));
      const authorize = async feature => {
       const permission = await accounts.authorize(sessionId, feature);
       if (!current() || permission.account.id !== owner || !studioAccess(permission.account)) throw new AccountError(403, 'pro_required', '账号或 Pro 权限已变化，操作已停止。');
@@ -309,7 +310,13 @@ async function createServer(options = {}) {
      if (url.pathname === '/api/studio/generate') return send(await studio.generate(owner, target, body, current));
      if (url.pathname === '/api/studio/cancel') { studio.cancelOwner(owner); return send({ ok: true }); }
      if (url.pathname === '/api/studio/export' || url.pathname === '/api/studio/prepare') {
-      if (url.pathname === '/api/studio/export') { const { item, bytes } = await studio.archive(owner, target, body.id); const buildId = body.buildId || (['bg3-lua', 'bg3-follower'].includes(item.adapterId) && !body.source ? item.toolchain?.id : null); if (['bg3-lua', 'bg3-follower'].includes(item.adapterId) && !body.source && !body.buildId && !item.toolchain?.bundle) throw new Error('尚未生成可导出的 BG3 Mod 包，请先完成编译与打包'); return send(buildId ? await studio.toolchain.bundle(owner, target, item.id, buildId) : { filename: item.draft.name + '.zip', base64: bytes.toString('base64') }); }
+      if (url.pathname === '/api/studio/export') {
+       const { item, bytes } = await studio.archive(owner, target, body.id);
+       const compiled = ['bg3-lua', 'bg3-follower', 'engine-mod'].includes(item.adapterId);
+       const buildId = body.buildId || (compiled && !body.source && item.toolchain?.status === 'passed' ? item.toolchain.id : null);
+       if (['bg3-lua', 'bg3-follower'].includes(item.adapterId) && !body.source && !body.buildId && !item.toolchain?.bundle) throw new Error('尚未生成可导出的 BG3 Mod 包，请先完成编译与打包');
+       return send(buildId ? await studio.toolchain.bundle(owner, target, item.id, buildId) : { filename: item.draft.name + '.zip', base64: bytes.toString('base64') });
+      }
       const saved = await studio.read(owner, body.id);
       if (!saved.toolchain) await studio.toolchain.run(owner, target, body.id, await studio.workspace(target), { current, authorize });
       const { item, bytes } = await studio.deploymentArchive(owner, target, body.id);
@@ -380,6 +387,7 @@ async function createServer(options = {}) {
     if (url.pathname === '/api/installations/auto') {
      const job=downloads.jobs.find(j=>j.id===body.jobId&&j.status==='completed');
      if(!job)throw new Error('请选择已经下载完成的 MOD');
+     return send(await installers.progress.run(job,profile.id,body.operationId,async report=>{
      let target=onlineGames().find(g=>g.id===job.gameId);
      if(!target&&job.gameId.startsWith('catalog:')){
       const catalog=workshop.game(job.gameId),matches=onlineGames().filter(g=>sameGame(catalog,g));
@@ -387,23 +395,26 @@ async function createServer(options = {}) {
       target=matches[0];job.game=target;job.gameId=target.id;job.gameName=target.name;await downloads.save();
      }
      if(!target)throw new Error('请重新扫描，确认游戏仍在本机');
+     report('environment',2,'正在检查游戏环境和所需组件…');
      await ensureEnvironment(target);
      let context={};
      if(job.resourceId.startsWith('nexus:')){
+      report('environment',5,'正在读取 MOD 说明和前置要求…');
       const resource=sources.resource(target,job.resourceId),detail=await sources.detail(target,job.resourceId);
       const file=detail.files.find(file=>file.id===job.fileId);if(!file)throw new Error('所选 Nexus 文件已下架，请重新选择');
       context={domain:resource.domain,url:`https://www.nexusmods.com/${resource.domain}/mods/${resource.id}`,description:detail.description,fileDescription:file.description,requirements:detail.requirementDetails||detail.requirements||[]};
      }
      if (job.source === 'studio') {
-      const rule = await studio.ruleFor(target, job.studio || { adapterId: 'dialogue', draft: { kind: 'dialogue' } }, installers.getProfile(target).rule);
-      const plan = await installers.prepare(target, job.id, rule);
-      try { return send(await installers.apply(target, plan.id, true)); } catch (error) { await installers.discard(plan.id).catch(() => {}); throw error; }
+      const rule = await studio.ruleFor(target, job.studio || { adapterId: 'dialogue', draft: { kind: 'dialogue' } }, installers.getProfile(target).rule, profile.id);
+      const plan = await installers.prepare(target, job.id, rule, report);
+      try { return await installers.apply(target, plan.id, true, report); } catch (error) { await installers.discard(plan.id).catch(() => {}); throw error; }
      }
-     return send(await installers.installAuto(target,job.id,context));
+     return installers.installAuto(target,job.id,context,report);
+     }));
     }
     if (url.pathname === '/api/installations/restore') return send(await installers.restoreNative(game()));
     if (url.pathname === '/api/installations/plan') {
-     const target = game(), rule = creationJob ? await studio.ruleFor(target, creationJob.studio || { adapterId: 'dialogue', draft: { kind: 'dialogue' } }, installers.getProfile(target).rule) : undefined;
+     const target = game(), rule = creationJob ? await studio.ruleFor(target, creationJob.studio || { adapterId: 'dialogue', draft: { kind: 'dialogue' } }, installers.getProfile(target).rule, profile.id) : undefined;
      await ensureEnvironment(target);
      return send(await installers.prepare(target, body.jobId, rule));
     }

@@ -33,7 +33,7 @@ class UniversalModder {
   try {
    const { stdout } = await run(runtime.executable, [...runtime.prefix, bridge, 'scan', game.installPath, game.searchName || game.name], { timeout: 20000, maxBuffer: 1024 * 1024, windowsHide: true, env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' } });
    const report = JSON.parse(stdout);
-   const preferLocal = ['native','unknown'].includes(report.engine.key) && local.engine.key !== 'unknown';
+   const preferLocal = ['native','unknown'].includes(report.engine.key) && local.engine.key !== 'unknown' || ['rpgmaker-mv', 'rpgmaker-mz', 'rpgmaker-rgss', 'renpy', 'gamemaker', 'godot', 'unity-mono', 'unity-il2cpp'].includes(local.engine.key);
    return { ...local, engine: preferLocal ? local.engine : { key: report.engine.key, name: report.engine.label, confidence: 'universal-modder 文件特征匹配', evidence: report.engine.evidence },
     loaders: [...new Set([...local.loaders, ...report.mod_loaders_installed])], antiCheat: [...new Set([...local.antiCheat, ...report.anti_cheat])],
     onlineOnly: !!report.online_only, filesIndexed: report.files_indexed, truncated: report.index_truncated,
@@ -56,7 +56,7 @@ class UniversalModder {
    const exact = names.some(name => query.length > 3 && (name === query || name.includes(query) || query.includes(name) && name.length > 5));
    return { note, score: (exact ? 100 : 0) + (note.engine === engine ? 10 : 0) + (note.status === 'working' || note.status === 'released' ? 1 : 0) };
   }).filter(item => item.score >= 10).sort((a, b) => b.score - a.score).slice(0, 3).map(({ note }) => ({ path: note.path, title: note.title, game: note.game, status: note.status || '未声明', gameVersion: note.game_version || '', engine: note.engine }));
-  const fallback = engine.startsWith('unity') ? 'unity.md' : ({ unreal: 'unreal.md', dotnet: 'dotnet-xna.md', 'xna-fna': 'dotnet-xna.md', godot: 'godot.md', creation: 'bethesda.md', 're-engine': 're-engine.md' })[engine] || 'native.md';
+  const fallback = engine.startsWith('unity') ? 'unity.md' : engine.startsWith('rpgmaker') || ['renpy', 'gamemaker'].includes(engine) ? 'misc-engines.md' : ({ unreal: 'unreal.md', dotnet: 'dotnet-xna.md', 'xna-fna': 'dotnet-xna.md', godot: 'godot.md', creation: 'bethesda.md', 're-engine': 're-engine.md' })[engine] || 'native.md';
   let playbook = /^skills\/mod-any-game\/references\/engines\/[a-z0-9-]+\.md$/.test(report.upstreamPlaybook || '') ? report.upstreamPlaybook : 'skills/mod-any-game/references/engines/' + fallback;
   let guide;
   try { guide = await this.document(playbook); } catch { playbook = 'skills/mod-any-game/references/engines/native.md'; guide = await this.document(playbook); }

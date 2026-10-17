@@ -143,7 +143,7 @@ test('BG3 requests for an installable Mod replan document-only responses even wh
  let calls = 0;
  const x = await fixture(t, { studio: { plan: async () => ++calls === 1 ? { ...plan, kind: 'project-plan' } : plan } });
  const thread = await x.turn('生成可安装的 Mod，不要开发方案。');
- assert.equal(thread.status, 'completed', thread.error); assert.equal(calls, 2); assert.equal(thread.plan.kind, 'bg3-lua'); assert.equal(thread.planningAttempts[0].accepted, false);
+ assert.equal(thread.status, 'blocked', thread.error); assert.equal(thread.toolchain.status, 'blocked'); assert.equal(calls, 2); assert.equal(thread.plan.kind, 'bg3-lua'); assert.equal(thread.planningAttempts[0].accepted, false);
 });
 test('bounded follower recipes remain packable on a host without native Lua tools', async t => {
  const x = await fixture(t, { studio: { tools: { luac: false } } }), thread = await x.turn('制作一个跟随者。');

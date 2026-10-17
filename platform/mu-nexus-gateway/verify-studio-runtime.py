@@ -33,9 +33,21 @@ def request(route, token=None, body=None, expected=200, extra=None):
         headers['Content-Type'] = 'application/json'
     req = urllib.request.Request(origin + route, data=None if body is None else json.dumps(body).encode(), headers=headers)
     try:
-        response = urllib.request.urlopen(req, timeout=95)
+        response = urllib.request.urlopen(req, timeout=190)
     except urllib.error.HTTPError as error:
         response = error
+    if response.headers.get_content_type() == 'application/x-ndjson' and response.status == expected:
+        result = None
+        for line in response:
+            frame = json.loads(line)
+            if frame['type'] == 'event':
+                pi_events.append(frame['event'])
+            elif frame['type'] == 'result':
+                result = frame['result']
+            elif frame['type'] == 'error':
+                raise AssertionError('Pi stream failed: ' + frame.get('code', 'unknown'))
+        assert result is not None, 'Pi stream ended without a result'
+        return result
     data = response.read()
     assert response.status == expected, route + ': ' + str(response.status) + ', expected ' + str(expected) + ', body=' + data[:120].decode(errors='replace')
     return json.loads(data) if data else None
@@ -67,7 +79,8 @@ expired_id, expired, _ = account('expired', now-86400)
 owner, pro, credentials = account('pro', now+86400)
 token = pro['accessToken']
 verify(pro['account']['membership']['tier'] == 'pro', 'real MU login returns current Pro membership')
-payload = {'prompt': '制作一个中国风人物跟随者，姓名和一句问候由你决定；明确复用现有角色资源，不制作新模型和完整剧情。',
+pi_events = []
+payload = {'harness': 'pi-agent', 'prompt': '制作一个中国风人物跟随者，姓名和一句问候由你决定；明确复用现有角色资源，不制作新模型和完整剧情。',
  'types': [{'id': 'bg3-follower', 'available': True}], 'capability': {'creativeDefaultsDelegated': True, 'preferredKind': 'bg3-follower'},
  'context': {'game': {'name': "Baldur's Gate 3", 'appId': '1086940'}, 'guide': {'text': 'a' * 18000}},
  'diagnostic': {'engine': {'key': 'larian', 'name': 'Larian'}, 'loaders': ['BG3 Script Extender']}}
@@ -77,10 +90,13 @@ verify(True, 'anonymous, standard and expired Pro requests are denied')
 for body, status in [({**payload, 'apiKey': 'injected'}, 400), ({**payload, 'prompt': 'x'*2001}, 400), ({**payload, 'context': {'guide': {'text': 'x'*200000}}}, 413)]:
     request('/api/v1/studio/plan', token, body, status)
 verify(True, 'invalid fields, long prompts and oversized contexts are rejected')
-plan = request('/api/v1/studio/plan', token, payload, extra={'X-Mu-Account-Id': standard})
+plan = request('/api/v1/studio/plan', token, payload, extra={'X-Mu-Account-Id': standard, 'Accept': 'application/x-ndjson'})
 verify(plan.get('kind') == 'bg3-follower' and isinstance(plan.get('steps'), list) and plan['steps'], 'real model plans through MU with context above the old 16KB limit')
-draft = request('/api/v1/studio/generate', token, {**payload, 'kind': plan['kind'], 'plan': plan})
+draft = request('/api/v1/studio/generate', token, {**payload, 'kind': plan['kind'], 'plan': plan}, extra={'Accept': 'application/x-ndjson'})
 verify(draft.get('kind') == 'bg3-follower' and draft.get('followerName') and draft.get('greeting'), 'real model generates actual follower fields through MU')
+for event_type in ['selection', 'agent_start', 'thinking_delta', 'skill_loaded', 'tool_start', 'tool_end', 'agent_end']:
+    verify(any(event['type'] == event_type for event in pi_events), 'real Pi event streamed through MU: ' + event_type)
+verify(any(event.get('name') == 'submit_result' for event in pi_events), 'real Pi submits the structured result through a tool')
 for value in [plan, draft]:
     text = json.dumps(value)
     verify('sk-' not in text and 'MODDOCK_STUDIO_TOKEN' not in text and 'apiKey' not in text, 'model response exposes no service credential')
@@ -105,7 +121,7 @@ request('/api/v1/studio/plan', normal['accessToken'], payload, 401)
 verify(True, 'revoked MU sessions cannot call creation endpoints')
 verify(db.execute('PRAGMA integrity_check').fetchone()[0] == 'ok' and not db.execute('PRAGMA foreign_key_check').fetchall(), 'isolated schema-5 database integrity is valid')
 root = pathlib.Path(database).parent
-(root/'studio-check.json').write_text(json.dumps({'checks': checks, 'plan': plan, 'draft': draft, 'realModelUsed': True, 'productionDatabaseModified': False}, ensure_ascii=False, indent=2))
+(root/'studio-check.json').write_text(json.dumps({'checks': checks, 'plan': plan, 'draft': draft, 'piEventTypes': sorted(set(event['type'] for event in pi_events)), 'realModelUsed': True, 'productionDatabaseModified': False}, ensure_ascii=False, indent=2))
 private = root/'client-check.json';private.write_text(json.dumps({'credentials': credentials, 'owner': owner, 'session': pro}));private.chmod(0o600)
 (root.parent/'studio-runtime-verified').touch()
 print('MU AI integration passed: ' + str(checks) + ' assertions.', flush=True)

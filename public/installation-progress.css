@@ -1,0 +1,24 @@
+.installation-progress{padding:8px 0;color:var(--text,#eef1eb)}
+.installation-progress-summary{display:flex;align-items:center;gap:14px;margin-bottom:24px}
+.installation-progress-icon{display:grid;place-items:center;width:46px;height:46px;flex-shrink:0;border:1px solid #b9dc8240;border-radius:14px;background:#b9dc8210;color:#b9dc82}
+.installation-progress-icon svg{width:24px;height:24px}
+.installation-progress-summary>div{min-width:0;flex:1}
+.installation-progress-summary strong{display:block;overflow-wrap:anywhere;font-size:16px}
+.installation-progress-summary p{margin:6px 0 0;color:#9da598;font-size:12px}
+.installation-progress-percent{font-size:28px;font-variant-numeric:tabular-nums;color:#b9dc82}
+.installation-progress-track{height:9px;overflow:hidden;border-radius:8px;background:#ffffff12}
+.installation-progress-track>div{height:100%;border-radius:inherit;background:#b9dc82;transition:width .3s ease}
+.installation-progress-message{margin:18px 0 8px;font-size:14px;overflow-wrap:anywhere}
+.installation-progress-file{margin:0;color:#9da598;font:12px/1.6 monospace;overflow-wrap:anywhere}
+.installation-progress-count{margin:8px 0;color:#9da598;font-size:12px;font-variant-numeric:tabular-nums}
+.installation-progress-steps{display:flex;justify-content:space-between;gap:8px;padding:22px 0 0;margin:22px 0 0;list-style:none;border-top:1px solid #ffffff12}
+.installation-progress-steps li{display:flex;align-items:center;flex-direction:column;gap:9px;color:#858e7e;font-size:11px;text-align:center}
+.installation-progress-steps li>span{display:grid;place-items:center;width:24px;height:24px;border:1px solid #ffffff20;border-radius:50%;font-variant-numeric:tabular-nums}
+.installation-progress-steps svg{width:14px;height:14px}
+.installation-progress-steps .is-done,.installation-progress-steps .is-current{color:#b9dc82}
+.installation-progress-steps .is-done>span,.installation-progress-steps .is-current>span{border-color:#b9dc8250;background:#b9dc8210}
+.installation-progress.is-failed .installation-progress-icon,.installation-progress.is-failed .installation-progress-percent,.installation-progress.is-failed .installation-progress-message{color:#ef9a91}
+.installation-progress.is-failed .installation-progress-track>div{background:#ef9a91}
+.install-progress-modal{max-width:600px}
+@media(max-width:560px){.installation-progress-summary{gap:10px}.installation-progress-percent{font-size:24px}.installation-progress-steps{gap:4px}.installation-progress-steps li{font-size:10px}}
+@media(prefers-reduced-motion:reduce){.installation-progress-track>div{transition:none}}

@@ -29,9 +29,21 @@ class GameEnvironment {
    const managed = report.managedDirectories;
    const candidates = [...new Set(managed.map(dir => dir.replace(/_Data\/Managed$/i, '.exe')))];
    if (candidates.length === 1) profile = { id: 'bepinex', name: 'BepInEx 5 · Unity Mono', executable: candidates[0], base: path.posix.dirname(candidates[0]) === '.' ? '' : path.posix.dirname(candidates[0]), existing: report.loaderFiles.BepInEx.length === 1 };
+  } else if (report.engine.key === 'unity-il2cpp') {
+   const candidates = report.il2cppMetadata.map(name => name.replace(/_Data\/il2cpp_data\/Metadata\/global-metadata\.dat$/i, '.exe'));
+   if (candidates.length === 1) profile = { id: 'bepinex-il2cpp', name: 'BepInEx 6 · Unity IL2CPP', executable: candidates[0], base: path.posix.dirname(candidates[0]) === '.' ? '' : path.posix.dirname(candidates[0]), existing: report.loaderFiles.BepInEx.length === 1 && /BepInEx\.Core\.dll$/i.test(report.loaderFiles.BepInEx[0]) };
   } else if (report.engine.key === 'unreal' || report.loaders.includes('UE4SS')) {
    const wukong = String(game.appId) === '2358720' || /^(?:black myth:?\s*wukong|黑神话[：:]?悟空)(?:\s*\[TEST\])?$/i.test(game.searchName || game.name || '');
-   if (report.loaderFiles.UE4SS.length === 1 || wukong) profile = { id: 'ue4ss', name: 'UE4SS', executable: wukong ? 'b1/Binaries/Win64/b1-Win64-Shipping.exe' : null, base: 'b1/Binaries/Win64', existing: report.loaderFiles.UE4SS.length === 1, custom: wukong ? 'Wukong' : null };
+   const readyOrNot = require('./studio-game-api.cjs').isReadyOrNot(game);
+   if (readyOrNot) {
+    const base = 'ReadyOrNot/Binaries/Win64', candidates = [];
+    for (const name of ['ReadyOrNotSteam-Win64-Shipping.exe', 'ReadyOrNot-Win64-Shipping.exe']) {
+     try { const stat = await fs.lstat(path.join(root, base, name)); if (stat.isFile() && !stat.isSymbolicLink()) candidates.push(base + '/' + name); }
+     catch (error) { if (error.code !== 'ENOENT') throw error; }
+    }
+    if (candidates.length === 1) profile = { id: 'ue4ss', name: 'UE4SS · 严阵以待', executable: candidates[0], base, existing: report.loaderFiles.UE4SS.length === 1, releaseDefaults: true };
+   } else if (report.loaderFiles.UE4SS.length === 1 || wukong) profile = { id: 'ue4ss', name: 'UE4SS', executable: wukong ? 'b1/Binaries/Win64/b1-Win64-Shipping.exe' : null, base: wukong ? 'b1/Binaries/Win64' : path.posix.dirname(report.loaderFiles.UE4SS[0]), existing: report.loaderFiles.UE4SS.length === 1, custom: wukong ? 'Wukong' : null };
+   else if (report.shippingExecutables.length === 1) profile = { id: 'ue4ss', name: 'UE4SS', executable: report.shippingExecutables[0], base: path.posix.dirname(report.shippingExecutables[0]), existing: false, releaseDefaults: true };
   } else if (report.engine.key === 're-engine' || report.loaders.includes('REFramework') || reGames[String(game.appId)]) {
    const entry = reGames[String(game.appId)];
    if (entry || report.loaderFiles.REFramework.length === 1) profile = { id: 'reframework', name: 'REFramework', executable: entry?.[1], base: '', existing: report.loaderFiles.REFramework.length === 1 && !!await existing(await target(root, 'dinput8.dll')) };
@@ -45,8 +57,13 @@ class GameEnvironment {
   const base = { applicable: true, supported, adapter: profile?.id || null, name: profile?.name || report.engine.name, engine: report.engine,
    runtimeConfirmed: false, coverage: profile ? 'adapter' : 'source-only', canPrepare: !!profile && supported };
   if (report.antiCheat.length || report.onlineOnly) return { ...base, ready: false, canPrepare: false, status: 'source-only', message: '当前游戏检测到联网保护，仅开放分析和源码方案；没有已核对的自动部署路线。' };
+  if (!profile && ['rpgmaker-mv', 'rpgmaker-mz', 'renpy'].includes(report.engine.key)) {
+   const evidence = await require('./studio-engines.cjs').collectEngineEvidence(game, report);
+   if (evidence?.mode !== 'investigate') return { ...base, ready: true, supported: true, coverage: 'engine-development', status: 'ready', canPrepare: false, message: '已检测到游戏原生脚本入口，创作时将自动编写并构建。' };
+  }
   if (profile?.existing) return { ...base, ready: true, status: 'ready', message: `已检测到 ${profile.name}，可按对应路线制作；文件检测不代表游戏内效果已验证。` };
-  if (!profile) return { ...base, ready: false, status: 'source-only', message: '可分析此游戏并生成方案；专用制作或加载器适配尚未接通。不会套用其他游戏的文件。' };
+  if (!profile && ['godot', 'gamemaker', 'rpgmaker-rgss'].includes(report.engine.key)) return { ...base, ready: false, coverage: 'engine-development', status: 'automatic', canPrepare: false, message: '已接入原生制作工具链；创作时自动提取玩法代码、编译、重建资源并生成可安装产物。' };
+  if (!profile) return { ...base, ready: false, coverage: require('./studio-engines.cjs').familyFor(report.engine.key) ? 'engine-development' : base.coverage, status: 'investigating', message: '创作时将按实际引擎调查代码、资源与加载入口，并尝试开发和构建。' };
   return { ...base, ready: false, status: supported ? 'missing' : 'unsupported', message: supported ? `将自动准备 ${profile.name}；无需填写路径或下载地址。` : `${profile.name} 自动安装当前面向 Windows；已有本机环境仍可用于制作。` };
  }
  ensure(context) {
@@ -110,19 +127,27 @@ class GameEnvironment {
   const signal = context.signal ? AbortSignal.any([context.signal, AbortSignal.timeout(180000)]) : AbortSignal.timeout(180000);
   const add = (name, source) => files.push({ name: relative(name), source });
   try {
-   if (profile.id === 'bepinex') {
-    const asset = await this.asset('bepinex-' + arch, stage, signal);
-    for (const file of asset.files.filter(file => /^BepInEx\/core\//.test(file.source) || ['winhttp.dll', 'doorstop_config.ini', '.doorstop_version'].includes(file.source))) add(path.posix.join(profile.base, file.source), path.join(asset.directory, file.source));
+   if (['bepinex', 'bepinex-il2cpp'].includes(profile.id)) {
+    const asset = await this.asset(profile.id + '-' + arch, stage, signal);
+    for (const file of asset.files.filter(file => /^BepInEx\/core\//.test(file.source) || profile.id === 'bepinex-il2cpp' && /^dotnet\//.test(file.source) || ['winhttp.dll', 'doorstop_config.ini', '.doorstop_version'].includes(file.source))) add(path.posix.join(profile.base, file.source), path.join(asset.directory, file.source));
    } else if (profile.id === 'reframework') {
     const asset = await this.asset('reframework', stage, signal), file = asset.files.find(file => file.source === 'dinput8.dll');
     if (!file) throw new Error('官方 REFramework 包缺少 dinput8.dll'); add('dinput8.dll', path.join(asset.directory, file.source));
    } else if (profile.id === 'ue4ss') {
-    if (!profile.custom) return before;
-    const asset = await this.asset('ue4ss', stage, signal), config = await this.asset('ue4ss-configs', stage, signal);
+    if (!profile.custom && !profile.releaseDefaults) return before;
+    const asset = await this.asset('ue4ss', stage, signal);
     for (const name of ['dwmapi.dll', 'ue4ss/UE4SS.dll']) { if (!asset.files.some(file => file.source === name)) throw new Error('官方 UE4SS 包结构不匹配'); add(path.posix.join(profile.base, name), path.join(asset.directory, name)); }
-    for (const name of ['UE4SS-settings.ini', 'VTableLayout.ini']) {
-     const source = profile.custom + '/' + name; if (!config.files.some(file => file.source === source)) throw new Error('缺少此游戏的官方 UE4SS 配置');
-     add(path.posix.join(profile.base, 'ue4ss', name), path.join(config.directory, source));
+    if (profile.releaseDefaults) {
+     for (const name of ['ue4ss/UE4SS-settings.ini', 'ue4ss/LICENSE', 'ue4ss/Mods/shared/UEHelpers/UEHelpers.lua', 'ue4ss/UE4SS_SDK_Backends/UE4SS.json']) {
+      if (!asset.files.some(file => file.source === name)) throw new Error('官方 UE4SS 包缺少运行依赖：' + name);
+      add(path.posix.join(profile.base, name), path.join(asset.directory, name));
+     }
+    } else {
+     const config = await this.asset('ue4ss-configs', stage, signal);
+     for (const name of ['UE4SS-settings.ini', 'VTableLayout.ini']) {
+      const source = profile.custom + '/' + name; if (!config.files.some(file => file.source === source)) throw new Error('缺少此游戏的官方 UE4SS 配置');
+      add(path.posix.join(profile.base, 'ue4ss', name), path.join(config.directory, source));
+     }
     }
    } else if (profile.id === 'smapi' && !location.report.loaders.includes('SMAPI')) {
     const asset = await this.asset('smapi', stage, signal), nested = asset.files.filter(file => /\/internal\/windows\/install\.dat$/.test(file.source));
@@ -151,7 +176,7 @@ class GameEnvironment {
      await fs.copyFile(file.source, tmp, fs.constants.COPYFILE_EXCL); await fs.link(tmp, destination);
      await this.options.afterWrite?.(file.name, destination);
     }
-    const directories = profile.id === 'bepinex' ? [path.posix.join(profile.base, 'BepInEx/plugins')] : profile.id === 'reframework' ? ['reframework/autorun'] : profile.id === 'ue4ss' ? [path.posix.join(profile.base, 'ue4ss/Mods')] : ['Mods'];
+    const directories = ['bepinex', 'bepinex-il2cpp'].includes(profile.id) ? [path.posix.join(profile.base, 'BepInEx/plugins')] : profile.id === 'reframework' ? ['reframework/autorun'] : profile.id === 'ue4ss' ? [path.posix.join(profile.base, 'ue4ss/Mods')] : ['Mods'];
     for (const name of directories) await fs.mkdir(await target(root, name), { recursive: true });
     for (const file of planned) if (await existing(await target(root, file.name)) !== file.sha256) throw new Error('组件安装后校验失败');
     const committed = journal + '.tmp'; await fs.writeFile(committed, JSON.stringify({ ...record, committed: true })); await fs.rename(committed, journal);

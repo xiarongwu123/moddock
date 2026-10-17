@@ -9,6 +9,7 @@ const { recipesFor, buildStudioProject, projectRule } = require('./studio-recipe
 const { AccountError } = require('./account.cjs');
 const { StudioConversations } = require('./studio-conversations.cjs');
 const { StudioToolchain } = require('./studio-toolchain.cjs');
+const { selectSkills } = require('./studio-skills.cjs');
 const { removeStudioSamples } = require('./studio-migration.cjs');
 
 function studioAccess(account) {
@@ -17,14 +18,28 @@ function studioAccess(account) {
  return account?.membership?.tier === 'pro' && (!expires || Date.parse(expires) > Date.now()) && (!feature || feature.enabled && feature.allowed);
 }
 class ModStudio {
- constructor(root, options = {}) { this.root = path.join(root, 'creations'); this.options = options; this.integration = new UniversalModder(options.integration); this.pending = new Map(); this.queues = new Map(); this.toolchain = new StudioToolchain(this, options.tools); this.conversations = new StudioConversations(this); this.ready = removeStudioSamples(this.root); this.ready.catch(() => {}); }
+ constructor(root, options = {}) { this.root = path.join(root, 'creations'); this.options = options; this.integration = new UniversalModder(options.integration); this.pending = new Map(); this.queues = new Map(); this.native = new (require('./studio-native-projects.cjs').NativeProjects)(options.tools); this.toolchain = new StudioToolchain(this, options.tools); this.conversations = new StudioConversations(this); this.ready = removeStudioSamples(this.root); this.ready.catch(() => {}); }
  status(account) { return { allowed: studioAccess(account), requiredTier: 'pro', aiAvailable: typeof this.options.plan === 'function' && typeof this.options.generate === 'function', provider: this.options.provider || null, npcs: NPCS, days: DAYS }; }
  directory(owner) { return path.join(this.root, crypto.createHash('sha256').update(owner).digest('hex')); }
  async workspace(game) {
   const diagnostic = await this.integration.diagnose(game, await diagnoseGame(game));
-  return { diagnostic, context: await this.integration.context(game, diagnostic), types: this.toolchain.catalog(recipesFor(game, diagnostic)) };
+  const context = await this.integration.context(game, diagnostic);
+  context.engineEvidence = await require('./studio-engines.cjs').collectEngineEvidence(game, diagnostic);
+  context.engineEvidence = await this.native.snapshot(game, context.engineEvidence);
+  return { diagnostic, context, skills: selectSkills(game, diagnostic), types: this.toolchain.catalog(recipesFor(game, diagnostic)) };
  }
- async ruleFor(game, item, savedRule) {
+ async prepareNative(game, context) {
+  const diagnostic = await diagnoseGame(game);
+  if (diagnostic.antiCheat.length || diagnostic.onlineOnly) return;
+  const evidence = await require('./studio-engines.cjs').collectEngineEvidence(game, diagnostic);
+  await this.native.prepare(game, evidence, { ...context, diagnostic });
+ }
+ async ruleFor(game, item, savedRule, owner) {
+  if (item.adapterId === 'engine-mod' && item.compiled && !item.toolchain?.deployment && item.artifactId && owner) {
+   const saved = await this.deploymentArchive(owner, game, item.artifactId);
+   if (saved.item.buildId !== item.buildId) throw new Error('此创作已有更新构建，请在创作中重新存入 Mod 库');
+   item = saved.item;
+  }
   if (item.toolchain && item.toolchain.status !== 'passed') throw new Error('此产物尚未通过制作与文件验证，请先在对话中处理构建结果。');
   const { diagnostic, types } = await this.workspace(game), kind = item.adapterId || item.draft.kind;
   if (!types.find(type => type.id === kind)?.available) throw new Error('当前游戏环境不支持这份创作，请重新诊断并核对适配类型。');
@@ -57,7 +72,7 @@ class ModStudio {
   if (item.id !== id) throw new Error('创作记录不匹配');
   if (!item.adapterId) Object.assign(item, { adapterId: item.draft.kind, output: '内容包', installable: ['dialogue','texture'].includes(item.draft.kind) });
   item.toolchain = await this.toolchain.latest(owner, id);
-  if (['bepinex-plugin', 'bg3-lua', 'bg3-follower'].includes(item.adapterId) && item.toolchain?.status === 'passed' && item.toolchain.bundle) item.installable = true;
+  if (['bepinex-plugin', 'bg3-lua', 'bg3-follower', 'engine-mod'].includes(item.adapterId) && item.toolchain?.status === 'passed' && item.toolchain.bundle) item.installable = true;
   if (item.toolchain && item.toolchain.status !== 'passed') item.installable = false;
   try { item.deployment = await smallJson(path.join(this.recordPath(owner, id), 'deployment.json')); } catch (error) { if (error.code !== 'ENOENT') throw error; }
   try { item.library = await smallJson(path.join(this.recordPath(owner, id), 'library.json')); } catch (error) { if (error.code !== 'ENOENT') throw error; }
@@ -109,7 +124,7 @@ class ModStudio {
  async deploymentArchive(owner, game, id) {
   const archive = await this.archive(owner, game, id), item = archive.item;
   if (item.toolchain?.status !== 'passed') throw new Error('请先完成编译与文件验证，再安装产物。' + (item.toolchain?.checks.filter(check => ['blocked','failed'].includes(check.status)).map(check => check.detail).join('；') || ''));
-  if (!['bepinex-plugin', 'bg3-lua', 'bg3-follower'].includes(item.adapterId)) return archive;
+  if (!['bepinex-plugin', 'bg3-lua', 'bg3-follower', 'engine-mod'].includes(item.adapterId)) return archive;
   const bundle = await this.toolchain.bundle(owner, game, id, item.toolchain.id), bytes = Buffer.from(bundle.base64, 'base64');
   return { item: { ...item, compiled: true, buildId: item.toolchain.id, ...(item.toolchain.bg3Module ? { bg3Module: item.toolchain.bg3Module } : {}), sha256: crypto.createHash('sha256').update(bytes).digest('hex') }, bytes };
  }

@@ -1,4 +1,6 @@
 const { app, BrowserWindow, shell, net, session, safeStorage, dialog } = require('electron');
+// Keep long creation streams on TLS/TCP when an edge advertises HTTP/3.
+app.commandLine.appendSwitch('disable-quic');
 const path=require('node:path');
 const { createServer } = require('./server.cjs');
 const { downloadAllowed, externalAllowed } = require('./sources.cjs');
