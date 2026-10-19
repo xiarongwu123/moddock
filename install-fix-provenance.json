@@ -1,0 +1,24 @@
+{
+  "source": "F:/test/Moddock/resources/app.asar",
+  "sourceVersion": "0.6.8",
+  "version": "0.6.8-installfix.20261018",
+  "tests": "F:/youxia/qa/component-install-fix.test.cjs",
+  "uiTest": "F:/youxia/qa/ui-component-install-fix.cjs",
+  "testResults": {
+    "regressionsPassed": 6,
+    "uiPassed": true,
+    "fileCount": 227,
+    "permissionChecks": 3,
+    "processChecks": 5,
+    "operatorRuleTestsPassed": 2
+  },
+  "hashes": {
+    "game-environment.cjs": "b541be6754ae245e330adfd2b914c8b2d67921748cad277322c3823a70177441",
+    "server.cjs": "6c19410a55c4e9b323c9bd5c83422f107be9eff5680b03635637ae27f9c81615",
+    "electron.cjs": "c756bde127af2cb102147ab9097c2a09028a61a2ed88ce3a0a9bab19cbe179c0",
+    "package.json": "1fcf697ef03ec256ba61feb0d4dfb3c361e7cfc7707b3cd9a14bf8f08a1167b2",
+    "auto-install.cjs": "b8d5b8d399e141ccd2c3d44241627f81ab73c93025233a32bbd6c619b19d068f",
+    "installers.cjs": "2fe90285c5abe22a2549f36a304f88e7e6b0842a24e371a55d4d6c86cfa61207"
+  },
+  "realInstallEvidence": "F:/youxia/qa/tattoos-real-test/installed-verification.json"
+}

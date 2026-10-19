@@ -1,4 +1,5 @@
 const crypto = require('node:crypto');
+const { setTimeout: wait } = require('node:timers/promises');
 const { version } = require('./package.json');
 
 const DEFAULT_BASE_URL = 'https://mu-api.claude-api.cn/';
@@ -26,27 +27,44 @@ function createAccountClient(options = {}) {
  Object.defineProperty(config, 'rememberAvailable', { enumerable: true, get: () => !!tokenStore?.isAvailable() });
  const deviceName = `MODDOCK ${version} (${process.platform})`;
  const fail = (status, code, message, retry) => { throw new AccountError(status, code, message, retry); };
+ const retryDelay = options.retryDelay ?? 350;
+ function connectionError(error, service = 'MU 账号') {
+  const detail = [error?.cause?.code, typeof error?.code === 'string' ? error.code : '', error?.name, error?.message].filter(Boolean).join(' ');
+  const timeout = /timeout|timed.out|abort/i.test(detail);
+  const tls = /cert|ssl|tls/i.test(detail);
+  return new AccountError(503, timeout ? 'account_timeout' : tls ? 'account_tls_error' : 'account_unavailable',
+   timeout ? `${service}连接超时，已保留登录状态，请重试。` : tls ? `${service}安全连接失败，请检查系统时间、证书或代理。` : `无法连接 ${service}服务，已保留登录状态，请检查网络或代理后重试。`);
+ }
  async function send(route, body, bearer) {
-  let response;
-  try {
-   response = await request(new URL(`api/v1/${route}`, base), {
-    method: body === undefined ? 'GET' : 'POST', redirect: 'error', signal: AbortSignal.timeout(route === 'auth/refresh' ? 30000 : 20000),
-    headers: { Accept: 'application/json', ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...(bearer ? { Authorization: `Bearer ${bearer}` } : {}) },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-   });
-  } catch { fail(503, 'account_unavailable', '无法连接 MU 账号服务，请稍后重试。'); }
-  if (response.status === 204) return null;
-  let data;
-  try { data = await response.json(); } catch {
-   fail(response.ok ? 502 : response.status, 'invalid_response', 'MU 账号服务响应无效，请稍后重试。', Number(response.headers.get('retry-after')) || undefined);
+  const retryable = body === undefined || route === 'account/authorize';
+  for (let attempt = 0; ; attempt++) {
+   let response;
+   try {
+    response = await request(new URL(`api/v1/${route}`, base), {
+     method: body === undefined ? 'GET' : 'POST', redirect: 'error', signal: AbortSignal.timeout(route === 'auth/refresh' ? 30000 : 20000),
+     headers: { Accept: 'application/json', ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...(bearer ? { Authorization: `Bearer ${bearer}` } : {}) },
+     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+   } catch (error) {
+    if (retryable && attempt === 0) { await wait(retryDelay); continue; }
+    throw connectionError(error);
+   }
+   if (response.status === 204) return null;
+   let data;
+   try { data = await response.json(); if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('Invalid account response'); } catch {
+    if (retryable && attempt === 0) { await wait(retryDelay); continue; }
+    // An HTML proxy/edge response is not evidence that a MU session was revoked.
+    fail(502, 'account_response_unavailable', 'MU 连接暂未返回有效数据，已保留登录状态，请重试。', Number(response.headers.get('retry-after')) || undefined);
+   }
+   if (!response.ok) {
+    if (retryable && attempt === 0 && [502, 503, 504].includes(response.status) && !data.code) { await wait(retryDelay); continue; }
+    const error = new AccountError(response.status, data.code || 'account_error', data.message || 'MU 账号服务请求失败，请稍后重试。', data.retryAfterSeconds || Number(response.headers.get('retry-after')) || undefined);
+    if (data.account) error.account = account(data.account);
+    if (data.reason) error.reason = data.reason;
+    throw error;
+   }
+   return data;
   }
-  if (!response.ok) {
-   const error = new AccountError(response.status, data.code || 'account_error', data.message || 'MU 账号服务请求失败，请稍后重试。', data.retryAfterSeconds || Number(response.headers.get('retry-after')) || undefined);
-   if (data.account) error.account = account(data.account);
-   if (data.reason) error.reason = data.reason;
-   throw error;
-  }
-  return data;
  }
  function emailAddress(value) {
   const email = typeof value === 'string' ? value.trim().toLowerCase() : '';
@@ -159,24 +177,91 @@ function createAccountClient(options = {}) {
    return { allowed: true, reason: result.reason, account: state.profile };
   });
  }
- async function nexusRequest(id, route, { method = 'GET', body, signal } = {}) {
-  if (!/^(?:status|jobs(?:\/[a-f0-9-]{36}(?:\/file)?)?)$/.test(route) || !['GET', 'POST', 'DELETE'].includes(method)) throw new Error('Invalid platform download route');
-  return withSession(id, async state => {
+ async function nexusRequest(id, route, { method = 'GET', body, signal, headers: transferHeaders } = {}) {
+  if (!/^(?:status|jobs(?:\/[a-f0-9-]{36}(?:\/file|\/verification(?:\/click)?)?)?)$/.test(route) || !['GET', 'POST', 'DELETE'].includes(method)) throw new Error('Invalid platform download route');
+  const state = await withSession(id, async state => {
    const refresh = async () => apply(state, await send('auth/refresh', { refreshToken: state.refreshToken }));
    if (state.expiresAt <= now() + 30000) await refresh();
+   return state;
+  });
+  const current = () => sessions.get(id) === state;
+  const bearer = state.accessToken;
    const call = async () => {
-    const timeout = new AbortController(), timer = setTimeout(() => timeout.abort(), 30000);
+    if (!current()) fail(401, 'login_required', '请先登录游匣账号。');
+    const timeout = new AbortController(), timer = setTimeout(() => timeout.abort(), route.endsWith('/verification') ? 10000 : 30000);
     try { return await request(new URL('api/v1/nexus/' + route, base), {
      method, redirect: 'error', signal: signal ? AbortSignal.any([signal, timeout.signal]) : timeout.signal,
-     headers: { Authorization: 'Bearer ' + state.accessToken, ...(body ? { 'Content-Type': 'application/json' } : {}) }, ...(body ? { body } : {}),
+     headers: { ...(route.endsWith('/file') ? Object.fromEntries(Object.entries(transferHeaders || {}).filter(([key]) => /^(range|if-range)$/i.test(key))) : {}), Authorization: 'Bearer ' + state.accessToken, ...(body ? { 'Content-Type': 'application/json' } : {}) }, ...(body ? { body } : {}),
     }); } finally { clearTimeout(timer); }
    };
    let response;
-   try { response = await call(); if (response.status === 401) { await response.body?.cancel(); await refresh(); response = await call(); } }
+   try {
+    for (let attempt = 0; ; attempt++) {
+     try { response = await call(); }
+     catch (error) { if (method !== 'GET' || attempt || signal?.aborted || error instanceof AccountError) throw error; await wait(retryDelay, undefined, { signal }); continue; }
+     if (method === 'GET' && attempt === 0 && [502, 503, 504].includes(response.status)) { await response.body?.cancel(); await wait(retryDelay, undefined, { signal }); continue; }
+     break;
+    }
+    if (response.status === 401) {
+     await response.body?.cancel();
+     await withSession(id, async fresh => {
+      if (fresh !== state) fail(401, 'login_required', '请先登录游匣账号。');
+      if (fresh.accessToken === bearer) await apply(fresh, await send('auth/refresh', { refreshToken: fresh.refreshToken }));
+      return true;
+     });
+     response = await call();
+    }
+   }
    catch (error) { if (signal?.aborted) throw error; if (error instanceof AccountError) throw error; fail(503, 'nexus_unavailable', '下载服务暂不可用，请稍后重试。'); }
-   if (!response.ok) { let error; try { error = await response.json(); } catch {} fail(response.status, error?.code || 'nexus_unavailable', error?.message || '下载服务暂不可用，请稍后重试。', Number(response.headers.get('retry-after')) || undefined); }
+   if (!current()) { await response.body?.cancel(); fail(401, 'login_required', '请先登录游匣账号。'); }
+   if (!response.ok) {
+    let error; try { error = await response.json(); } catch {}
+    if (!error || typeof error.code !== 'string') fail(502, 'nexus_unavailable', 'MU 下载连接暂未返回有效数据，正在保留原任务重试。');
+    fail(response.status, error.code, error.message || '下载服务暂不可用，请稍后重试。', Number(response.headers.get('retry-after')) || undefined);
+   }
    return response;
+ }
+ async function studioRequest(id, owner, route, { body, signal } = {}) {
+  if (!['plan', 'generate', 'repair'].includes(route)) throw new Error('Invalid studio service route');
+  const state = await withSession(id, async current => {
+   if (current.profile.id !== owner) fail(401, 'login_required', '创作账号已变化，请重新开始。');
+   if (current.expiresAt <= now() + 30000) await apply(current, await send('auth/refresh', { refreshToken: current.refreshToken }));
+   return current;
   });
+  const current = () => sessions.get(id) === state && state.profile.id === owner;
+  const call = () => {
+   if (!current()) fail(401, 'login_required', '请先登录游匣账号。');
+   return request(new URL('api/v1/studio/' + route, base), { method: 'POST', redirect: 'error',
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(310000)]) : AbortSignal.timeout(310000),
+    headers: { Authorization: 'Bearer ' + state.accessToken, 'Content-Type': 'application/json', Accept: 'application/x-ndjson, application/json' }, body });
+  };
+  let response;
+  try {
+   response = await call();
+   if (response.status === 401) {
+    await response.body?.cancel();
+    await withSession(id, async fresh => {
+     if (fresh !== state || fresh.profile.id !== owner) fail(401, 'login_required', '创作账号已变化。');
+     await apply(fresh, await send('auth/refresh', { refreshToken: fresh.refreshToken }));
+     return true;
+    });
+    response = await call();
+   }
+  } catch (error) {
+   if (signal?.aborted || error instanceof AccountError) throw error;
+   throw Object.assign(new AccountError(503, 'studio_unavailable', '创作连接暂时中断，正在恢复连接。'), { cause: error });
+  }
+  if (!current() || signal?.aborted) { await response.body?.cancel(); fail(401, 'login_required', '创作已停止，请重新登录后继续。'); }
+  if (!response.ok) {
+   let data;
+   try { data = await response.json(); } catch {}
+   const messages = { pro_required: 'AI Mod 创作为 Pro 高级功能。', feature_denied: '当前账号的创作权限已关闭。',
+    studio_rate_limited: '创作请求较多，请稍后再试。', studio_not_configured: 'MU 创作服务正在配置中，请稍后重试。',
+    ai_credits_exhausted: '创作服务额度暂不足，请联系维护方。', ai_response_invalid: 'AI 返回的内容未通过校验，请重试。',
+    invalid_request: 'AI 请求参数未通过 MU 校验，请更新客户端；重新登录或等待重试无法修复此参数问题。' };
+   fail(response.status, data?.code || 'studio_unavailable', messages[data?.code] || 'MU 创作服务请求失败，请稍后重试。', Number(response.headers.get('retry-after')) || undefined);
+  }
+  return response;
  }
  async function restore() {
   if (!tokenStore) return { profile: null, storageWarning: null };
@@ -200,6 +285,7 @@ function createAccountClient(options = {}) {
  return {
   config,
   nexusRequest,
+  studioRequest,
   status(id) { const state = sessions.get(id); return { remember: state?.remember === true, storageWarning: state?.storageWarning || storageWarning }; },
   requireSession,
   requireActiveSession() { return requireSession([...sessions.keys()].at(-1)); },

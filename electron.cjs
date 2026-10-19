@@ -1,10 +1,13 @@
 const { app, BrowserWindow, shell, net, session, safeStorage, dialog } = require('electron');
+// Keep long creation streams on TLS/TCP when an edge advertises HTTP/3.
+app.commandLine.appendSwitch('disable-quic');
 const path=require('node:path');
 const { createServer } = require('./server.cjs');
 const { downloadAllowed, externalAllowed } = require('./sources.cjs');
 const { createAccountTokenStore } = require('./account-token-store.cjs');
 const { createSourceKeyStore } = require('./source-key-store.cjs');
 const { createNexusPlatformClient } = require('./nexus-platform-client.cjs');
+const { createElectronFetch } = require('./bg3-extender.cjs');
 let service,mainWindow,authorizationWindow,protocolRegistered=false;
 const pending=[];
 function focusMain(){if(mainWindow&&!mainWindow.isDestroyed()){if(mainWindow.isMinimized())mainWindow.restore();mainWindow.show();mainWindow.focus();}}
@@ -34,8 +37,13 @@ if (primary) app.whenReady().then(async () => {
   const result = await dialog.showOpenDialog(mainWindow, { title: '添加 Steam 游戏库', buttonLabel: '添加游戏库', message: '选择 Steam 游戏库、steamapps 或其中的游戏文件夹', properties: ['openDirectory', 'dontAddToRecent'] });
   return result.canceled ? null : result.filePaths[0];
  };
- service = await createServer({ port: 0, root: dataRoot, accounts: { tokenStore }, sourceKeyStore, chooseScanDirectory, nexusSso: { openBrowser: openNexusSso }, reveal: file => shell.showItemInFolder(file), protocolStatus:()=>protocolRegistered, sources: { fetch: (url, init) => net.fetch(String(url), init), nexusPlatform }, downloads: { fetch: (url, init) => downloadSession.fetch(String(url), { ...init, redirect: 'follow' }) } });
- mainWindow = new BrowserWindow({ width: 1440, height: 940, minWidth: 1000, minHeight: 700, title: '游匣 · MODDOCK', titleBarStyle: 'hidden', titleBarOverlay: { color: '#00000000', symbolColor: '#eef1ee', height: 40 }, backgroundColor: '#101215', autoHideMenuBar: true, webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true } });
+ const chooseStudioGame = async () => {
+  if (!mainWindow || mainWindow.isDestroyed()) throw new Error('主窗口尚未就绪');
+  const result = await dialog.showOpenDialog(mainWindow, { title: '选择要创作 Mod 的游戏', buttonLabel: '选择游戏', properties: ['openFile', 'dontAddToRecent'], ...(process.platform === 'win32' ? { filters: [{ name: '游戏启动文件', extensions: ['exe'] }] } : {}) });
+  return result.canceled ? null : result.filePaths[0];
+ };
+ service = await createServer({ port: 0, root: dataRoot, accounts: { tokenStore, fetch: (url, init) => net.fetch(String(url), init) }, sourceKeyStore, chooseScanDirectory, chooseStudioGame, installers: { openGame: uri => shell.openExternal(uri) }, bg3Extender: { fetch: createElectronFetch(net) }, nexusSso: { openBrowser: openNexusSso }, reveal: file => shell.showItemInFolder(file), protocolStatus:()=>protocolRegistered, sources: { fetch: (url, init) => net.fetch(String(url), init), nexusPlatform }, downloads: { fetch: (url, init) => downloadSession.fetch(String(url), { ...init, redirect: 'follow' }) } });
+ mainWindow = new BrowserWindow({ width: 1440, height: 940, minWidth: 1000, minHeight: 700, title: '游匣 · MODDOCK · 安装修复版', titleBarStyle: 'hidden', titleBarOverlay: { color: '#00000000', symbolColor: '#eef1ee', height: 40 }, backgroundColor: '#101215', autoHideMenuBar: true, webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true, preload: path.join(__dirname, 'studio-preload.cjs') } });
  mainWindow.on('closed',()=>{mainWindow=null;if(authorizationWindow&&!authorizationWindow.isDestroyed())authorizationWindow.close();});
  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
   if (Object.values(service.accountLegalUrls).includes(url) || externalAllowed(url)) void shell.openExternal(url).catch(() => {});

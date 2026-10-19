@@ -1,0 +1,72 @@
+{
+  "status": "repairing",
+  "error": "",
+  "artifactId": "3d552d4b-4ba4-49c4-b4b9-f814c55df4a2",
+  "runtimeRecovery": {
+    "artifactId": "3d552d4b-4ba4-49c4-b4b9-f814c55df4a2",
+    "attempts": [
+      {
+        "artifactId": "3d552d4b-4ba4-49c4-b4b9-f814c55df4a2",
+        "runId": "306810dd-9c1a-48c1-a695-6bb318d435b7",
+        "reason": "behavior_failed",
+        "evidence": [
+          {
+            "id": "fov_toggle_110",
+            "kind": "failed_readback",
+            "actual": "90",
+            "expected": "110",
+            "tolerance": "0.050000000000000003"
+          },
+          {
+            "id": "fov_toggle_110",
+            "seq": 2,
+            "status": "failed",
+            "actual": "90",
+            "expected": "110",
+            "tolerance": "0.050000000000000003"
+          }
+        ],
+        "started": "2026-10-19T05:49:42.973Z"
+      }
+    ],
+    "pendingArtifactId": null,
+    "lastRunId": "306810dd-9c1a-48c1-a695-6bb318d435b7",
+    "expectingNewRun": false
+  },
+  "runtimeVerification": {
+    "status": "behavior_failed",
+    "detail": "实际游戏状态与预期不符，将携带回读证据自动修复。",
+    "evidence": [
+      {
+        "id": "fov_toggle_110",
+        "kind": "failed_readback",
+        "actual": "90",
+        "expected": "110",
+        "tolerance": "0.050000000000000003"
+      },
+      {
+        "id": "fov_toggle_110",
+        "seq": 2,
+        "status": "failed",
+        "actual": "90",
+        "expected": "110",
+        "tolerance": "0.050000000000000003"
+      }
+    ],
+    "states": {
+      "fov_toggle_110": {
+        "seq": 2,
+        "status": "failed",
+        "actual": "90",
+        "expected": "110",
+        "tolerance": "0.050000000000000003"
+      }
+    },
+    "pending": {},
+    "repairable": true,
+    "runId": "306810dd-9c1a-48c1-a695-6bb318d435b7",
+    "gamePid": 38836,
+    "exited": false,
+    "checked": "2026-10-19T05:49:42.415Z"
+  }
+}

@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Data-XML template: a one-time City project, tech-gated, that fires a reward modifier
+  on completion. A project with NO effect is hidden from the build list, so the
+  ProjectCompletionModifiers row is mandatory. Tech-unlocked City projects use
+  RequiresUnlock="false" (the ProgressionTreeNodeUnlocks row is the gate).
+  See references/projects.md. Add matching Types rows and LOC_* text separately.
+-->
+<Database>
+
+    <Types>
+        <Row Type="PROJECT_MY_THING" Kind="KIND_PROJECT"/>
+    </Types>
+
+    <Projects>
+        <Row ProjectType="PROJECT_MY_THING"
+             Name="LOC_PROJECT_MY_THING_NAME"
+             ShortName="LOC_PROJECT_MY_THING_NAME"
+             Description="LOC_PROJECT_MY_THING_DESCRIPTION"
+             CityOnly="true"
+             Cost="200"
+             MaxPlayerInstances="1"
+             RequiresUnlock="false"/>
+    </Projects>
+
+    <!-- Researching this tech node reveals the project. Grep the base game's
+         progression-trees-tech.xml for the real ProgressionTreeNodeType. -->
+    <ProgressionTreeNodeUnlocks>
+        <Row ProgressionTreeNodeType="NODE_TECH_AQ_CURRENCY"
+             TargetKind="KIND_PROJECT"
+             TargetType="PROJECT_MY_THING"
+             UnlockDepth="1"/>
+    </ProgressionTreeNodeUnlocks>
+
+    <!-- The effect (required, or the project is hidden). MOD_MY_THING_REWARD is defined
+         in a GameEffects file. For ongoing player/city bonuses, fire an attach wrapper
+         here instead of a raw player/city modifier. -->
+    <ProjectCompletionModifiers>
+        <Row ProjectType="PROJECT_MY_THING" ModifierId="MOD_MY_THING_REWARD"/>
+    </ProjectCompletionModifiers>
+
+</Database>

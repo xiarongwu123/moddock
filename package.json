@@ -1,43 +1,17 @@
 {
   "name": "moddock",
-  "version": "0.5.0",
+  "version": "0.6.8-runtime-repair.20261019",
   "private": true,
   "description": "游匣 — 本机游戏库、社区 Mod 下载与按游戏规则安装管理",
   "main": "electron.cjs",
-  "scripts": {
-    "build": "node scripts/build-ui.cjs",
-    "prestart": "npm run build",
-    "start": "electron .",
-    "prepreview": "npm run build",
-    "preview": "node server.cjs",
-    "test": "node --test test/*.test.cjs"
-  },
-  "devDependencies": {
-    "@playwright/test": "1.64.0",
-    "electron": "44.7.0",
-    "esbuild": "^0.28.2"
-  },
+  "author": "Rongwen Xia",
   "dependencies": {
-    "@gsap/react": "^2.1.2",
-    "@hugeicons/core-free-icons": "^4.3.5",
-    "@hugeicons/react": "^1.1.10",
-    "face-api.js": "^0.22.2",
-    "gsap": "^3.15.0",
-    "motion": "^14.1.0",
-    "postprocessing": "^6.39.5",
-    "react": "^19.3.0",
-    "react-dom": "^19.3.0",
-    "three": "^0.186.1",
-    "transition-hook": "1.5.2",
-    "yauzl": "3.4.0"
-  },
-  "overrides": {
-    "transition-hook": {
-      "react": "$react",
-      "react-dom": "$react-dom"
-    }
-  },
-  "engines": {
-    "node": ">=22.15.0"
+    "yauzl": "3.4.0",
+    "@xmldom/xmldom": "0.9.12",
+    "wasmoon": "1.16.0",
+    "@lezer/python": "1.1.19",
+    "@ruby/wasm-wasi": "2.10.1",
+    "@ruby/3.3-wasm-wasi": "2.10.1",
+    "fossil-delta": "2.0.0"
   }
 }

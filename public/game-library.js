@@ -1,18 +1,19 @@
-export function renderGameLibrary({ data, selected, tab, query, launching, esc, icon, cover, explore, runCard }) {
+export function renderGameLibrary({ data, selected, tab, query, launching, esc, icon, cover, explore, runCard, studio }) {
  const game = data.sourceGames.find(item => item.id === selected);
  const games = data.scan.games.filter(item => `${item.name} ${item.platform}`.toLowerCase().includes(query.toLowerCase()));
  const mods = data.installations?.mods.filter(item => item.gameId === selected) || [];
  const runs = data.installations?.runs.filter(item => item.gameId === selected) || [];
  const profile = data.installations?.profiles.find(item => item.gameId === selected);
  const enabled = mods.filter(item => item.status === 'enabled').length;
+ const restoration = data.installations?.restorations?.find(item => item.gameId === selected && item.preserved);
  const lastPlayed = runs[0] ? new Date(runs[0].started).toLocaleDateString('zh-CN') : '暂无记录';
- const tabs = [['overview', '概览'], ['mods', '我的 Mod'], ['explore', '探索 Mod'], ['settings', '游戏设置']];
+ const tabs = [['overview', '概览'], ['mods', '我的 Mod'], ['explore', '探索 Mod'], ['studio', '游匣 AI'], ['settings', '游戏设置']];
  const tabButton = (value, label, className = 'btn') => `<button class="${className}" data-game-tab="${value}">${label}</button>`;
  const modRows = (items, actions = false) => items.map(mod => `<article class="library-mod-row">
   <span class="library-mod-icon">${icon('box')}</span>
   <div class="library-mod-copy"><h3>${esc(mod.name)}</h3><span>${mod.files.length} 个文件${mod.version ? ` · v${esc(mod.version)}` : ''}</span></div>
   <span class="library-mod-status ${mod.status === 'enabled' ? 'is-enabled' : ''}">${mod.status === 'enabled' ? '已启用' : '已停用'}</span>
-  ${actions ? `<div class="row-actions"><button class="btn small" data-mod-action="${mod.status === 'enabled' ? 'disable' : 'enable'}" data-managed-id="${esc(mod.id)}">${mod.status === 'enabled' ? '停用' : '启用'}</button><button class="btn small" data-mod-action="verify" data-managed-id="${esc(mod.id)}">校验</button><button class="icon-button" data-mod-action="uninstall" data-managed-id="${esc(mod.id)}" aria-label="卸载 ${esc(mod.name)}">${icon('trash')}</button></div>` : ''}
+  ${actions ? `<div class="row-actions">${(() => { const job = data.jobs.find(job => job.id === mod.jobId); return job?.studio?.controls ? `<button class="btn small" data-studio-controls="${esc(job.studio.artifactId)}" data-controls-game="${esc(mod.gameId)}">参数与快捷键</button>` : ''; })()}<button class="btn small" data-mod-action="${mod.status === 'enabled' ? 'disable' : 'enable'}" data-managed-id="${esc(mod.id)}">${mod.status === 'enabled' ? '停用' : '启用'}</button><button class="btn small" data-mod-action="verify" data-managed-id="${esc(mod.id)}">校验</button><button class="icon-button" data-mod-action="uninstall" data-managed-id="${esc(mod.id)}" aria-label="卸载 ${esc(mod.name)}">${icon('trash')}</button></div>` : ''}
  </article>`).join('');
  const noMods = () => `<div class="library-mod-empty"><span>${icon('box')}</span><h3>还没有安装 Mod</h3>${tabButton('explore', `${icon('compass')}探索 Mod`, 'btn primary')}</div>`;
  const pending = data.jobs.filter(job => job.gameId === selected && job.status === 'completed' && job.import?.status === 'ready' && !mods.some(mod => mod.jobId === job.id));
@@ -26,12 +27,12 @@ export function renderGameLibrary({ data, selected, tab, query, launching, esc, 
  </div>`;
  const managed = () => `<div class="library-section-heading"><h2>我的 Mod <span>${mods.length}</span></h2>${tabButton('explore', `${icon('compass')}探索 Mod`)}</div>
   ${mods.length ? `<div class="library-mod-list">${modRows(mods, true)}</div>` : noMods()}
-  ${pending.length ? `<h2 class="run-heading">待安装</h2>${pending.map(job => `<div class="file-row"><div><strong>${esc(job.name)}</strong><small>${job.import.files.length} 个文件</small></div><button class="btn small primary" data-install-job="${esc(job.id)}">预览安装</button></div>`).join('')}` : ''}
+  ${pending.length ? `<h2 class="run-heading">待安装</h2>${pending.map(job => `<div class="file-row"><div><strong>${esc(job.name)}</strong><small>${job.import.files.length} 个文件</small></div><button class="btn small primary" data-install-job="${esc(job.id)}">一键安装</button></div>`).join('')}` : ''}
   <button class="library-pending-link" data-nav="installed">${icon('settings')}全部 Mod 与配置档案${icon('arrow')}</button>`;
  const settings = () => `<section class="library-game-settings"><h2>游戏设置</h2>
-  <div class="library-setting-row"><div><h3>启动入口</h3><p>${esc(profile?.rule?.executable || '首次启动前，选择游戏或加载器的可执行文件。')}</p></div><button class="btn" data-launch-settings="${esc(game.id)}">设置启动入口</button></div>
+  <div class="library-setting-row"><div><h3>启动入口</h3><p>${esc(profile?.rule?.executable || '自动通过游戏平台启动；需要加载器时自动使用对应入口。')}</p></div><button class="btn" data-launch-settings="${esc(game.id)}">设置启动入口</button></div>
   <div class="library-setting-row"><div><h3>安装位置</h3><p class="library-install-path">${esc(game.installPath)}</p></div></div>
-  <div class="library-setting-row"><div><h3>Mod 安装规则</h3><p>${profile?.configured ? '已配置，可按 Mod 作者的说明调整。' : '安装 Mod 时再配置目录和前置要求。'}</p></div><button class="btn" data-rule-game="${esc(game.id)}">安装规则</button></div>
+  <details class="library-launch-advanced"><summary>高级设置</summary><div class="library-setting-row"><div><h3>手动安装规则</h3><p>默认自动识别，仅在需要自定义目录或特殊安装方式时调整。</p></div><button class="btn" data-rule-game="${esc(game.id)}">手动安装规则</button></div>${restoration ? `<div class="library-setting-row"><div><h3>恢复时保留的用户文件</h3><p>${esc(restoration.recoveryPath)}</p></div></div>` : ''}</details>
   <div class="library-setting-row"><div><h3>Mod 来源</h3><p>关联这款游戏在各个 Mod 平台的专区。</p></div><button class="btn" data-mapping>来源匹配</button></div>
  </section>`;
  return `<div class="game-library-layout">
@@ -59,10 +60,10 @@ export function renderGameLibrary({ data, selected, tab, query, launching, esc, 
     <div class="game-library-play-slot" data-body-play-slot><button class="btn primary game-library-play" data-play-game="${esc(game.id)}" ${launching === game.id ? 'disabled' : ''}>${icon(launching === game.id ? 'loader' : 'play', launching === game.id ? 'spinning' : '')}${launching === game.id ? '正在启动…' : '开始游戏'}</button></div>
     <div class="game-library-stat"><span>最近启动</span><strong>${lastPlayed}</strong></div>
     <div class="game-library-stat"><span>已启用 Mod</span><strong>${enabled}<small> / ${mods.length}</small></strong></div>
-    <button class="game-library-settings-button" data-game-tab="settings" aria-label="游戏设置" title="游戏设置">${icon('settings')}</button>
+    ${mods.length ? `<button class="btn danger" data-restore-game="${esc(game.id)}">恢复原生游戏</button>` : ''}<button class="game-library-settings-button" data-game-tab="settings" aria-label="游戏设置" title="游戏设置">${icon('settings')}</button>
    </div>
-   <div class="game-library-tabs" role="tablist" aria-label="游戏内容">${tabs.map(([value, label]) => `<button id="game-tab-${value}" role="tab" aria-selected="${tab === value}" aria-controls="game-library-panel" tabindex="${tab === value ? 0 : -1}" data-game-tab="${value}">${label}${value === 'mods' && mods.length ? `<span>${mods.length}</span>` : ''}</button>`).join('')}</div>
-   <section class="game-library-panel" id="game-library-panel" role="tabpanel" tabindex="0" aria-labelledby="game-tab-${tab}">${({ overview, mods: managed, explore, settings })[tab]()}</section></div>` : `<div class="game-library-missing">${icon('gamepad')}<h2>游戏已不在库中</h2><p>从左侧选择游戏，或重新扫描游戏库。</p><button class="btn" data-nav="library">返回游戏库</button></div>`}
+   <div class="game-library-tabs" role="tablist" aria-label="游戏内容">${tabs.map(([value, label]) => `<button id="game-tab-${value}" role="tab" aria-selected="${tab === value}" aria-controls="game-library-panel" tabindex="${tab === value ? 0 : -1}" data-game-tab="${value}">${label}${value === 'studio' ? '<span class="studio-pro">PRO</span>' : ''}${value === 'mods' && mods.length ? `<span>${mods.length}</span>` : ''}</button>`).join('')}</div>
+   <section class="game-library-panel" id="game-library-panel" role="tabpanel" tabindex="0" aria-labelledby="game-tab-${tab}">${({ overview, mods: managed, explore, studio, settings })[tab]()}</section></div>` : `<div class="game-library-missing">${icon('gamepad')}<h2>游戏已不在库中</h2><p>从左侧选择游戏，或重新扫描游戏库。</p><button class="btn" data-nav="library">返回游戏库</button></div>`}
   </section>
  </div>`;
 }

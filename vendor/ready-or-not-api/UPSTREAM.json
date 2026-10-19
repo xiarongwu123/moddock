@@ -1,0 +1,13 @@
+{
+  "repository": "https://github.com/Herkkomehtala/ReadyOrNot-Internal",
+  "commit": "ef7c5642688bd265356e72a9a5f25e86d6a88150",
+  "license": "MIT",
+  "inputs": {
+    "RoN-Internal/SDK/ReadyOrNot_classes.hpp": "ac6b866032b3de5c888c900ce15fe0852bd67c6fbe2687840cc9a1dbecf5f94a",
+    "RoN-Internal/SDK/Engine_classes.hpp": "84e200f2e1bfcf5b9160bb917d79f2f5011fa813b85a0a431296ac676c7b883f"
+  },
+  "hashes": {
+    "api.json": "9d3566e3bce7a3ffcf27e583767a27fabc96ffce903cf6dfa965c007a66a3bf1",
+    "LICENSE": "1126322e2cc8d165adc4c792eeb195717de2bcc7b39be1ce77959d78e87ef685"
+  }
+}

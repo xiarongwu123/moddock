@@ -34,7 +34,7 @@ const providers = [
 function safeUrl(value, allowed) { try { const u = new URL(value); return u.protocol === 'https:' && !u.username && !u.password && allowed.includes(u.hostname) ? u.href : null; } catch { return null; } }
 function externalAllowed(value) {
   if (/^steam:\/\/url\/CommunityFilePage\/\d+$/.test(value)) return true;
-  return !!safeUrl(value, ['www.nexusmods.com', 'nexusmods.com', 'gamebanana.com', 'steamcommunity.com', 'api-docs.nexusmods.com']);
+  return !!safeUrl(value, ['www.nexusmods.com', 'nexusmods.com', 'gamebanana.com', 'steamcommunity.com', 'api-docs.nexusmods.com', 'github.com', 'docs.bepinex.dev', 'stardewvalleywiki.com', 'wiki.redmodding.org']);
 }
 function text(value) { return String(value || '').replace(/<[^>]*>/g, '').replace(/\[(?:\/?[a-z]+)(?:=[^\]]*)?\]/gi, '').replace(/\s+/g, ' ').trim().slice(0, 50000); }
 function normalize(value) { return String(value || '').replace(/[™®©]/g, '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, ''); }
@@ -188,11 +188,11 @@ class Sources {
       const g = await this.gql('query($domain:String){game(domainName:$domain){id}}', { domain: r.domain });
       const raw = await this.gql('query($mod:ID!,$game:ID!){mod(modId:$mod,gameId:$game){description modRequirements{nexusRequirements{nodes{modName notes}}}} modFiles(modId:$mod,gameId:$game){fileId name uri detectedFileExtension sizeInBytes size version category description}}', { mod: r.id, game: String(g.game.id) });
       const connected = this.status().nexusConnected;
-      return { description: text(raw.mod.description), requirements: (raw.mod.modRequirements?.nexusRequirements?.nodes || []).map(m => text(`${m.modName} ${m.notes || ''}`)), notice: this.nexusPlatform ? '点击下载后自动准备并传输文件，无需登录 Nexus。' : this.keys.nexus ? 'Nexus 已连接。桌面版会自动完成文件授权和下载；首次网页登录或站点验证需在弹出的官方窗口完成，随后自动继续。' : '公开列表可浏览，下载前请在设置中连接 Nexus。普通账号仍需由 Nexus 网页签发文件授权。', files: raw.modFiles.filter(f => !['REMOVED', 'ARCHIVED', 'OLD_VERSION'].includes(f.category)).map(f => {
+      return { description: text(raw.mod.description), requirementDetails: (raw.mod.modRequirements?.nexusRequirements?.nodes || []).map(m => ({name:text(m.modName),notes:text(m.notes)})), requirements: (raw.mod.modRequirements?.nexusRequirements?.nodes || []).map(m => text(`${m.modName} ${m.notes || ''}`)), notice: this.nexusPlatform ? '点击下载后自动准备并传输文件，无需登录 Nexus。' : this.keys.nexus ? 'Nexus 已连接。桌面版会自动完成文件授权和下载；首次网页登录或站点验证需在弹出的官方窗口完成，随后自动继续。' : '公开列表可浏览，下载前请在设置中连接 Nexus。普通账号仍需由 Nexus 网页签发文件授权。', files: raw.modFiles.filter(f => !['REMOVED', 'ARCHIVED', 'OLD_VERSION'].includes(f.category)).map(f => {
         const bytes = Number(f.sizeInBytes), sizeExact = Number.isSafeInteger(bytes) && bytes > 0;
         // Legacy Nexus sizes are rounded KiB rather than exact byte counts.
         const approximate = Number(f.size) * 1024;
-        return { id: String(f.fileId), name: text(`${f.name}.${f.detectedFileExtension || 'zip'}`), label: text(f.name), size: sizeExact ? bytes : Number.isFinite(approximate) && approximate > 0 ? Math.round(approximate) : 0, sizeExact, version: f.version, category: f.category, available: connected, downloadCode:connected?'NEXUS_PERMISSION_CHECK':'NEXUS_KEY_REQUIRED',downloadReason:this.nexusPlatform?'点击即可下载，文件准备完成后自动传输':this.keys.nexus?'Nexus 已连接，下载时自动核对文件权限':'未连接 Nexus；请在设置中连接账号。' };
+        return { id: String(f.fileId), name: text(`${f.name}.${f.detectedFileExtension || 'zip'}`), label: text(f.name), size: sizeExact ? bytes : Number.isFinite(approximate) && approximate > 0 ? Math.round(approximate) : 0, sizeExact, version: f.version, description: text(f.description), category: f.category, available: connected, downloadCode:connected?'NEXUS_PERMISSION_CHECK':'NEXUS_KEY_REQUIRED',downloadReason:this.nexusPlatform?'点击即可下载，文件准备完成后自动传输':this.keys.nexus?'Nexus 已连接，下载时自动核对文件权限':'未连接 Nexus；请在设置中连接账号。' };
       }) };
     }
     if (!game.appId || game.workshop === false) throw new Error('该游戏不支持 Steam 工坊');
@@ -229,18 +229,28 @@ class Sources {
     if (game.banana) { this.matching('banana',game,{id:game.banana,name:game.searchName}); return String(game.banana); }
     const key = `banana:${game.id}:${game.searchName}`; if (this.gameIds.has(key)) return this.gameIds.get(key);
     const u = new URL('https://gamebanana.com/apiv11/Util/Search/Results'); u.searchParams.set('_sSearchString', game.searchName); u.searchParams.set('_sModelName', 'Game');
-    let records;
+    const names = [game.searchName, game.name].map(name => normalize(String(name).replace(/&/g, 'and')));
+    const exact = record => names.includes(normalize(record._sName.replace(/&/g, 'and')));
+    let records, indexed;
     try { records = bananaGameRecords(await this.request(u)); }
     catch (error) {
       if (!['INVALID_SCHEMA', 'INVALID_JSON'].includes(error.code) && !error.code?.startsWith('GAMEBANANA_')) throw error;
-      // The dedicated index remains usable when the general search returns an invalid payload.
+      records = [];
+    }
+    if (records.filter(exact).length !== 1) {
+      // General search can omit a real exact match or return unrelated popular games.
       const fallback = new URL('https://gamebanana.com/apiv11/Game/Index');
       fallback.searchParams.set('_aFilters[Generic_Name]', `contains,${game.searchName}`);
-      fallback.searchParams.set('_nPerpage', '15');
-      records = bananaGameRecords(await this.request(fallback));
+      fallback.searchParams.set('_nPerpage', '50');
+      indexed = await this.request(fallback);
+      records = [...new Map([...records, ...bananaGameRecords(indexed)].map(record => [String(record._idRow), record])).values()];
     }
-    const matches = records.filter(g => [game.searchName,game.name].some(n=>normalize(n)===normalize(g._sName)));
-    if (matches.length !== 1) { this.matching('banana',game,{searchName:game.searchName,candidates:records.slice(0,6).map(g=>({id:String(g._idRow),name:g._sName}))}); return null; }
+    const matches = records.filter(exact);
+    if (matches.length !== 1) {
+      const related = matches.length ? matches : records.filter(record => names.some(name => name.length >= 5 && normalize(record._sName.replace(/&/g, 'and')).startsWith(name)));
+      const complete = indexed?._aMetadata?._bIsComplete === true || (Number.isSafeInteger(indexed?._aMetadata?._nRecordCount) && indexed._aMetadata._nRecordCount <= indexed._aRecords.length);
+      this.matching('banana',game,{searchName:game.searchName,unavailable:!related.length && complete,candidates:related.slice(0,6).map(g=>({id:String(g._idRow),name:g._sName}))}); return null;
+    }
     const match = matches[0], id = String(match._idRow); this.matching('banana',game,{name:match._sName,id}); this.gameIds.set(key,id); return id;
   }
   async list(source, game, query = '', page = 1) {
@@ -277,7 +287,11 @@ class Sources {
         base.total = Number.isFinite(Number(raw.mods.totalCount)) ? Number(raw.mods.totalCount) : null; base.hasNext = page * 20 < base.total; base.scope = 'search'; base.matchedGame = this.binding(source,game); return this.result(base, raw.mods.nodes.length);
       }
       if (source === 'banana') {
-        const gameId = await this.bananaGame(game); if (!gameId) return { ...base, status: 'unmapped', ...this.binding(source,game), message: `未找到唯一匹配的香蕉网专区（查找名：${game.searchName}）${this.binding(source,game).candidates?.length?'，可选择下方候选专区':''}` };
+        const gameId = await this.bananaGame(game);
+        if (!gameId) {
+          const binding = this.binding(source,game);
+          return { ...base, ...binding, status: binding.unavailable ? 'unsupported' : 'unmapped', code: binding.unavailable ? 'GAME_NOT_LISTED' : 'GAME_MATCH_REQUIRED', message: binding.unavailable ? `GameBanana 暂未收录与“${game.searchName}”准确匹配的游戏专区，可切换 N 网或 Steam 创意工坊。` : `尚未确定“${game.searchName}”对应的 GameBanana 专区${binding.candidates?.length ? '，请选择下方候选专区' : '，请重试或查看官方索引'}` };
+        }
         base.matchedGame = this.binding(source,game);
         const u = new URL(query ? 'https://gamebanana.com/apiv11/Util/Search/Results' : 'https://gamebanana.com/apiv11/Mod/Index');
         if (page > 1) u.searchParams.set('_nPage', page);

@@ -4,7 +4,7 @@ function advanceNexusAuthorization(page, submitted = false) {
  const body = document.body?.innerText || '';
  if (current.hostname === 'users.nexusmods.com' && document.querySelector('input[type="password"]')) return { state: 'login_required' };
  const verified = [...document.querySelectorAll('input[name="cf-turnstile-response"],textarea[name="g-recaptcha-response"],textarea[name="h-captcha-response"]')].some(input => !!input.value);
- if (/verify you are human|checking your browser|verify.*human|验证码|人机验证/i.test(body) || (!verified && [...document.querySelectorAll('iframe')].some(frame => visible(frame) && /challenges\.cloudflare\.com|recaptcha|hcaptcha/i.test(frame.src)))) return { state: 'verification_required' };
+ if (/verify you are human|checking your browser|performing security verification|verify.*human|验证码|人机验证/i.test(body) || (!verified && [...document.querySelectorAll('iframe')].some(frame => visible(frame) && /challenges\.cloudflare\.com|recaptcha|hcaptcha/i.test(frame.src)))) return { state: 'verification_required' };
  if (current.pathname !== expected.pathname || current.searchParams.get('file_id') !== expected.searchParams.get('file_id') || current.searchParams.get('nmm') !== '1') return { state: 'waiting', reason: 'different_file_page' };
  const mod = expected.pathname.match(/^\/([a-z0-9_-]+)\/mods\/([1-9]\d*)$/);
  for (const link of document.querySelectorAll('a[href^="nxm://"]')) {

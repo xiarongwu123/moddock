@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  GameEffects template: deliver a player/city bonus the ONLY way that works — through a
+  COLLECTION_MAJOR_PLAYERS + EFFECT_ATTACH_MODIFIERS wrapper (the MOD_CS_HILLFORT
+  pattern). Bind ONLY the wrapper (here MY_ATTACH_ALL) in your tradition's
+  <GameModifiers> (or fire it from a project completion). Binding the COLLECTION_PLAYER_*
+  modifiers directly does nothing. See references/gameeffects.md.
+
+  ALWAYS replace the effect + argument names below with the EXACT names from a real
+  base-game modifier you grepped — argument names are not guessable.
+-->
+<GameEffects xmlns="GameEffects">
+
+    <!-- THE WRAPPER: bound at game level, hands each major player the real modifiers. -->
+    <Modifier id="MY_ATTACH_ALL"
+              collection="COLLECTION_MAJOR_PLAYERS"
+              effect="EFFECT_ATTACH_MODIFIERS">
+        <Argument name="ModifierId">MY_BONUS_YIELD, MY_BONUS_TWO</Argument>
+    </Modifier>
+
+    <!-- A real bonus: now it has a player owner, so COLLECTION_PLAYER_CITIES resolves
+         and its SubjectRequirements gate per city. -->
+    <Modifier id="MY_BONUS_YIELD"
+              collection="COLLECTION_PLAYER_CITIES"
+              effect="EFFECT_CITY_ADJUST_YIELD">
+        <SubjectRequirements>
+            <Requirement type="REQUIREMENT_CITY_POPULATION">
+                <Argument name="MinUrbanPopulation">7</Argument>
+            </Requirement>
+        </SubjectRequirements>
+        <Argument name="YieldType">YIELD_SCIENCE</Argument>
+        <Argument name="Amount">2</Argument>
+    </Modifier>
+
+    <!-- A second bonus, gated on having built an unlock project. -->
+    <Modifier id="MY_BONUS_TWO"
+              collection="COLLECTION_PLAYER_CITIES"
+              effect="EFFECT_CITY_ADJUST_YIELD">
+        <SubjectRequirements>
+            <Requirement type="REQUIREMENT_PLAYER_HAS_COMPLETED_PROJECT">
+                <Argument name="ProjectType">PROJECT_MY_THING</Argument>
+            </Requirement>
+        </SubjectRequirements>
+        <Argument name="YieldType">YIELD_CULTURE</Argument>
+        <Argument name="Amount">1</Argument>
+    </Modifier>
+
+</GameEffects>

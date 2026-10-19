@@ -1,0 +1,29 @@
+{
+  "name": "civ7-modding-skill",
+  "version": "1.0.0",
+  "description": "Claude Code skill for building Civilization VII gameplay/database mods (modinfo + GameEffects + traditions). Installs into ~/.claude/skills (global) or ./.claude/skills (project).",
+  "bin": "./bin/install.js",
+  "repository": { "type": "git", "url": "git+https://github.com/chrislittle/civ7-modding-skill.git" },
+  "homepage": "https://github.com/chrislittle/civ7-modding-skill#readme",
+  "files": [
+    "bin/",
+    "SKILL.md",
+    "references/",
+    "assets/",
+    "scripts/",
+    "tools/",
+    "LICENSE"
+  ],
+  "keywords": [
+    "claude",
+    "claude-code",
+    "claude-skill",
+    "civ7",
+    "civilization-vii",
+    "modding"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=14"
+  }
+}

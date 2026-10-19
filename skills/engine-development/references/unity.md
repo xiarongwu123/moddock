@@ -1,0 +1,7 @@
+# Unity
+
+Distinguish Mono, IL2CPP and unknown backend from local diagnostics. For Mono use bepinex-plugin and the host Roslyn compiler with this game's local assemblies; never redistribute game DLLs. Read the BepInEx skill selected by the host. Game class names require local source or assembly evidence; generic Unity APIs do not prove game-specific methods.
+
+For engineEvidence.mode=unity-il2cpp the host has run Cpp2IL and Il2CppInterop against this game's native binary and metadata with matching Unity libraries. Read native/il2cpp documents: these are actual generated type/member signatures, not recovered method bodies. Write main.cs defining public static class ModContent { public static void Initialize(BepInEx.Unity.IL2CPP.BasePlugin plugin) { ... } } and mod.json {"mode":"unity-il2cpp","patches":[],"blockers":[]}. The host supplies the BepInEx 6 entry, compiles against matching local interop and the loader's .NET runtime, verifies CLR metadata and packages the actual DLL for installation. Do not declare a second BepInPlugin or BaseUnityPlugin. Use verified Harmony targets for the requested gameplay; injected MonoBehaviours require registration and IntPtr constructors. Read the selected IL2CPP skill. Compiler errors return for repair. Do not submit a log-only initializer or PatchAll without real patch methods.
+
+References: https://docs.bepinex.dev/articles/user_guide/installation/index.html
