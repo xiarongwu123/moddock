@@ -8,12 +8,13 @@ const { createAccountClient, TERMS_VERSION } = require('../account.cjs');
 const { createAuthClient } = require('../src/auth/client.cjs');
 const { accountFixture } = require('./account-fixture.cjs');
 const { createAccountStore } = require('../src/account/store.cjs');
+const version = require('../package.json').version;
 
 async function fixture(t, accountOptions = {}) {
  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'moddock-account-'));
  const upstream = accountFixture();
  const service = await createServer({ root, port: 0, scan: async () => ({ games: [], diagnostics: [] }), accounts: { ...upstream.options, ...accountOptions } });
- t.after(async () => { await new Promise(resolve => service.server.close(resolve)); await fs.rm(root, { recursive: true, force: true }); });
+ t.after(async () => { await new Promise(resolve => service.server.close(resolve)); await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
  const state = await (await fetch(service.url + '/api/auth/config')).json();
  let cookie = '';
  const localFetch = async (url, init = {}) => {
@@ -31,7 +32,7 @@ test('MU login, reload verification and logout use the real contract without exp
  assert.equal((await x.client.login({ email: ' Player@Example.com ', password })).mode, 'mu');
  const request = x.upstream.calls[0];
  assert.equal(request.route, '/api/v1/auth/login');
- assert.deepEqual(request.body, { email: 'player@example.com', password, deviceName: 'MODDOCK 0.5.0 (' + process.platform + ')' });
+ assert.deepEqual(request.body, { email: 'player@example.com', password, deviceName: `MODDOCK ${version} (${process.platform})` });
  assert.match(x.cookie(), /^moddock-account-\d+=[a-f0-9]{64}$/);
  const response = await x.localFetch('/api/auth/session');
  const text = await response.text();
@@ -58,7 +59,7 @@ test('MU email code and registration send purpose, consent version and entered c
  assert.equal(await x.client.session(), null);
  const profile = await x.client.register({ ...input, code: '246810' });
  assert.equal(profile.email, input.email);
- assert.deepEqual(x.upstream.calls.at(-1).body, { email: input.email, password: input.password, code: '246810', termsVersion: TERMS_VERSION, deviceName: `MODDOCK 0.5.0 (${process.platform})` });
+ assert.deepEqual(x.upstream.calls.at(-1).body, { email: input.email, password: input.password, code: '246810', termsVersion: TERMS_VERSION, deviceName: `MODDOCK ${version} (${process.platform})` });
  assert.equal(x.upstream.calls.filter(call => call.route.includes('verify')).length, 0);
 });
 test('local auth rejects missing token, cross-origin posts, missing consent and invalid inputs before calling MU', async t => {

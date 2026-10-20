@@ -5,7 +5,29 @@
   "description": "游匣 — 本机游戏库、社区 Mod 下载与按游戏规则安装管理",
   "main": "electron.cjs",
   "author": "Rongwen Xia",
+  "scripts": {
+    "build": "node scripts/build-ui.cjs",
+    "test": "node --test test/*.test.cjs",
+    "test:ai": "node --test test/auth.test.cjs test/ai-membership.test.cjs test/ai-cloud.test.cjs",
+    "test:ai-ui": "node test/ui-ai-membership.cjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.0",
+    "esbuild": "0.28.2"
+  },
   "dependencies": {
+    "@gsap/react": "2.1.2",
+    "@hugeicons/core-free-icons": "4.3.5",
+    "@hugeicons/react": "1.1.10",
+    "face-api.js": "0.22.2",
+    "gsap": "3.15.0",
+    "i18n-jsautotranslate": "4.0.0",
+    "motion": "14.1.0",
+    "postprocessing": "6.39.5",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "three": "0.186.1",
+    "transition-hook": "1.5.2",
     "yauzl": "3.4.0",
     "@xmldom/xmldom": "0.9.12",
     "wasmoon": "1.16.0",
@@ -13,5 +35,10 @@
     "@ruby/wasm-wasi": "2.10.1",
     "@ruby/3.3-wasm-wasi": "2.10.1",
     "fossil-delta": "2.0.0"
-  }
+  },
+  "overrides": {
+    "@tensorflow/tfjs-core": { "node-fetch": "2.7.0" },
+    "transition-hook": { "react": "$react", "react-dom": "$react-dom" }
+  },
+  "engines": { "node": ">=22.19.0" }
 }

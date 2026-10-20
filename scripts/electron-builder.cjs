@@ -6,6 +6,8 @@ module.exports = {
  directories: { output: path.join('output', 'windows') },
  files: [
   '*.cjs',
+  '!studio-ai.cjs',
+  '!studio-authoring.cjs',
   'package.json',
   'nexus-games.json',
   'nexus-app.json',

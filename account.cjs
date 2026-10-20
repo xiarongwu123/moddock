@@ -224,13 +224,19 @@ function createAccountClient(options = {}) {
  }
  async function studioRequest(id, owner, route, { body, signal } = {}) {
   if (!['plan', 'generate', 'repair'].includes(route)) throw new Error('Invalid studio service route');
+  let delivery; try { delivery = JSON.parse(body || '{}').delivery; } catch {}
+  const task = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/.test(delivery?.id || '') ? delivery.id : null;
+  const checkNewInference = state => {
+   // Only the cloud can distinguish a new delivery from an existing result after
+   // sign-in/restart. It gates every model call; do not block replay at this hop.
+   if (delivery?.operation === 'cancel' || task && delivery.version === 1 && delivery.operation === 'subscribe') return;
+   requireAI(state.profile, now());
+  };
   const state = await withSession(id, async current => {
    if (current.profile.id !== owner) fail(401, 'login_required', '创作账号已变化，请重新开始。');
    if (current.expiresAt <= now() + 30000) await apply(current, await send('auth/refresh', { refreshToken: current.refreshToken }));
    current.profile = account(await authenticated(current, 'account/me'));
-   let operation; try { operation = JSON.parse(body || '{}').delivery?.operation; } catch {}
-   // Cancellation must remain possible after expiry or quota exhaustion.
-   if (operation !== 'cancel') requireAI(current.profile, now());
+   checkNewInference(current);
    return current;
   });
   const current = () => sessions.get(id) === state && state.profile.id === owner;
@@ -248,8 +254,7 @@ function createAccountClient(options = {}) {
     await withSession(id, async fresh => {
      if (fresh !== state || fresh.profile.id !== owner) fail(401, 'login_required', '创作账号已变化。');
      await apply(fresh, await send('auth/refresh', { refreshToken: fresh.refreshToken }));
-     let operation; try { operation = JSON.parse(body || '{}').delivery?.operation; } catch {}
-     if (operation !== 'cancel') requireAI(fresh.profile, now());
+     checkNewInference(fresh);
      return true;
     });
     response = await call();

@@ -1,23 +1,82 @@
 # Pro 与 AI token 计量
 
-产品规则：全部 AI 功能仅限有效 Pro；每月最多 1,000,000 token，输入与输出均计入。重试和多轮修复产生的实际推理也计入，传输重连和重复交付不能重复扣费。套餐价格和支付开放状态使用 MU 返回的数据。
+全部 AI 功能仅限有效 Pro。每账户每月 1,000,000 token，输入、缓存命中输入、输出及思考输出均按提供方真实 usage 计入。多轮修改及真正模型重试是新的调用；本机明细不作为账户账单。
 
-## 当前客户端
+账期采用 **UTC 自然月**，每月 1 日 00:00 UTC（北京时间 08:00）切换。有效 Pro 首次读取或使用时建立当期记录；登录、重装、设备切换及续费不重置当前期。跨期调用及迟到结算均归属预留时的原账期。
 
-`account.cjs` 在每次 AI 传输之前刷新账户并调用 `ai-policy.cjs`，覆盖创作、修复、AI 安装分析。普通用户、过期会员、关闭功能、额度缺失、额度耗尽均拒绝。取消不受额度限制。`server.cjs` 在启动创作或拒绝反馈触发修复之前也检查额度。
+## 实际服务
 
-账户响应必须增加 `aiUsage: { limitTokens: 1000000, usedTokens: 123, periodStart: ISO8601, periodEnd: ISO8601 }`。没有有效周期和非负整数用量时返回 `ai_quota_unconfigured`，不能按无限额度降级。客户端将上限限制在 100 万。`GET /api/account/ai-usage` 返回当前账户额度和本机历史用量摘要。
+账户服务：/home/xrw/amd-dlss-mu-account，Docker Compose 发布。私有 Pi 服务：/home/xrw/moddock-studio，用户 systemd 服务 moddock-studio 发布。两端通过 current -> releases/... 切换。
 
-`studio-mu-client.cjs` 支持 NDJSON 的 `usage` 帧，以及 event/result/error 内的 `usage`。格式为该 delivery task 的累计 `{ inputTokens, outputTokens }`，也支持 OpenAI/Anthropic 对应的 snake_case 字段。多次模型调用由服务端先求和，再回传任务累计数；不能将不同模型调用的单次用量冒充任务累计用量。失败时应在 error 前回传已消耗 token。
+生产支付服务为 schema 5。旧 MU 源码不能替换线上 Mu.Server.dll。本次只替换网关扩展 Mu.NexusGateway.dll，并向当前私有 Studio 发布覆盖计量文件。发布脚本校验基线哈希，保留其余创作源码、依赖、账号与支付配置。
 
-本机 `ai-usage` 目录按账户和任务的 SHA-256 隔离，用原子写入记录累计输入/输出，重放不重复相加；不保存提示词、模型回复、邮箱或凭据。没有服务端用量时不虚构 token，界面说明未回传不等于零消耗。本机明细是辅助记录，不能作为跨设备付费账本。
+网关 Client 鉴权从登录 claims 获取 owner，覆盖客户端请求头。私有账户回查需要内网来源和服务器 transport token，调用现有 AccountService.SnapshotAsync。每次 Pi provider 请求（含专项 Agent、后续轮次、修复）均先回查有效 Pro 和功能权限，再预留额度。
 
-## 上线前必须接通的 MU 云端规则
+AiAccounts.Serialize 为 account/me、登录、刷新、授权等账号响应统一添加 aiUsage。故障时为 null，禁止新创作。正常对象包含 limitTokens、usedTokens、periodStart、periodEnd，另返回 reservedTokens、reconciliationRequired。客户端剩余额度扣除活动预留；待对账时禁止新推理。
 
-当前工作区没有正在运行的 MU AI 扣费服务源码/部署凭据。本地 `F:/mu` 的服务快照不包含 studio 推理路由。本次没有部署云端；仅发布客户端不能宣称扣费闭环已上线。
+取消和已有 delivery 订阅不受额度限制；云端仍检查登录及任务归属，任何新的模型调用均重新检查权益。
 
-云端必须以已验证的账户 ID 作为 owner，并在每次模型调用前检查 Pro 与月额度，在数据库事务中预留本次最大 token，设置对应的模型输出上限。多个设备、并发任务共享一个账户周期账本，禁止以客户端提供的 owner、套餐、用量或当前时间作为扣费依据。按会员账期每月重置（数据库提供当前 periodStart/periodEnd），不得通过重新登录/重装重置。
+## 数据库与计量
 
-每次模型调用用不可重复的 usage ID 记账，存储 provider 实际 input/output token；成功、失败、取消均结算实际消耗并释放剩余预留。delivery ID 绑定 owner，订阅重连只读取既有任务；取消/结果读取仍须允许额度耗尽的原任务执行。任务输出上述累计 usage 帧，并在 account/me 返回更新后的 aiUsage。应验证跨设备并发、账期切换、会员到期、流中断、取消、模型失败、幂等重放，以及实付订单回调后权益和额度生效。
+platform/ai-ledger.sql 是现有账户 SQLite 数据库中的增量迁移，不改变支付 schema 版本，不删除原表：
 
-支付页面只在 MU `plans.paymentsEnabled` 为 true 时允许创建订单，支付结果必须重新从服务端查询；本地显示不授予会员权限。
+- ModdockAiPeriods：主键 (owner,start)，固定上限、实际已用及预留。
+- ModdockAiCalls：计量 UUID 主键、owner、delivery、原期、预算、实际输入/输出、提供方 ID、状态、到期时间、对账凭证摘要。提供方 ID 有唯一索引。
+
+预留和结算使用 BEGIN IMMEDIATE。预留检查 limit-used-reserved，并限制 provider max_tokens。输入预算为实际 Pi wire payload 字节数加模板余量，仅用于保守预留，绝不作为账单。
+
+结算只读取 provider 原始 prompt_tokens 与 completion_tokens，不将缓存输入重复相加。提供方 ID 在首帧落库，真实 usage 到达立即结算，后续结果失败不会丢失已收到的账单。provider 隐式 HTTP 重试关闭；Pi 发起的每次真正重试有独立计量 ID。
+
+订阅断开只轮换连接。delivery UUID 全局绑定 owner，重复订阅不重新推理。旧 owner-hash 任务目录启动时迁移，保留 frames/checkpoint/result。每次模型结算后持久化任务累计 usage 帧，握手先于重放帧，失败/取消终帧之前保留已结算用量。
+
+## 取消、崩溃与对账
+
+正常取消停止后续工具/推理，当前 provider 流最多继续收尾 300 秒以取得真实终帧用量，再结算并释放未用预留。收到 usage 后模型失败仍结算。
+
+进程崩溃、断流或提供方未返回 usage 时，不虚构零消耗：到期预留转为 unresolved，释放预留并阻止该账号新推理，直到取得提供方凭证对账；该限制跨账期保持。恢复在额度读取或下一次预留时执行。
+
+未知用量不能凭估算自动扣除或自动解除。运维取得提供方账单/支持回复后，在私有主机使用 reconcile-ai-usage.cjs：
+
+~~~sh
+ELECTRON_RUN_AS_NODE=1 /home/xrw/moddock-nexus/runtime/electron/electron \
+  /home/xrw/moddock-studio/current/platform/reconcile-ai-usage.cjs \
+  /home/xrw/amd-dlss-mu-account/data/accounts.sqlite /private/provider-evidence.json
+~~~
+
+凭证 JSON 为 {source,providerId,callId,owner,task,usage:{inputTokens,outputTokens}}。身份须匹配 unresolved 调用，输入/输出为非负安全整数；凭证 SHA-256 写入账本。此命令无 HTTP 入口，须由有数据库权限的运维核对来源，禁止采用客户端报数。
+
+## 配置、部署与回滚
+
+Node >=22.19；生产现有 Electron Node runtime 为 24.21。service.env（0600）增加：
+
+~~~text
+MODDOCK_AI_DATABASE=/home/xrw/amd-dlss-mu-account/data/accounts.sqlite
+MODDOCK_AI_ACCOUNT_URL=http://127.0.0.1:8089/internal/moddock/ai-account
+~~~
+
+复用已有 transport token、模型密钥、支付配置，不向客户端添加 API Key。启动执行幂等迁移；数据库路径错误、用户表缺失、额度不可用均关闭推理。
+
+platform/deploy-ai-quota.py 支持 prepare/activate/rollback/stop-candidate。prepare 校验补丁，复制当前发布和隔离数据库，启动 8096/18098 候选；activate 要求真实模型计量报告通过，锁定发布与备份，确认无活动任务，停止写入，备份账户/邮件库，切换两端链接并检查健康。
+
+已部署发布：20261020-ai-quota-f1315529。
+补丁 SHA-256：f1315529b354f7ff99513ed3711ffcc7f2dc23a8a875f1cad7d22cf20b307511。
+状态：/home/xrw/moddock-studio/deployment-20261020-ai-quota-f1315529.json。
+切换前备份：/home/xrw/moddock-studio/backups/activate-quota-20261020T092631Z。
+
+回滚保留当前数据库写入及计量表，不恢复旧数据库。为避免回到不支持额度保护的旧版本，回滚统一**暂停 AI 服务**；账户/支付恢复上个版本，确认目标支持计量或发布修复后再恢复推理。本次未执行生产回滚演练：
+
+~~~sh
+python3 /home/xrw/moddock-studio/incoming/quota-20261020/deploy-ai-quota.py \
+  rollback f1315529b354f7ff99513ed3711ffcc7f2dc23a8a875f1cad7d22cf20b307511
+~~~
+
+## 验证记录（2026-10-20）
+
+- npm run test:ai：29 项通过。覆盖 Pro/过期/无额度、并发连接预留、100 万边界、缓存输入、取消与失败结算、SIGKILL 杀进程后的身份保留/预留恢复、未知用量对账、跨期、重连/重启、跨账户隔离。
+- 网关按线上支付程序集编译：0 warning、0 error。
+- UI 构建、会员页浏览器验收通过。补齐分支缺少的构建源文件与依赖声明；服务端模型适配器从桌面打包排除。
+- 真实隔离 MU 客户端联调通过：耗尽时显示已用 1,000,000、剩余 0，发起新创作返回 ai_credits_exhausted；恢复为实际账单后显示已用 13,998、剩余 986,002。另一设备本机明细为 0，不影响账户总额。截图在 output/playwright/ai-quota-real/。
+- 最终补丁的隔离 MU + 真实 Pi/provider：18 项通过；3 次模型调用输入 13,005、输出 993，共 13,998 token。账本、流帧、account/me、refresh、authorize 一致。额度耗尽后禁止新推理，仍可读取/取消原任务。报告在隔离目录 quota-verification.json。
+- 生产两端已切换且健康，鉴权边界、数据库完整性、已有 Pro 的额度读取通过；支付程序集未变。报告：/home/xrw/moddock-studio/ai-quota-production-check-20261020.json。没有创建生产测试会员或调用生产模型。
+
+全套历史测试曾在下载/安装测试清理竞态后挂起，不能宣称全套通过；本次关联 29 项独立通过。未生成新 Windows 安装包，未做物理 Windows 或真实游戏验收。支付继续使用 MU 真实配置和订单核验，没有模拟付款或授予生产会员。

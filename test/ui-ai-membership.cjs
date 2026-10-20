@@ -38,5 +38,5 @@ const { openHome } = require('./ui-open.cjs');
   await page.keyboard.press('Escape'); await expect(page.locator('.membership-dialog')).toHaveCount(0);
   assert.deepEqual(errors, []);
   console.log('PASS: standard marketing, hidden AI composer, plans/payment disabled, Pro quota refresh, 390px layout, account entry, focus and Escape');
- } finally { await browser?.close(); await new Promise(resolve => service.server.close(resolve)); await fs.rm(root, { recursive: true, force: true }); }
+ } finally { await browser?.close(); await new Promise(resolve => service.server.close(resolve)); await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -15,6 +15,8 @@ test('AI requires current Pro, enabled feature and finite current quota; hard ca
  assert.equal(hasPro({ ...pro(), membership: { tier: 'pro', expiresAt: new Date(Date.now() - 1).toISOString() } }), false);
  assert.equal(hasPro({ ...pro(), features: [{ key: 'modding.studio', enabled: false, allowed: true }] }), false);
  assert.throws(() => requireAI({ ...pro(), aiUsage: null }), { code: 'ai_quota_unconfigured' });
+ assert.throws(() => requireAI({ ...pro(), aiUsage: { ...quota(), reconciliationRequired: true } }), { code: 'ai_quota_unconfigured' });
+ assert.equal(quotaView({ ...quota(10), reservedTokens: 20 }).remainingTokens, 999970);
  assert.throws(() => requireAI({ ...pro(), aiUsage: quota(1000000) }), { code: 'ai_credits_exhausted' });
  assert.equal(requireAI({ ...pro(), aiUsage: quota(999999) }).remainingTokens, 1);
  assert.equal(quotaView({ ...quota(), limitTokens: 99999999 }).limitTokens, 1000000);
@@ -32,6 +34,8 @@ test('transport refuses standard, expired, exhausted and unconfigured accounts b
  fixture.updateAccount(pro()); await call(); assert.equal(calls, 1);
  fixture.updateAccount({ aiUsage: quota(1000000) }); await assert.rejects(call(), { code: 'ai_credits_exhausted' }); assert.equal(calls, 1);
  await call('cancel'); assert.equal(calls, 2);
+ await client.studioRequest(session.id, session.profile.id, 'plan', { body: JSON.stringify({ delivery: { version: 1, id: require('node:crypto').randomUUID(), after: 1, operation: 'subscribe' } }) });
+ assert.equal(calls, 3, 'cloud-owned task replay remains available at exhaustion');
  fixture.updateAccount({ aiUsage: undefined }); await assert.rejects(call(), { code: 'ai_quota_unconfigured' });
  fixture.updateAccount({ membership: { tier: 'standard', expiresAt: null } }); await assert.rejects(call(), { code: 'pro_required' });
 });

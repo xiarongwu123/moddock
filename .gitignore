@@ -7,3 +7,10 @@ output/
 test-results/
 playwright-report/
 *.log
+.cache/
+.demo-data/
+.moddock-tools/
+.moddock-private/
+.playwright-cli/
+platform/mu-nexus-gateway/bin/
+platform/mu-nexus-gateway/obj/

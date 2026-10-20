@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <Reference Include="Mu.Server">
+      <HintPath>$(MuServerPath)/Mu.Server.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+  <Target Name="RequireDeployedServer" BeforeTargets="ResolveReferences">
+    <Error Condition="!Exists('$(MuServerPath)/Mu.Server.dll')" Text="Set MuServerPath to the deployed payments release directory." />
+  </Target>
+</Project>

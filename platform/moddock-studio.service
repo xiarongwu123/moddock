@@ -1,0 +1,21 @@
+[Unit]
+Description=MU private AI creation service
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=/home/xrw/moddock-studio/current
+EnvironmentFile=/home/xrw/moddock-studio/service.env
+ExecStart=/bin/bash /home/xrw/moddock-studio/current/platform/run-studio-server.sh /home/xrw/moddock-studio
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+MemoryMax=256M
+TasksMax=32
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077
+
+[Install]
+WantedBy=default.target
