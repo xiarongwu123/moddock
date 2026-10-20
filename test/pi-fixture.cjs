@@ -1,9 +1,13 @@
 const http = require('node:http');
 const { selectSkills } = require('../studio-skills.cjs');
 const key = 'sk-isolated-pi-fixture-key-123456789';
+const crypto = require('node:crypto');
+const { ledgerFixture } = require('./ai-ledger-fixture.cjs');
 async function piFixture(t, { game = { name: 'Fixture' }, engine = 'unknown', result = {}, respond, delay = 0 } = {}) {
  const { createRuntime } = await import('../platform/studio-pi.mjs');
  const runtime = await createRuntime(key), requests = [];
+ const billing = await ledgerFixture(); t.after(() => billing.close());
+ const runId = crypto.randomUUID();
  const selection = selectSkills(game, { engine: { key: engine } });
  const server = http.createServer(async (req, res) => {
   const chunks = []; for await (const chunk of req) chunks.push(chunk);
@@ -18,7 +22,7 @@ async function piFixture(t, { game = { name: 'Fixture' }, engine = 'unknown', re
   const answer = respond ? await respond({ body, step, phase }) : null;
   if (answer?.status) { res.writeHead(answer.status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: { message: 'isolated fixture failure', code: 'fixture_error' } })); return; }
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store' });
-  const send = (delta, finish_reason = null) => res.write('data: ' + JSON.stringify({ id: 'fixture-' + step, object: 'chat.completion.chunk', created: 1, model: 'deepseek-flash', choices: [{ index: 0, delta, finish_reason }] }) + '\n\n');
+  const send = (delta, finish_reason = null) => res.write('data: ' + JSON.stringify({ id: runId + '-' + step, object: 'chat.completion.chunk', created: 1, model: 'deepseek-flash', choices: [{ index: 0, delta, finish_reason }] }) + '\n\n');
   send({ role: 'assistant', reasoning_content: '核对当前游戏的真实工具与技能。' });
   if (delay) await new Promise(resolve => setTimeout(resolve, delay));
   let calls;
@@ -30,12 +34,13 @@ async function piFixture(t, { game = { name: 'Fixture' }, engine = 'unknown', re
    send({ tool_calls: calls.map((call, index) => ({ index, id: `call-${step}-${index}`, type: 'function', function: { name: call.name, arguments: JSON.stringify(call.arguments) } })) });
    send({}, 'tool_calls');
   } else { send({ content: '已提交结果。' }); send({}, 'stop'); }
+  res.write('data: ' + JSON.stringify({ id: runId + '-' + step, choices: [], usage: { prompt_tokens: 120, completion_tokens: 30 } }) + '\n\n');
   res.end('data: [DONE]\n\n');
  });
  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
  t.after(async () => { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
  const config = runtime.getRegisteredProviderConfig('moddock-deepseek');
  runtime.registerProvider('moddock-deepseek', { ...config, baseUrl: `http://127.0.0.1:${server.address().port}` });
- return { pi: { modelRuntime: runtime }, requests, selection, key, game, diagnostic: { engine: { key: engine } } };
+ return { pi: { modelRuntime: runtime, metering: { ledger: billing.ledger, owner: 'fixture-user', task: runId } }, requests, selection, key, game, diagnostic: { engine: { key: engine } } };
 }
 module.exports = { piFixture, key };

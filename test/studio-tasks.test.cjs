@@ -4,7 +4,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
 const crypto = require('node:crypto');
-const { createStudioService } = require('../platform/studio-service.cjs');
+const { createStudioService } = require('./ai-ledger-fixture.cjs');
 const { createMuStudioAI } = require('../studio-mu-client.cjs');
 const { cleanDiagnostic, describeError } = require('../studio-errors.cjs');
 const { createDeepSeek } = require('../studio-ai.cjs');
@@ -97,12 +97,12 @@ test('reusing a task id with different content fails without regenerating', asyn
  assert.equal(changed.at(-1).code, 'invalid_request'); assert.equal(calls, 1);
 });
 
-test('task identity is owner-scoped and cannot replay another account code', async t => {
+test('task identity is bound to its original owner and cannot replay another account code', async t => {
  const id = crypto.randomUUID();
  const x = await fixture(t, { generate: async ({ accountId }) => ({ owner: accountId }) });
  await frames(await x.request('generate', { body: body(id) }));
  const response = await fetch(x.url + '/generate', { method: 'POST', body: body(id), headers: { ...headers, 'X-Mu-Account-Id': 'bob' } });
- assert.equal((await frames(response)).at(-1).result.owner, 'bob');
+ assert.equal((await frames(response)).at(-1).code, 'invalid_request');
 });
 
 test('completed code and progress replay after service restart with no provider invocation', async t => {
@@ -155,7 +155,7 @@ test('terminal submission errors retain their exact stage and saved source witho
  assert.equal(checkpoint, code);
 });
 
-test('Pi retries a transient model failure within its session without repeating a completed code write', async t => {
+test('Pi preserves compiled source and stops retries when provider failure leaves usage unresolved', async t => {
  let interrupted = false, writes = 0; const events = [];
  const draft = { kind: 'ue4ss-lua', name: 'SDK retry fixture', author: 'Fixture', description: 'A real compiled Lua artifact', code: 'local count=0\nLoopAsync(500,function() count=count+1 return false end)' };
  const pi = await piFixture(t, { engine: 'unreal', result: draft, respond: ({ phase }) => {
@@ -163,9 +163,10 @@ test('Pi retries a transient model failure within its session without repeating 
   return null;
  } });
  const ai = createDeepSeek({ apiKey: pi.key, pi: { ...pi.pi, retrySettings: { enabled: true, maxRetries: 2, baseDelayMs: 1, maxAgentDelayMs: 2 } } });
- const result = await ai.generate({ ...payload, diagnostic: pi.diagnostic, context: { game: pi.game }, checkpoint: async () => { writes++; }, onEvent: event => events.push(event) });
- assert.equal(result.code, draft.code); assert(interrupted); assert.equal(writes, 1);
- assert(events.some(event => event.type === 'retry')); assert.equal(events.filter(event => event.type === 'tool_start' && event.name === 'write_project_file').length, 1);
+ await assert.rejects(ai.generate({ ...payload, diagnostic: pi.diagnostic, context: { game: pi.game }, checkpoint: async () => { writes++; }, onEvent: event => events.push(event) }), error => error.code === 'ai_quota_unconfigured' && error.diagnostic.upstreamStatus === 503);
+ assert(interrupted); assert.equal(writes, 1);
+ assert.equal(pi.pi.metering.ledger.quota('fixture-user').reconciliationRequired, true);
+ assert.equal(events.filter(event => event.type === 'tool_start' && event.name === 'write_project_file').length, 1);
 });
 
 test('token-heavy thinking preserves all text without exhausting the event channel', () => {

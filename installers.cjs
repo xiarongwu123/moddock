@@ -11,6 +11,10 @@ const yauzl = require('yauzl');
 const { crc32 } = require('node:zlib');
 const {defaultRecipe}=require('./adapters.cjs');
 const {detectRule,documentation,userFile,assertRequirements}=require('./auto-install.cjs');
+const {canUseAI}=require('./ai-install.cjs');
+const {classifyFiles,validateExclusions,uniqueMatches,replacementRule}=require('./replacement-evidence.cjs');
+const {instructionTexts}=require('./author-install.cjs');
+const {archiveFormat,formatError,extract7z}=require('./archive-format.cjs');
 const { isBG3, moduleInfo, readModule, editLoadOrder, isEnabled } = require('./bg3-mod.cjs');
 const { LIMITS, assertSize, checkArchiveEntry } = require('./archive-limits.cjs');
 const { InstallationProgress } = require('./installation-progress.cjs');
@@ -42,8 +46,13 @@ async function fileHash(file) { try { const st = await fs.lstat(file); if (!st.i
 async function json(file, limit = 1024 ** 2) { const st = await fs.stat(file); if (st.size > limit) throw new Error('记录超过读取体积限制'); return JSON.parse((await fs.readFile(file, 'utf8')).replace(/^\uFEFF/, '')); }
 async function atomic(file, value) { await fs.mkdir(path.dirname(file), { recursive: true }); const tmp = file + '.tmp'; await fs.writeFile(tmp, JSON.stringify(value, null, 2)); await fs.rename(tmp, file); }
 async function extract(file, dir, progress = noop) {
+ const format=await archiveFormat(file);
+ if(format==='7z')return extract7z(file,dir,progress,{relative,target});
+ if(format!=='zip')throw formatError(format);
  await fs.mkdir(dir, { recursive: true }); const files = []; const names = new Set(); let bytes = 0, count = 0;
- const zip = await yauzl.openPromise(file, { lazyEntries: true, validateEntrySizes: true });
+ let zip;
+ try{zip=await yauzl.openPromise(file,{lazyEntries:true,validateEntrySizes:true});}
+ catch(error){throw new Error('ZIP 压缩包目录无法读取，文件可能不完整或已损坏：'+error.message);}
  try {
   for await (const entry of zip.eachEntry()) {
    ++count;
@@ -72,13 +81,21 @@ const presets = {
 function profile(input) {
  if (!input || !['copy','smapi','archive','pak','bepinex','bethesda','bg3','native'].includes(input.mode)) throw new Error('请设置该游戏的安装规则');
  const p = { mode: input.mode, root: relative(input.root || '', true), sourcePrefix: relative(input.sourcePrefix || '', true), destination: relative(input.destination || '', true), executable: relative(input.executable || '', true), arguments: input.arguments || [], requires: [], log: relative(input.log || '', true), marker: String(input.marker || '').trim() };
+ if(input.fileMappings!==undefined){
+  if(p.mode!=='copy'||p.root||p.sourcePrefix||p.destination||!Array.isArray(input.fileMappings)||!input.fileMappings.length||input.fileMappings.length>2000)throw new Error('AI 文件映射规则无效');
+  p.fileMappings=input.fileMappings.map(row=>({source:relative(row.source),destination:relative(row.destination)}));
+ }
+ if(input.excludedFiles!==undefined){
+  if(!Array.isArray(input.excludedFiles)||input.excludedFiles.length>2000)throw new Error('备份排除记录无效');
+  p.excludedFiles=input.excludedFiles.map(row=>({source:relative(row.source),reason:row.reason,counterpart:relative(row.counterpart),evidence:row.evidence}));
+ }
  if (p.mode === 'bg3') { p.root = ''; p.destination = 'Mods'; p.bg3Module = moduleInfo(input.bg3Module); }
  if (p.mode === 'native') { if (!/^[a-f0-9]{64}$/.test(input.nativeManifestSha256 || '') || input.root || input.sourcePrefix || input.destination) throw new Error('原生 Mod 安装约束无效'); p.nativeManifestSha256 = input.nativeManifestSha256; }
  if(!Array.isArray(p.arguments)||p.arguments.length>30||p.arguments.some(a=>typeof a!=='string'||a.length>500||/[\x00\r\n]/.test(a)))throw new Error('启动参数无效，每行一个参数，最多 30 个');
  if (!Array.isArray(input.requires || []) || (input.requires || []).length > 30 || p.marker.length > 160) throw new Error('前置或日志规则无效');
  p.requires = (input.requires || []).map(r => relative(r));
  if (input.baseHashes !== undefined) {
-  if (!input.baseHashes || typeof input.baseHashes !== 'object' || Array.isArray(input.baseHashes) || Object.keys(input.baseHashes).length > 24) throw new Error('原文件版本约束无效');
+  if (!input.baseHashes || typeof input.baseHashes !== 'object' || Array.isArray(input.baseHashes) || Object.keys(input.baseHashes).length > (p.fileMappings ? 2000 : 24)) throw new Error('原文件版本约束无效');
   p.baseHashes = Object.fromEntries(Object.entries(input.baseHashes).map(([name, value]) => { if (value !== null && !/^[a-f0-9]{64}$/.test(value)) throw new Error('原文件摘要无效'); return [relative(name), value]; }));
  }
  if (input.generatedCaches !== undefined) {
@@ -177,23 +194,33 @@ class Installers {
   if(!job.sha256||await hash(f.file,bytes=>report('inspect',8+7*bytes/Math.max(1,total),'正在校验安装包…'))!==job.sha256)throw new Error('下载文件校验失败');
   const dir=path.join(this.root,'inspect',crypto.randomUUID());
   try{
-   if(/\.zip$/i.test(f.name)){
+   const format=await archiveFormat(f.file);
+   if(['zip','7z'].includes(format)){
     const entries=await extract(f.file,dir,(done,total,file)=>report('inspect',15+13*done/Math.max(1,total),'正在解析安装包…',{file,processed:Math.floor(done),total})),files=entries.map(f=>({path:f.source,size:f.size}));
-    if(readInstructions){const docs=entries.filter(f=>documentation(f.source)&&/\.(txt|md)$/i.test(f.source)&&f.size<=256*1024).slice(0,4);files.instructions=(await Promise.all(docs.map(f=>fs.readFile(path.join(dir,f.source),'utf8')))).join('\n');}return files;
+    if(readInstructions){const docs=entries.filter(f=>documentation(f.source)&&(/\.(txt|md)$/i.test(f.source)||!path.posix.basename(f.source).includes('.'))&&f.size<=256*1024).slice(0,4);files.instructions=(await Promise.all(docs.map(f=>fs.readFile(path.join(dir,f.source),'utf8')))).join('\n');}return files;
    }
-   if(/\.(archive|pak|utoc|ucas)$/i.test(f.name))return [{path:relative(f.name),size:total}];
-   throw new Error('此压缩格式需要专用适配，当前支持 ZIP 或原始 archive/pak/utoc/ucas 文件');
+   if(format==='unknown'&&/\.(archive|pak|utoc|ucas)$/i.test(f.name))return [{path:relative(f.name),size:total}];
+   throw formatError(format);
   }finally{await fs.rm(dir,{recursive:true,force:true});}
  });}
  async installAuto(game,jobId,context={},report=noop) {
   const files=await this.inspect(game,jobId,true,report);context={...context,readmeInstructions:files.instructions||''};
-  report('matching',28,'正在匹配安装规则和前置要求…');
-  const rule=await detectRule(game,files,context);
+  const texts=instructionTexts(context),classified=classifyFiles(files.filter(f=>!documentation(f.path)),texts);
+  const excluded=new Set(classified.excludedFiles.map(row=>row.source));
+  report('matching',28,'正在分析作者安装说明、包结构和前置要求…');
+  let rule;
+  try{rule=await detectRule(game,files.filter(f=>!excluded.has(f.path)),context);}catch(error){
+   if(!canUseAI(error))throw error;
+   rule=await replacementRule(game,files.filter(f=>!documentation(f.path)),texts,{...context,matchError:error.message},{check:context.checkCurrent});
+   if(!rule){if(typeof context.resolveWithAI!=='function')throw error;rule=await context.resolveWithAI(files,context,error);}
+  }
+  if(classified.excludedFiles.length){rule.excludedFiles=classified.excludedFiles;rule.installationRule.excludedFiles=classified.excludedFiles;rule.installationRule.exclusionInstructions=[...new Map(classified.excludedFiles.map(row=>[row.evidence.source+'\n'+row.evidence.quote,{source:row.evidence.source,excerpt:row.evidence.quote}])).values()];}
   const dependencies=this.state.mods.filter(mod=>mod.gameId===game.id);
   if(rule.mode==='smapi'){const root=await this.gameRoot(game,profile(rule));for(const {manifest}of await manifests(await target(root,'Mods')))dependencies.push({name:manifest.Name,status:'enabled'});}
   assertRequirements(context,rule,dependencies);
+  await context.beforeApply?.();
   const plan=await this.prepare(game,jobId,rule,report);
-  try{return await this.apply(game,plan.id,true,report);}catch(error){await this.discard(plan.id).catch(()=>{});throw error;}
+  try{await context.beforeApply?.();return await this.apply(game,plan.id,true,report,context.checkCurrent);}catch(error){await this.discard(plan.id).catch(()=>{});throw error;}
  }
  async prepare(game,jobId,automaticRule,report=noop) { return this.exclusive(async()=>{
   report('extracting',32,'正在检查安装路径和游戏状态…');
@@ -206,16 +233,40 @@ class Installers {
   assertSize((await fs.stat(downloaded.file)).size,LIMITS.downloadBytes,'安装包体积',downloaded.name);
   const id=crypto.randomUUID(),stage=path.join(this.root,'plans',id);await fs.mkdir(stage,{recursive:true});
   try{
-   let files; if(/\.zip$/i.test(downloaded.name))files=await extract(downloaded.file,stage,(done,total,file)=>report('extracting',40+15*done/Math.max(1,total),'正在解压安装文件…',{file,processed:Math.floor(done),total}));
+   const format=await archiveFormat(downloaded.file);
+   let files; if(['zip','7z'].includes(format))files=await extract(downloaded.file,stage,(done,total,file)=>report('extracting',40+15*done/Math.max(1,total),'正在解压安装文件…',{file,processed:Math.floor(done),total}));
    else if(/\.(archive|pak|utoc|ucas)$/i.test(downloaded.name)){const source=relative(downloaded.name);await copyProgress(downloaded.file,path.join(stage,source),ratio=>report('extracting',40+15*ratio,'正在准备安装文件…',{file:source}));files=[{source,sha256:job.sha256,size:downloadSize}];}
-   else throw new Error('当前安装引擎支持 ZIP 和 archive/pak/utoc/ucas 原始文件；RAR、7z、可执行安装器需专用解包适配');
+   else throw formatError(format);
    report('checking',55,'正在检查前置、冲突和目标文件…');
    const archiveFiles=files.map(f=>({path:f.source,size:f.size}));let units=[]; const warnings=[];
    if(automaticRule)files=files.filter(f=>!documentation(f.source));
+   if(p.excludedFiles?.length){
+    if(!automaticRule?.installationRule)throw new Error('备份排除必须来自已校验的自动安装方案');
+    const texts=(automaticRule.installationRule.exclusionInstructions||automaticRule.installationRule.instructions||[]).map(row=>({source:row.source,text:row.excerpt}));
+    const excluded=validateExclusions(files.map(f=>({path:f.source,size:f.size})),p.excludedFiles,texts);
+    files=files.filter(f=>!excluded.has(f.source));
+    warnings.push(`已核对作者备份用途，排除 ${excluded.size} 个包内原版备份；安装器会另行备份本机当前文件。`);
+   }
    if(p.sourcePrefix){files=files.filter(f=>f.source.startsWith(p.sourcePrefix+'/'));if(!files.length)throw new Error('压缩包中不存在配置的内部目录：'+p.sourcePrefix);}
-   if(p.mode==='native'){
+   if(p.fileMappings){
+    const origin=automaticRule?.installationRule?.origin;
+    if(!['pi-agent','local-files'].includes(origin))throw new Error('逐文件自动映射必须来自已校验的安装方案');
+    const mappings=new Map(p.fileMappings.map(row=>[row.source,row.destination]));
+    if(mappings.size!==p.fileMappings.length||mappings.size!==files.length||files.some(f=>!mappings.has(f.source)))throw new Error('AI 安装方案与复核后的实际包结构不一致');
+    if(origin==='local-files'){
+     const matches=await uniqueMatches(game,files.map(f=>({path:f.source,size:f.size})));
+     if(matches.some(row=>!row.destination||mappings.get(row.source)!==row.destination||!p.baseHashes?.[row.destination]))throw new Error('本机唯一文件匹配依据已变化，请重新分析安装方案');
+    }
+    files=files.map(f=>({...f,destination:mappings.get(f.source)}));
+    warnings.push(origin==='local-files'?'已通过本机唯一同名文件和完整相对目录核对替换位置；覆盖前备份当前文件，可停用或卸载恢复。':'pi agent 已按作者说明生成逐文件方案；所有目标将检查冲突、自动备份并记录，可停用或卸载恢复。');
+   }else if(p.mode==='native'){
     files=await require('./studio-native-patch.cjs').materializeNativePatch(root,stage,p,target);
     warnings.push('按原文件 SHA-256 重建原生资源；安装前备份，可停用或卸载还原。');
+   }else if(automaticRule?.id==='operator-tattoos-114'){
+    if(String(game.appId)!=='1913370'||files.length!==3||files.some(f=>!/^charactermods_stripped_assets_(?:tribal|oldschool|americaneagle)_[a-f0-9]{32}\.bundle$/.test(path.posix.basename(f.source))))throw new Error('OPERATOR 纹身资源布局不匹配');
+    files=files.map(f=>({...f,destination:p.destination+'/'+path.posix.basename(f.source)}));
+    for(const f of files)if(!await fileHash(await target(root,f.destination)))throw new Error('原始纹身文件不存在：'+f.destination);
+    warnings.push('替换 Tribal、Old School 和 American Eagle 原有纹身贴图；自动备份原文件，进入游戏后选择对应纹身。');
    }else if(p.mode==='smapi'){
     const found=await manifests(stage);if(!found.length)throw new Error('没有 SMAPI manifest.json；XNB 替换包或其他格式需配置自己的安装规则');
     const chosen=found.filter(x=>files.some(f=>f.source===x.rel));const existing=await manifests(await target(root,p.destination || 'Mods'));
@@ -248,7 +299,7 @@ class Installers {
      if(content.some(f=>/\.(exe|bat|cmd|ps1|dll)$/i.test(f.source)))throw new Error('Data 包含加载器或可执行文件，请按作者说明配置独立规则');
      files=content;warnings.push('插件部署不等于启用：需在游戏或相应加载器中确认插件启用与排序。');
     }
-    files=files.map(f=>({...f,destination:[p.destination,p.sourcePrefix?f.source.slice(p.sourcePrefix.length+1):p.mode==='bethesda'?f.source.replace(/^Data\//i,''):f.source].filter(Boolean).join('/')}));warnings.push('按你为该游戏配置的规则部署。软件不会执行压缩包内的安装脚本；须核对作者目录、依赖及版本要求。');
+    files=files.map(f=>({...f,destination:[p.destination,p.sourcePrefix?f.source.slice(p.sourcePrefix.length+1):p.mode==='bethesda'?f.source.replace(/^Data\//i,''):f.source].filter(Boolean).join('/')}));warnings.push(automaticRule?.installationRule?.origin==='author'?'按作者安装说明与包结构自动生成目录映射，覆盖文件自动备份。':'按你为该游戏配置的规则部署。软件不会执行压缩包内的安装脚本；须核对作者目录、依赖及版本要求。');
    }
    const names=new Set();for(const f of files){f.destination=relative(f.destination);if(automaticRule&&userFile(f.destination))throw new Error('自动安装不会写入存档或用户文件目录');if(names.has(key(f.destination)))throw new Error('安装目标重复：'+f.destination);names.add(key(f.destination));
     const dest=await target(root,f.destination),owner=this.fileOwner(dest);if(owner)throw new Error('与已托管 Mod 冲突：'+owner.name+' / '+f.destination);
@@ -262,7 +313,8 @@ class Installers {
  }); }
  planView(p){return {...p,stage:undefined,profileHash:undefined,files:p.files.map(f=>({...f,overwrite:!!f.originalHash})),expires:new Date(p.created+15*60000).toISOString()};}
  async discard(id){return this.exclusive(async()=>{const p=this.plans.get(id);if(p){this.plans.delete(id);await fs.rm(p.stage,{recursive:true,force:true});}return {ok:true};});}
- async apply(game,id,allowOverwrite=false,report=noop){return this.exclusive(async()=>{
+ async apply(game,id,allowOverwrite=false,report=noop,checkCurrent=noop){return this.exclusive(async()=>{
+  checkCurrent();
   report('backup',62,'正在准备备份原始文件…');
   const p=this.plans.get(id);if(!p||p.gameId!==game.id||Date.now()-p.created>15*60000)throw new Error('安装方案已过期，请重新生成');
   if(digest(this.getProfile(game).rule)!==p.profileHash||await this.gameRoot(game,p.profile)!==p.root)throw new Error('游戏路径或安装规则已变化，请重新生成方案');
@@ -270,7 +322,7 @@ class Installers {
   if(p.profile.mode==='smapi')await this.checkSmapi(p.root,p.profile,p.units);
   if(p.files.some(f=>f.originalHash)&&!allowOverwrite)throw new Error('方案将替换已有文件，请确认备份和替换');
   const dir=path.join(this.root,'mods',id);await fs.mkdir(path.join(dir,'payload'),{recursive:true});await fs.mkdir(path.join(dir,'original'),{recursive:true});
-  const files=[];for(let i=0;i<p.files.length;i++){const f=p.files[i];const dest=await target(p.root,f.destination);if(this.fileOwner(dest))throw new Error('安装方案已与其他托管 Mod 冲突，请重新生成');
+  const files=[];for(let i=0;i<p.files.length;i++){checkCurrent();const f=p.files[i];const dest=await target(p.root,f.destination);if(this.fileOwner(dest))throw new Error('安装方案已与其他托管 Mod 冲突，请重新生成');
    if(await fileHash(dest)!==f.originalHash)throw new Error('方案生成后目标文件已改变：'+f.destination);
    const update=ratio=>report('backup',62+14*(i+ratio)/Math.max(1,p.files.length),'正在备份原始文件和安装载荷…',{file:f.destination,processed:i,total:p.files.length});
    if(await hash(path.join(p.stage,f.source))!==f.sha256)throw new Error('暂存文件校验失败');
@@ -279,7 +331,7 @@ class Installers {
    report('backup',62+14*(i+1)/Math.max(1,p.files.length),'文件备份完成…',{file:f.destination,processed:i+1,total:p.files.length});
   }
   const record={id,gameId:game.id,gameName:game.name,name:p.name,resourceId:p.resourceId,jobId:p.jobId,version:this.downloads.jobs.find(j=>j.id===p.jobId)?.version||'',root:p.root,profile:p.profile,installationRule:p.installationRule,files,units:p.units,status:'enabled',created:new Date().toISOString(),verification:{status:'deployed',message:'文件已部署并校验；尚未验证游戏内生效'}};
-  await this.transaction(record,'install',report);report('finishing',98,'正在保存安装结果并清理临时文件…');this.plans.delete(id);await fs.rm(p.stage,{recursive:true,force:true});return record;
+  checkCurrent();await this.transaction(record,'install',report,checkCurrent);report('finishing',98,'正在保存安装结果并清理临时文件…');this.plans.delete(id);await fs.rm(p.stage,{recursive:true,force:true});return record;
  });}
  async action(game,id,action){return this.exclusive(async()=>{if(!['enable','disable','uninstall','verify'].includes(action))throw new Error('未知安装操作');const m=this.state.mods.find(m=>m.id===id&&m.gameId===game.id);if(!m)throw new Error('未找到该游戏的安装记录');if(await this.gameRoot(game,m.profile)!==m.root)throw new Error('游戏安装路径已变化，请恢复原目录后管理旧 Mod');
   if(action==='verify'){const bad=[];for(const f of m.files)if(await fileHash(await target(m.root,f.destination))!==(m.status==='enabled'?f.sha256:f.originalHash))bad.push(f.destination);if(m.profile.mode==='bg3'){const text=await fs.readFile(await target(m.root,'PlayerProfiles/Public/modsettings.lsx'),'utf8');if(isEnabled(text,m.profile.bg3Module)!==(m.status==='enabled'))bad.push('PlayerProfiles/Public/modsettings.lsx');}m.verification={status:bad.length?'changed':'files_ok',message:bad.length?'文件缺失或已修改：'+bad.slice(0,5).join('、'):'托管文件校验通过；尚不能据此确认游戏内生效',checked:new Date().toISOString()};await this.save();return m;}
@@ -288,7 +340,7 @@ class Installers {
   if(action!=='enable'&&m.status==='enabled'){const removing=new Set(m.units.map(u=>key(u.id)));const other=await manifests(await target(m.root,m.profile.destination||'Mods')).catch(()=>[]);for(const {manifest:x}of other){if(removing.has(key(x.UniqueID||'')))continue;const deps=[...(x.Dependencies||[]).filter(d=>d.IsRequired!==false),...(x.ContentPackFor?[x.ContentPackFor]:[])];if(deps.some(d=>removing.has(key(d.UniqueID||''))))throw new Error('另一个 Mod 依赖当前 Mod：'+x.Name+'，请先停用依赖者');}}
   await this.transaction(m,action);return {ok:true,mod:this.state.mods.find(a=>a.id===id)};
  });}
- async transaction(m,action,report=noop){
+ async transaction(m,action,report=noop,checkCurrent=noop){
   report('installing',76,'正在校验备份并准备写入…');
   const before=structuredClone(this.state),dir=path.join(this.root,'mods',m.id);const changes=[];
   for(const f of m.files){const dest=await target(m.root,f.destination);const expected=action==='install'||m.status==='disabled'?f.originalHash:f.sha256;const after=action==='install'||action==='enable'?f.sha256:f.originalHash;
@@ -302,7 +354,8 @@ class Installers {
   if(action==='install')m.createdDirs=createdDirs;
   const journal={before,changes,createdDirs,phase:'writing'};await atomic(path.join(this.root,'journal.json'),journal);
   try{
-   for(let i=0;i<changes.length;i++){const c=changes[i];await this.writeChange(c,c.after,c.afterFile,c.before,ratio=>report('installing',76+20*(i+ratio)/Math.max(1,changes.length),'正在写入并校验 MOD 文件…',{file:c.rel,processed:i,total:changes.length}));if(this.options.afterWrite)await this.options.afterWrite(i,c);report('installing',76+20*(i+1)/Math.max(1,changes.length),'正在写入并校验 MOD 文件…',{file:c.rel,processed:i+1,total:changes.length});}
+   for(let i=0;i<changes.length;i++){checkCurrent();const c=changes[i];await this.writeChange(c,c.after,c.afterFile,c.before,ratio=>report('installing',76+20*(i+ratio)/Math.max(1,changes.length),'正在写入并校验 MOD 文件…',{file:c.rel,processed:i,total:changes.length}));if(this.options.afterWrite)await this.options.afterWrite(i,c);report('installing',76+20*(i+1)/Math.max(1,changes.length),'正在写入并校验 MOD 文件…',{file:c.rel,processed:i+1,total:changes.length});}
+   checkCurrent();
    if(action==='install')this.state.mods.unshift(m);else if(action==='uninstall')this.state.mods=this.state.mods.filter(a=>a.id!==m.id);else {m.status=action==='enable'?'enabled':'disabled';m.verification={status:'deployed',message:'文件状态已改变，请重新校验和运行验证'};}
    await this.save();journal.phase='committed';await atomic(path.join(this.root,'journal.json'),journal);
   }catch(e){report('rollback',96,'安装遇到问题，正在回滚文件，请稍候…');await this.rollback(journal);this.state=before;await this.save();await fs.rm(path.join(this.root,'journal.json'));throw new Error('操作失败，文件已回滚：'+e.message);}
@@ -454,4 +507,4 @@ class Installers {
   r.status=errors.length?'log_error':loaded?'log_confirmed':alive?'running':r.exitCode!==undefined&&r.exitCode!==0?'failed':'needs_confirmation';r.message=errors.length?'本次日志检测到错误：'+errors.slice(0,3).join(' / '):loaded?(r.profile.mode==='smapi'?'SMAPI 本次加载列表包含所有托管 Mod 的名称和版本；仍需在游戏中确认效果':'本次运行日志出现配置的加载成功标记；仍需在游戏中确认效果'):alive?'游戏进程正在运行；未取得 Mod 加载证据，请在游戏内确认':'游戏进程已退出或未能跟踪；未确认 Mod 生效';r.checked=new Date().toISOString();await this.save();return this.runView(r);
  });}
 }
-module.exports={Installers,relative,target,extract,profile,hash,versionAtLeast,smapiEvidence};
+module.exports={Installers,relative,target,extract,profile,hash,versionAtLeast,smapiEvidence,processes};

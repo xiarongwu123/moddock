@@ -12,7 +12,7 @@ function describeError(error, stage = 'creation', traceId = crypto.randomUUID())
  const causes = []; let current = error;
  for (let depth = 0; current && depth < 4; depth++, current = current.cause) causes.push(cleanDiagnostic((current.code ? current.code + ': ' : '') + (current.message || current.code || current)));
  const text = causes.join(' | '), status = Number(error?.status || /(?:HTTP|status(?: code)?)[\s:（(]*(\d{3})/i.exec(text)?.[1] || /\b(400|401|402|403|408|429|500|502|503|504)\b/.exec(text)?.[1]) || undefined;
- const category = /QUIC|net::ERR_|ECONN|UND_ERR_|fetch failed|terminated|socket/i.test(text) ? 'network'
+ const category = error?.code === 'STUDIO_PERSIST_FAILED' ? 'storage' : /QUIC|net::ERR_|ECONN|UND_ERR_|fetch failed|terminated|socket/i.test(text) ? 'network'
   : status === 429 ? 'rate_limit' : status === 402 ? 'credits' : /timeout|timed out|超时/i.test(text) ? 'timeout'
   : /compile|syntax|编译|语法/i.test(text) ? 'compiler' : stage === 'model' ? 'model' : 'creation';
  return { traceId, stage, category, code: cleanDiagnostic(error?.code || error?.name || 'ERROR', 100), ...(status ? { upstreamStatus: status } : {}), reason: text || 'Unknown creation error', stack: cleanDiagnostic(error?.stack, 1200) };

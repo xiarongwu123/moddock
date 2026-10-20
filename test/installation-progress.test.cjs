@@ -53,6 +53,7 @@ test('state API exposes in-flight progress and rejects duplicate install request
   installers: { processes: async () => [], afterWrite: async () => { entered(); await blocked; } } });
  t.after(async () => { release(); await new Promise(resolve => service.server.close(resolve)); });
  const job = await x.job([{ name: 'Release/original-mod.pak', data: 'modded' }]);
+ job.resourceId = 'local:installation-progress';
  const directory = path.join(service.downloads.root, job.id); await fs.mkdir(directory);
  await fs.copyFile(job.path, path.join(directory, job.filename)); service.downloads.jobs.push(job);
  const auth = await loginFixture(service), id = randomUUID();

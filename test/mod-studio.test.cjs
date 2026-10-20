@@ -13,6 +13,12 @@ const { createServer, loginFixture } = require('./server-fixture.cjs');
 const { accountFixture } = require('./account-fixture.cjs');
 const { validatedPlan } = require('../studio-conversations.cjs');
 
+// Packaging fixtures declare a simulated engine readback; they never run game code.
+const runtimeLua = code => `${code}\nModdockVerification.expect('effect','fixture game state')
+ModdockVerification.begin('effect')
+local actual = readEffectiveGameState()
+ModdockVerification.check('effect',actual,42)`;
+
 const draft = { kind: 'dialogue', name: '海边的问候', author: '测试作者', npc: 'Abigail', entries: { Mon: '今天也去海边散步吧。', Fri: '周末有什么打算？' } };
 async function temp(t) { const root = await fs.mkdtemp(path.join(os.tmpdir(), 'moddock-studio-')); t.after(() => fs.rm(root, { recursive: true, force: true, maxRetries: 3 })); return root; }
 async function write(root, file, data) { await fs.mkdir(path.dirname(path.join(root, file)), { recursive: true }); await fs.writeFile(path.join(root, file), data); }
@@ -174,12 +180,12 @@ test('generic upstream native fallback preserves local managed game evidence and
 });
 test('UE4SS project uses its detected loader directory and existing transactional installation', async t => {
  const x = await fixture(t, { variant: 'unreal' });
- const saved = await x.post('studio/save', { draft: { kind: 'ue4ss-lua', name: 'Test Script', author: 'Player', code: 'print("Hello")' } });
+ const saved = await x.post('studio/save', { draft: { kind: 'ue4ss-lua', name: 'Test Script', author: 'Player', code: runtimeLua('print("Hello")') } });
  assert.equal(saved.status, 200, JSON.stringify(saved.body));
  assert.equal((await x.post('studio/save', { draft })).status, 400);
  const plan = await x.post('studio/prepare', { id: saved.body.id }); assert.equal(plan.status, 200, JSON.stringify(plan.body));
  assert.equal(plan.body.files.length, 2); assert.ok(plan.body.files.every(file => file.destination.startsWith('Game/Binaries/Win64/ue4ss/Mods/Moddock')));
- assert.equal((await x.post('installations/plan', { jobId: plan.body.jobId })).status, 200);
+ const repeatedPlan = await x.post('installations/plan', { jobId: plan.body.jobId }); assert.equal(repeatedPlan.status, 200, JSON.stringify(repeatedPlan.body));
  const installed = await x.post('installations/apply', { id: plan.body.id }); assert.equal(installed.status, 200, JSON.stringify(installed.body));
  const script = path.join(x.game.installPath, 'Game/Binaries/Win64/ue4ss/Mods', saved.body.manifest.UniqueID, 'Scripts/main.lua');
  assert.match(await fs.readFile(script, 'utf8'), /print\("Hello"\)/);
@@ -190,7 +196,7 @@ test('UE4SS project uses its detected loader directory and existing transactiona
 });
 test('REFramework project deploys a uniquely named Lua file only to detected autorun', async t => {
  const x = await fixture(t, { variant: 're' });
- const saved = await x.post('studio/save', { draft: { kind: 'reframework-lua', name: 'RE Script', author: 'Player', code: 'log.info("Hello")' } });
+ const saved = await x.post('studio/save', { draft: { kind: 'reframework-lua', name: 'RE Script', author: 'Player', code: runtimeLua('log.info("Hello")') } });
  assert.equal(saved.status, 200, JSON.stringify(saved.body));
  const plan = await x.post('studio/prepare', { id: saved.body.id }); assert.equal(plan.status, 200, JSON.stringify(plan.body));
  assert.deepEqual(plan.body.files.map(file => file.destination), [`reframework/autorun/${saved.body.manifest.UniqueID}.lua`]);
@@ -258,7 +264,7 @@ test('automatic planning and generation choose an adapter, save the artifact and
  const planned = [], generated = [];
  const x = await fixture(t, { variant: 'unreal', studio: {
   plan: async payload => { planned.push(payload); return creationPlan; },
-  generate: async payload => { generated.push(payload); return { kind: payload.kind, name: 'Exploration helper', author: 'Player', code: `print("revision ${generated.length}")` }; },
+  generate: async payload => { generated.push(payload); return { kind: payload.kind, name: 'Exploration helper', author: 'Player', code: runtimeLua(`print("revision ${generated.length}")`) }; },
  } });
  assert.equal(x.login.state.studio.aiAvailable, true);
  const first = await completeTurn(x, { message: 'Make exploration more fun.' });
@@ -277,7 +283,7 @@ test('a Mod request rejects a document downgrade and compiles a real Lua package
  let plans = 0;
  const x = await fixture(t, { variant: 'unreal', studio: {
   plan: async () => ({ ...creationPlan, kind: ++plans === 1 ? 'project-plan' : 'ue4ss-lua' }),
-  generate: async () => ({ kind: 'ue4ss-lua', name: 'Executable helper', author: 'Fixture', code: 'RegisterHook("/Script/Engine.PlayerController:ClientRestart", function(Context) local pawn = Context:get() if pawn:IsValid() then print(pawn:GetFullName()) end end)' }),
+  generate: async () => ({ kind: 'ue4ss-lua', name: 'Executable helper', author: 'Fixture', code: runtimeLua('RegisterHook("/Script/Engine.PlayerController:ClientRestart", function(Context) local pawn = Context:get() if pawn:IsValid() then print(pawn:GetFullName()) end end)') }),
   tools: { luac: false },
  } });
  await fs.rm(path.join(x.game.installPath, 'Game/Binaries/Win64/ue4ss/UE4SS.dll'));
@@ -303,7 +309,7 @@ test('clarifying questions stay in the conversation and only generate after an a
  let plans = 0, generations = 0;
  const x = await fixture(t, { variant: 'unreal', studio: {
   plan: async () => ++plans === 1 ? { title: 'Exploration helper', summary: 'Choose the desired activation behavior.', questions: ['Should this activate automatically?'] } : creationPlan,
-  generate: async () => { generations++; return { kind: 'ue4ss-lua', name: 'Helper', author: 'Player', code: 'print("Hello")' }; },
+  generate: async () => { generations++; return { kind: 'ue4ss-lua', name: 'Helper', author: 'Player', code: runtimeLua('print("Hello")') }; },
  } });
  const waiting = await completeTurn(x, { message: 'Create an exploration helper.' });
  assert.equal(waiting.status, 'clarifying'); assert.equal(generations, 0); assert.match(waiting.messages.at(-1).content, /automatically/);
@@ -353,7 +359,7 @@ test('malformed model JSON is replanned but transport and balance failures are n
  let plans = 0;
  const x = await fixture(t, { variant: 'unreal', studio: {
   plan: async () => { if (++plans === 1) throw Object.assign(new Error('Invalid JSON'), { code: 'AI_RESPONSE_FORMAT' }); return creationPlan; },
-  generate: async () => ({ kind: 'ue4ss-lua', name: 'Helper', author: 'Player', code: 'print("Hello")' }),
+  generate: async () => ({ kind: 'ue4ss-lua', name: 'Helper', author: 'Player', code: runtimeLua('print("Hello")') }),
  } });
  const completed = await completeTurn(x, { message: 'Create an exploration helper.' });
  assert.equal(completed.status, 'completed'); assert.equal(plans, 2); assert.equal(completed.planningAttempts[0].code, 'AI_RESPONSE_FORMAT');
@@ -481,7 +487,7 @@ test('real Lua compilation rejects syntax errors and never executes generated sc
  const x = await fixture(t, { variant: 'unreal', studio: {
   plan: async () => creationPlan,
   generate: async () => ({ kind: 'ue4ss-lua', name: 'Broken Lua', author: 'Fixture', code: 'function broken(' }),
-  repair: async payload => { repairs++; assert.equal(payload.validation.status, 'failed'); return { kind: 'ue4ss-lua', name: 'Repaired Lua', author: 'Fixture', code: `local file = io.open(${JSON.stringify(path.join(x.root, 'must-not-execute'))}, "w"); file:write("executed"); file:close()` }; },
+  repair: async payload => { repairs++; assert.equal(payload.validation.status, 'failed'); return { kind: 'ue4ss-lua', name: 'Repaired Lua', author: 'Fixture', code: runtimeLua(`local file = io.open(${JSON.stringify(path.join(x.root, 'must-not-execute'))}, "w"); file:write("executed"); file:close()`) }; },
  } });
  const thread = await completeTurn(x, { message: 'Make a Lua project.' });
  assert.equal(repairs, 1); assert.equal(thread.toolchain.status, 'passed');
@@ -521,7 +527,7 @@ test('real C# compilation exports a checked DLL, keeps revisions isolated, and r
 });
 
 test('conversation installs, replaces its own revision, launches via the host and verifies only new loader evidence', async t => {
- const x = await fixture(t, { variant: 'unreal', studio: { plan: async () => creationPlan, generate: async () => ({ kind: 'ue4ss-lua', name: 'Lifecycle fixture', author: 'Fixture', code: 'local value = 1' }) } });
+ const x = await fixture(t, { variant: 'unreal', studio: { runtimeObservationMs: 1, runtimePollMs: 1, plan: async () => creationPlan, generate: async () => ({ kind: 'ue4ss-lua', name: 'Lifecycle fixture', author: 'Fixture', code: runtimeLua('local value = 1') }) } });
  let thread = await completeTurn(x, { message: 'Create a Lua mod' }); assert.equal(thread.toolchain.status, 'passed');
  thread = await completeTurn(x, { id: thread.id, message: '安装' }); assert.equal(thread.status, 'completed', thread.error);
  let artifact = (await x.post('studio/read', { id: thread.artifactId })).body; assert.equal(artifact.deployment.status, 'installed');
@@ -534,16 +540,18 @@ test('conversation installs, replaces its own revision, launches via the host an
  const log = path.join(x.game.installPath, 'Game/Binaries/Win64/ue4ss/UE4SS.log');
  await fs.writeFile(log, artifact.runtime.marker + '\n');
  x.service.installers.options.openGame = async uri => { assert.equal(uri, 'steam://rungameid/12345'); opened++; };
- thread = await completeTurn(x, { id: thread.id, message: '启动游戏并检查日志' }); assert.equal(thread.status, 'completed', thread.error); assert.equal(opened, 1);
+ thread = await completeTurn(x, { id: thread.id, message: '启动游戏并检查日志' }); assert.equal(thread.status, 'awaiting_runtime', thread.error); assert.equal(opened, 1);
  assert.equal((await x.post('studio/read', { id: artifact.id })).body.toolchain.runtime.status, 'unconfirmed');
  await fs.appendFile(log, artifact.runtime.marker + '\n');
- thread = await completeTurn(x, { id: thread.id, message: '检查本次运行' }); assert.match(thread.messages.at(-1).content, /初始化完成/);
- assert.equal((await x.post('studio/read', { id: artifact.id })).body.toolchain.runtime.status, 'loader_loaded');
+ thread = await completeTurn(x, { id: thread.id, message: '检查本次运行' });
+ assert.equal(thread.status, 'awaiting_runtime');
+ assert.equal((await x.post('studio/read', { id: artifact.id })).body.toolchain.runtime.status, 'awaiting_trigger');
  await fs.appendFile(log, 'ERROR runtime failure\n'); await completeTurn(x, { id: thread.id, message: '检查日志' });
- assert.equal((await x.post('studio/read', { id: artifact.id })).body.toolchain.runtime.status, 'loader_with_errors');
+ assert.equal((await x.post('studio/read', { id: artifact.id })).body.toolchain.runtime.status, 'loader_error');
 });
 test('compiled model C# bootstrap installs genuine DLL bytes and permissions are rechecked before mutation', async t => {
  const x = await fixture(t, { variant: 'unity', studio: {
+  runtimeObservationMs: 1, runtimePollMs: 1,
   plan: async () => ({ ...creationPlan, kind: 'bepinex-plugin' }),
   generate: async () => ({ kind: 'bepinex-plugin', name: 'Real compilation fixture', author: 'Fixture', entryPoint: 'Moddock.Generated.ModContent.Initialize', code: 'namespace Moddock.Generated { public static class ModContent { public static void Initialize() { UnityEngine.Application.targetFrameRate = 90; } } }' }),
  } });
@@ -556,7 +564,7 @@ test('compiled model C# bootstrap installs genuine DLL bytes and permissions are
  assert.equal(crypto.createHash('sha256').update(dll).digest('hex'), artifact.toolchain.outputs[0].sha256);
  x.game.appId = '12346';
  x.service.installers.options.openGame = async () => { await fs.writeFile(path.join(x.game.installPath, 'BepInEx/LogOutput.log'), artifact.runtime.marker + '\n'); };
- thread = await completeTurn(x, { id: thread.id, message: '启动游戏并检查日志' }); assert.equal(thread.status, 'completed', thread.error);
+ thread = await completeTurn(x, { id: thread.id, message: '启动游戏并检查日志' }); assert.equal(thread.status, 'awaiting_runtime', thread.error);
  assert.equal((await x.post('studio/read', { id: artifact.id })).body.toolchain.runtime.status, 'loader_loaded');
  let started = false; x.service.installers.options.openGame = async () => { started = true; };
  await assert.rejects(x.service.studio.options.lifecycle.launch({ owner: 'fixture-user', game: x.game, artifactId: artifact.id, current: () => true, authorize: async () => { throw Error('permission revoked'); } }), /permission revoked/); assert.equal(started, false);

@@ -29,7 +29,7 @@ async function fixture(t, serviceOptions = {}) {
  return { root, contexts, cancelled, service, gateway, closers, authorizer };
 }
 test('clients with no Nexus key share a backend session, wait for maintenance, and receive verified file bytes without grants', async t => {
- const x = await fixture(t), manager = new SourceConnections('test', { nexusPlatform: x.gateway }, { read: async () => ({ nexus: 'old-local-key' }), isAvailable: () => true });
+ const x = await fixture(t), manager = new SourceConnections('test', { nexusPlatformFactory: () => createNexusPlatformClient({ url: x.service.url, accessToken }, { interval: 10 }) }, { read: async () => ({ nexus: 'old-local-key' }), isAvailable: () => true });
  const alice = await manager.get('alice'), bob = await manager.get('bob'); assert.equal(alice.sources.keys.nexus, ''); assert.equal(bob.sources.keys.nexus, ''); assert.equal((await manager.status('alice')).nexusManaged, true);
  await assert.rejects(manager.connect('alice', 'nexus', 'another-key'), /平台服务/);
  const clients = await Promise.all(['alice', 'bob'].map(async owner => new Downloads(path.join(x.root, owner), (await manager.get(owner)).sources).open()));

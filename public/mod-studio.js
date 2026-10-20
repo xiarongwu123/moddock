@@ -6,7 +6,7 @@ import './mod-studio.css';
 
 const active = status => ['analyzing', 'planning', 'generating', 'validating', 'checking', 'building', 'verifying', 'repairing', 'deploying', 'launching', 'observing'].includes(status);
 const creating = thread => active(thread?.status) && !thread.command;
-const creationReady = s => !!s.saved && s.saved.toolchain?.status === 'passed' && (!s.thread || s.thread.status === 'completed' || !!s.thread.command);
+const creationReady = s => !!s.saved && s.saved.toolchain?.status === 'passed' && (!s.thread || ['completed','awaiting_runtime','awaiting_exit'].includes(s.thread.status) || !!s.thread.command);
 const suggestions = ['我想增加一个有独特能力的新装备，并设计获取方式', '我想调整游戏里的一个机制，让探索更有趣', '我想做一个符合游戏世界观的新角色或剧情'];
 const suggestionLabels = ['加一件新装备', '调整游戏机制', '创作角色与剧情'];
 const runActions = new Set(['send', 'resume', 'try']);
@@ -41,7 +41,7 @@ export function createModStudio({ api, render, esc, icon, getGame, getGames, cha
   if (!Number.isFinite(startedAt)) return null;
   const command = pending ? s.busy === 'try' : !!thread.command;
   const failed = !!s.error || ['blocked', 'failed', 'cancelled', 'interrupted', 'awaiting_service'].includes(thread?.status);
-  const doneLabel = s.error ? '这次遇到了点问题，用时' : ({ blocked: '制作还需要处理一些问题，用时', failed: '这次还没做好，用时', cancelled: '先歇一会儿，用时', interrupted: '创作已中断，用时', awaiting_service: '还没连上创作服务，用时', clarifying: '等你补充一点细节，用时' })[thread?.status] || (command ? '这一步处理好了，用时' : '这一版做好了，用时');
+  const doneLabel = s.error ? '这次遇到了点问题，用时' : ({ awaiting_runtime:'文件已生成，等待游戏功能验证，用时',awaiting_exit:'修复版已保存，等待游戏退出，用时',blocked: '制作还需要处理一些问题，用时', failed: '这次还没做好，用时', cancelled: '先歇一会儿，用时', interrupted: '创作已中断，用时', awaiting_service: '还没连上创作服务，用时', clarifying: '等你补充一点细节，用时' })[thread?.status] || (command ? '这一步处理好了，用时' : '文件已生成，游戏效果待验证，用时');
   const current = thread?.toolCalls?.findLast(tool => tool.status === 'running');
   const stage = { analyzing: '正在了解你的想法', planning: '正在构思玩法', generating: '正在制作你的 Mod', validating: '正在检查制作文件', checking: '正在检查游戏环境', building: '正在编译制作文件', verifying: '正在验证制作结果', repairing: '正在调整制作内容', deploying: '正在安装到游戏', launching: '正在启动游戏', observing: '正在查看运行反馈' }[thread?.status];
   const label = thread?.harness?.connection?.status === 'reconnecting' ? '连接中断，正在自动重连' : current ? activityNames[current.name] || '正在处理创作内容' : thread?.harness?.modelStatus === 'thinking' ? '正在思考实现方式' : stage || '正在准备创作';
@@ -106,8 +106,11 @@ export function createModStudio({ api, render, esc, icon, getGame, getGames, cha
  }
  function schedule(game) {
   const s = state(game.id); clearTimeout(s.timer);
-  if (!active(s.thread?.status) || !visible(game)) return;
-  s.timer = setTimeout(() => poll(game), 1200);
+  if (!s.thread || !visible(game)) return;
+  // A normal library launch can start runtime recovery after this page loaded
+  // an inactive conversation. Keep observing deployed projects for that change.
+  if (!active(s.thread.status) && !s.saved?.deployment?.runId) return;
+  s.timer = setTimeout(() => poll(game), active(s.thread.status) ? 1200 : 5000);
  }
  async function poll(game) {
   const s = state(game.id), id = s.thread?.id, ticket = epoch;
@@ -117,7 +120,7 @@ export function createModStudio({ api, render, esc, icon, getGame, getGames, cha
    if (!same(ticket) || s.thread?.id !== id) return;
    const changed = JSON.stringify(thread) !== JSON.stringify(s.thread); remember(s, thread);
    await artifact(s, game, ticket); if (!same(ticket)) return;
-   if (!active(thread.status)) s.records = (await api('studio/list', { gameId: game.id })).items;
+   if (changed && !active(thread.status)) s.records = (await api('studio/list', { gameId: game.id })).items;
    if (same(ticket) && visible(game) && changed) update();
    if (same(ticket) && visible(game) && !active(thread.status)) await deliver(s, game, ticket);
   } catch (error) { if (same(ticket)) { s.error = error.message; if (visible(game)) update(); } return; }
@@ -160,6 +163,7 @@ export function createModStudio({ api, render, esc, icon, getGame, getGames, cha
   return `<section class="studio-environment" aria-label="创作提示"><p role="status">${message}</p><button class="btn small" data-studio-action="${environment.status === 'conflict' || !canPrepare ? 'check-environment' : 'environment'}" ${s.busy || active(s.thread?.status) ? 'disabled' : ''}>${!canPrepare || environment.status === 'conflict' ? '重新检查' : '自动准备'}</button></section>` + content;
  }
  function mainPanel(game) {
+  if (!getStatus()?.allowed && window.ModdockMembership) return window.ModdockMembership.marketing();
   if (!getStatus()?.allowed) return `<div class="studio-locked">${mascot('studio-locked-mascot', '游匣 AI 卡通伙伴匣仔')}<span class="studio-pro">PRO</span><h2>游匣 AI</h2><p>我是匣仔，陪你把游戏里的奇思妙想做成 Mod。<br>开通 Pro，和我一起开始创作。</p><button class="btn primary" data-nav="account">查看我的会员</button></div>`;
   const s = game ? state(game.id) : null, t = s?.thread, running = active(t?.status), busy = !!s?.busy, disabled = busy || running;
   const empty = !t && !busy && !s?.saved;

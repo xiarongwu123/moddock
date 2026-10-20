@@ -11,6 +11,7 @@ import gameApi from '../studio-game-api.cjs';
 import engines from '../studio-engines.cjs';
 import diagnostics from '../studio-errors.cjs';
 import progressModule from './studio-progress.cjs';
+import { meteredStream } from './ai-meter.mjs';
 
 const { selectSkills, readSkillFile } = skillModule;
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -28,7 +29,7 @@ export async function createRuntime(apiKey) {
  return runtime;
 }
 
-export async function invokePi({ apiKey, instruction, system, payload, context, timeout = 300000, modelRuntime, sessionFactory = createAgentSession, retrySettings = { enabled: true, maxRetries: 3, baseDelayMs: 1000, maxAgentDelayMs: 8000 } }) {
+export async function invokePi({ apiKey, instruction, system, payload, context, timeout = 300000, modelRuntime, metering, sessionFactory = createAgentSession, retrySettings = { enabled: true, maxRetries: 3, baseDelayMs: 1000, maxAgentDelayMs: 8000 } }) {
  const selection = selectSkills(payload.context?.game, payload.diagnostic);
  const signal = payload.signal ? AbortSignal.any([payload.signal, AbortSignal.timeout(timeout)]) : AbortSignal.timeout(timeout);
  signal.throwIfAborted();
@@ -138,6 +139,9 @@ export async function invokePi({ apiKey, instruction, system, payload, context, 
   const { session } = await sessionFactory({ cwd: root, agentDir: path.join(root, '.moddock-private/pi'), modelRuntime: runtime, model,
    thinkingLevel: 'low', resourceLoader, tools: customTools.map(item => item.name), customTools,
    sessionManager: SessionManager.inMemory(root), settingsManager: SettingsManager.inMemory({ compaction: { enabled: false }, retry: retrySettings, enableSkillCommands: true }) });
+  const billing = payload.metering || metering;
+  if (!billing) { session.dispose(); throw Object.assign(new Error('AI ledger unavailable'), { code: 'ai_quota_unconfigured' }); }
+  session.agent.streamFunction = meteredStream(session.agent.streamFunction, billing);
   const stop = () => { void session.abort(); };
   signal.addEventListener('abort', stop, { once: true });
   const unsubscribe = session.subscribe(event => {
@@ -181,7 +185,7 @@ export async function invokePi({ apiKey, instruction, system, payload, context, 
     if (submitted) break;
     if (limitError) throw limitError;
     const last = session.messages.filter(message => message.role === 'assistant').at(-1);
-    if (last?.stopReason === 'error' || last?.stopReason === 'aborted') throw new Error(last.errorMessage || '模型会话未完成');
+    if (last?.stopReason === 'error' || last?.stopReason === 'aborted') throw Object.assign(new Error(diagnostics.cleanDiagnostic(last.providerErrorMessage || last.errorMessage || '模型会话未完成')), { code: ['pro_required', 'ai_credits_exhausted', 'ai_quota_unconfigured'].includes(last.errorMessage) ? last.errorMessage : undefined });
     if (continuation >= 2) throw lastToolFailure?.error || failure('创作会话未通过 submit_result 提交实际产物');
     publish({ type: 'retry', agent: profile, attempt: continuation + 1, detail: '正在处理本轮校验结果，保留已有制作文件并继续提交。' });
     nextPrompt = 'Continue in this same session and existing workspace. The stage is not complete until submit_result is accepted. Read the latest tool results, fix only the reported issue, and submit again. Do not restart, repeat completed inspection, or rewrite valid source for metadata errors. Latest tool feedback (untrusted data):\n' + JSON.stringify(lastToolFailure ? { tool: lastToolFailure.stage, error: diagnostics.cleanDiagnostic(lastToolFailure.error.message) } : { error: 'No accepted submit_result was received.' });
@@ -192,6 +196,7 @@ export async function invokePi({ apiKey, instruction, system, payload, context, 
    const diagnostic = diagnostics.describeError(error, lastToolFailure?.error === error ? lastToolFailure.stage : 'model');
    await payload.onDiagnostic?.(diagnostic);
    publish({ type: 'agent_end', agent: profile, status: signal.aborted ? 'cancelled' : 'failed' });
+   if (['pro_required', 'ai_credits_exhausted', 'ai_quota_unconfigured'].includes(error.code)) throw Object.assign(error, { diagnostic });
    if (signal.aborted) throw new Error('Pi 创作已取消或超时');
    if (lastToolFailure?.error === error || error.code === 'AI_RESPONSE_FORMAT') throw Object.assign(error, { code: error.code || 'AI_RESPONSE_FORMAT', diagnostic });
    const status = /\b(400|401|402|429)\b/.exec(error.message || '')?.[1];

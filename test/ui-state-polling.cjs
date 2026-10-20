@@ -69,6 +69,6 @@ const { openHome } = require('./ui-open.cjs');
   await browser?.close();
   service.server.closeAllConnections();
   await new Promise(resolve => service.server.close(resolve));
-  await fs.rm(root, { recursive: true, force: true });
+  await fs.rm(root, { recursive: true, force: true, maxRetries: 3 });
  }
 })().catch(error => { console.error(error); process.exitCode = 1; });

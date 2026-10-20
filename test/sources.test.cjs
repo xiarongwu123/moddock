@@ -8,7 +8,7 @@ const { Sources, sourceGames, downloadAllowed } = require('../sources.cjs');
 const { Downloads, filename } = require('../downloads.cjs');
 const { createServer, loginFixture } = require('./server-fixture.cjs');
 const game = { ...sourceGames[0], id:'steam-413150',platform:'Steam',installPath:'D:\\SteamLibrary\\Stardew Valley',real:true };
-const wait = async d => { for(let n=0;n<200&&(d.controllers.size||d.jobs.some(j=>['running','queued'].includes(j.status)));n++)await new Promise(r=>setTimeout(r,10)); };
+const wait = async d => { for(let n=0;n<1200&&(d.controllers.size||d.jobs.some(j=>['running','queued'].includes(j.status)));n++)await new Promise(r=>setTimeout(r,10)); };
 const temp = async t => {const root=await fs.mkdtemp(path.join(os.tmpdir(),'moddock-v3-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));return root;};
 test('N 网全库搜索、分页、游戏范围及缓存',async()=>{
  let calls=0,body;const s=new Sources({fetch:async(url,opts)=>{calls++;body=JSON.parse(opts.body);return Response.json({data:{mods:{totalCount:34461,nodes:[{modId:1,name:'Sword',game:{domainName:'stardewvalley'}},{modId:2,name:'Wrong game',game:{domainName:'other'}}]}}});}});

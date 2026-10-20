@@ -8,6 +8,7 @@ const { safeEvent } = require('../studio-events.cjs');
 const { verifySkillSources } = require('../studio-skills.cjs');
 const { createStudioLogger, describeError } = require('../studio-errors.cjs');
 const { StudioTasks } = require('./studio-tasks.cjs');
+const { AILedger } = require('./ai-ledger.cjs');
 
 const actions = new Set(['plan', 'generate', 'repair']);
 const kinds = new Set(['dialogue', 'texture', 'ue4ss-lua', 'reframework-lua', 'bepinex-plugin', 'bg3-lua', 'bg3-follower', 'engine-mod', 'custom-project', 'project-plan']);
@@ -24,11 +25,21 @@ function validate(action, value) {
  return value;
 }
 
-async function createStudioService({ accessToken, ai, apiKey, host = '127.0.0.1', port = 0, timeout = 300000, hourlyLimit = 120, taskDirectory, taskLease, taskRetention } = {}) {
+async function createStudioService({ accessToken, ai, apiKey, ledger, database, accountUrl, host = '127.0.0.1', port = 0, timeout = 300000, hourlyLimit = 120, taskDirectory, taskLease, taskRetention } = {}) {
  if (!/^[a-f0-9]{64}$/.test(accessToken || '')) throw new Error('Invalid private service token');
  if (host !== '127.0.0.1' && !/^172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}$/.test(host)) throw new Error('Private bind address required');
  if (!ai) { await import('./studio-pi.mjs'); await verifySkillSources(); await require('../studio-game-api.cjs').verify(); }
  const provider = ai || createDeepSeek({ apiKey });
+ if (!ledger) {
+  const target = new URL(accountUrl);
+  if (target.protocol !== 'http:' || !['127.0.0.1', 'localhost'].includes(target.hostname) || target.username || target.password) throw new Error('Private account callback required');
+  ledger = new AILedger({ filename: database, account: async owner => {
+   const response = await fetch(target, { method: 'GET', redirect: 'error', signal: AbortSignal.timeout(10000),
+    headers: { Authorization: 'Bearer ' + accessToken, 'X-Mu-Account-Id': owner, 'X-Forwarded-Proto': 'https' } });
+   if (!response.ok) throw new Error('Account unavailable');
+   return response.json();
+  } });
+ }
  const active = new Map(), windows = new Map();
  const temporary = !taskDirectory;
  taskDirectory ||= await fs.mkdtemp(path.join(os.tmpdir(), 'moddock-studio-tasks-'));
@@ -42,7 +53,9 @@ async function createStudioService({ accessToken, ai, apiKey, host = '127.0.0.1'
   return () => { if (active.get(owner) === controller) active.delete(owner); };
  };
  const tasks = new StudioTasks({ directory: taskDirectory, logger, timeout, lease: taskLease, retention: taskRetention, reserve,
-  execute: (action, payload) => provider[action]({ ...payload, onEvent: input => { const event = safeEvent(input); if (event) payload.onEvent(event); } }) });
+  execute: (action, payload) => provider[action]({ ...payload,
+   metering: { ledger, owner: payload.accountId, task: payload.taskId, onUsage: payload.onUsage },
+   onEvent: input => { const event = safeEvent(input); if (event) payload.onEvent(event); } }) });
  const server = http.createServer(async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -52,6 +65,9 @@ async function createStudioService({ accessToken, ai, apiKey, host = '127.0.0.1'
   if (supplied.length !== expected.length || !crypto.timingSafeEqual(supplied, expected)) return send({ code: 'unauthorized' }, 401);
   const owner = req.headers['x-mu-account-id'];
   if (typeof owner !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(owner)) return send({ code: 'invalid_request' }, 400);
+  if (req.method === 'GET' && req.url === '/quota') {
+   try { return send(ledger.quota(owner)); } catch { return send({ code: 'ai_quota_unconfigured' }, 503); }
+  }
   if (req.method === 'GET' && req.url === '/status') return send({ ready: true, provider: provider.provider?.name || 'MU AI', harness: 'pi-agent', activeTasks: active.size, capabilities: ['plan', 'generate', 'repair', 'skills', 'agents', 'thinking', 'tool-events', 'resumable-tasks', 'diagnostics'] });
   const action = req.url.slice(1);
   if (req.method !== 'POST' || !actions.has(action)) return send({ code: 'not_found' }, 404);
@@ -80,7 +96,7 @@ async function createStudioService({ accessToken, ai, apiKey, host = '127.0.0.1'
     catch (error) {
      const diagnostic = describeError(error, 'delivery', delivery.id); await logger.write({ taskId: delivery.id, action, diagnostic }).catch(() => {});
      if (res.headersSent) { res.destroy(); return; }
-     const code = ['invalid_request', 'studio_rate_limited', 'studio_task_expired', 'studio_task_interrupted'].includes(error.code) ? error.code : 'studio_unavailable';
+     const code = ['pro_required', 'ai_quota_unconfigured', 'ai_credits_exhausted', 'invalid_request', 'studio_rate_limited', 'studio_task_expired', 'studio_task_interrupted'].includes(error.code) ? error.code : 'studio_unavailable';
      res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'X-Accel-Buffering': 'no' });
      res.end(JSON.stringify({ type: 'task', version: 1, id: delivery.id }) + '\n' + JSON.stringify({ type: 'error', seq: delivery.after + 1, code, diagnostic }) + '\n'); return;
     }
@@ -102,7 +118,9 @@ async function createStudioService({ accessToken, ai, apiKey, host = '127.0.0.1'
     res.flushHeaders();
     heartbeat = setInterval(() => frame({ type: 'heartbeat' }), 10000);
    }
+   const taskId = crypto.randomUUID();
    const value = await provider[action]({ ...payload, accountId: owner, signal: controller.signal,
+    metering: { ledger, owner, task: taskId, onUsage: usage => { if (streaming) frame({ type: 'usage', usage }); } },
     onEvent: input => { const event = safeEvent(input); if (streaming && event) frame({ type: 'event', event }); } });
    const result = payload.agentStep === undefined ? value : { type: 'complete', draft: value };
    controller.signal.throwIfAborted();
@@ -113,7 +131,7 @@ async function createStudioService({ accessToken, ai, apiKey, host = '127.0.0.1'
    const credits = /HTTP 402/.test(message), busy = /HTTP 429/.test(message);
    const invalid = ['AI_RESPONSE_FORMAT', 'AI_ARTIFACT_INVALID'].includes(error.code) || /AI 贴图/.test(message);
    if (busy && !res.headersSent) res.setHeader('Retry-After', '30');
-   const code = credits ? 'ai_credits_exhausted' : busy ? 'studio_rate_limited' : invalid ? 'ai_response_invalid' : 'studio_unavailable';
+   const code = ['pro_required', 'ai_quota_unconfigured', 'ai_credits_exhausted'].includes(error.code) ? error.code : credits ? 'ai_credits_exhausted' : busy ? 'studio_rate_limited' : invalid ? 'ai_response_invalid' : 'studio_unavailable';
    await logger.write({ action, diagnostic: describeError(error, 'legacy_creation') }).catch(() => {});
    if (streaming) { if (!res.destroyed) res.end(JSON.stringify({ type: 'error', code }) + '\n'); } else send({ code }, credits || invalid ? 502 : busy ? 429 : 503);
   } finally {
@@ -127,11 +145,13 @@ async function createStudioService({ accessToken, ai, apiKey, host = '127.0.0.1'
   await tasks.close(); await logger.flush().catch(() => {});
   for (const controller of active.values()) controller.abort();
   server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
+  ledger.close();
   if (temporary) await fs.rm(taskDirectory, { recursive: true, force: true });
  } };
 }
 if (require.main === module) createStudioService({ accessToken: process.env.MODDOCK_STUDIO_TOKEN,
  apiKey: process.env.MODDOCK_DEEPSEEK_API_KEY, host: process.env.MODDOCK_STUDIO_HOST || '127.0.0.1',
- port: Number(process.env.MODDOCK_STUDIO_PORT || 8097), taskDirectory: process.env.MODDOCK_STUDIO_TASKS }).then(() => console.log('MU private creation service ready'))
+ port: Number(process.env.MODDOCK_STUDIO_PORT || 8097), taskDirectory: process.env.MODDOCK_STUDIO_TASKS,
+ database: process.env.MODDOCK_AI_DATABASE, accountUrl: process.env.MODDOCK_AI_ACCOUNT_URL }).then(() => console.log('MU private creation service ready'))
  .catch(() => { console.error('MU private creation service configuration failed'); process.exitCode = 1; });
 module.exports = { createStudioService };

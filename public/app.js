@@ -27,6 +27,25 @@ const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;',
 const cover = id => `https://cdn.akamai.steamstatic.com/steam/apps/${encodeURIComponent(id)}/header.jpg`;
 let data, view='library', selected=null, query='', scanning=false, modal=null, previousFocus, toastTimer;
 let scanPathsBusy=false, scanError='';
+const pendingModActions=new Map();
+function renderPendingModActions(){
+ for(const button of app.querySelectorAll('[data-mod-action]')){
+  const action=pendingModActions.get(button.dataset.managedId);
+  if(!action)continue;
+  const row=button.closest('.managed-row, .library-mod-row');
+  row?.setAttribute('aria-busy','true');
+  for(const control of row?.querySelectorAll('button')||[])control.disabled=true;
+  if(button.dataset.modAction!==action)continue;
+  const label=action==='enable'?'正在启用…':action==='disable'?'正在停用…':'正在校验…';
+  button.setAttribute('aria-busy','true');
+  if(button.classList.contains('manager-switch')){
+   button.setAttribute('aria-label',label);
+   const status=row.querySelector('.manager-state');
+   status.setAttribute('role','status');
+   status.innerHTML=`${icon('loader','spinning')} ${label}`;
+  }else button.innerHTML=`${icon('loader','spinning')}<span role="status">${label}</span>`;
+ }
+}
 let lastNxm=null;
 let onlineProvider='all', onlineQuery='', onlineDraft='', onlineResults={}, generation=0, requests={};
 let gameTab='overview', gameLibraryQuery='', launchingGame=null;
@@ -92,10 +111,10 @@ function render(){
  // Unchanged polls must not detach a hovered or keyboard-focused card.
  if(!pageChanged&&libraryKey!==null&&libraryKey===renderedLibraryKey)return;
  renderedLibraryKey=libraryKey;
- const detailKey=view==='detail'?JSON.stringify([data.scan.games,data.sourceGames,data.installations,data.jobs,data.providers,data.studio,studio.revision,onlineResults,onlineProvider,onlineQuery,onlineDraft,gameTab,gameLibraryQuery,launchingGame,homeProfile?.name,homeProfile?.email]):null;
+ const detailKey=view==='detail'?JSON.stringify([data.scan.games,data.sourceGames,data.installations,data.jobs,data.providers,data.studio,studio.revision,onlineResults,onlineProvider,onlineQuery,onlineDraft,gameTab,gameLibraryQuery,launchingGame,[...pendingModActions],homeProfile?.name,homeProfile?.email]):null;
  if(!pageChanged&&detailKey!==null&&detailKey===renderedDetailKey)return;
  renderedDetailKey=detailKey;
- const managerKey=view==='installed'?JSON.stringify([data.installations,data.jobs,data.sourceGames,modManager.key(),homeProfile?.name,homeProfile?.email]):null;
+ const managerKey=view==='installed'?JSON.stringify([data.installations,data.jobs,data.sourceGames,modManager.key(),[...pendingModActions],homeProfile?.name,homeProfile?.email]):null;
  if(!pageChanged&&managerKey!==null&&managerKey===renderedManagerKey)return;
  renderedManagerKey=managerKey;
  const previousContent=app.querySelector('.content');
@@ -127,6 +146,7 @@ function render(){
  </div>`;
  if(previousContent&&!pageChanged){const next=app.querySelector('.content');previousContent.className=next.className;previousContent.innerHTML=next.innerHTML;next.replaceWith(previousContent);}
  renderGameCards();
+ renderPendingModActions();
  studio.mount(app);
  const sidebar=app.querySelector('[data-library-scroll]');if(sidebar)sidebar.scrollTop=sidebarScroll;
  const detailPane=app.querySelector('[data-detail-scroll]');if(detailPane)detailPane.scrollTop=pageChanged?0:detailScroll;
@@ -169,7 +189,7 @@ function exploreMods(){
 }
 function modCard(m){const p=provider(m.source);return `<article class="mod-card online-card" data-source="${esc(m.source)}"><button class="online-art" data-mod="${esc(m.id)}" aria-label="查看 ${esc(m.name)}" style="--source-color:${p.color}">${icon('box')}${m.image?`<img src="${esc(m.image)}" alt="" loading="lazy">`:''}<span class="online-source-tag">${p.short}</span></button><div class="mod-copy">${listTranslation.title(m,'online',m.id)}<div class="online-author">by ${esc(m.author||'社区作者')}</div>${listTranslation.summary(m)}<div class="mod-meta"><span>${icon('download')}${m.metric==null?'':new Intl.NumberFormat('zh-CN',{notation:'compact'}).format(m.metric)+' '+m.metricLabel}</span>${m.version?`<span>v${esc(m.version)}</span>`:''}</div><div class="mod-actions"><button class="text-link" data-mod="${esc(m.id)}">查看详情</button><button class="btn primary small" data-mod="${esc(m.id)}">${icon('download')}选择文件 / 下载</button></div></div></article>`;}
 const ruleNames={copy:'目录映射 / 原文件替换',smapi:'SMAPI 清单包',archive:'纯 archive 包',pak:'Unreal pak / utoc / ucas',bepinex:'BepInEx 插件目录',bethesda:'Bethesda · Data 插件资源包'};
-function ruleEvidence(mod){const r=mod.installationRule;return r?`<details data-help-key="rule-evidence-${esc(mod.id)}"><summary>安装依据：${esc(r.name)}</summary><p>规则核对日期 ${esc(r.reviewedAt)} · 目标目录 ${esc(mod.profile.destination||'游戏目录')}</p>${(r.notes||[]).map(note=>`<p>${esc(note)}</p>`).join('')}${r.sources.map(url=>`<p><a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(url)}</a></p>`).join('')}</details>`:'';}
+function ruleEvidence(mod){const r=mod.installationRule;return r?`<details data-help-key="rule-evidence-${esc(mod.id)}"><summary>安装依据：${esc(r.name)}</summary><p>${r.origin==='pi-agent'?'pi agent 已分析作者说明并通过本地方案校验':r.origin==='local-files'?'已核对本机唯一原文件与包内相对目录':r.origin==='author'?'根据作者安装说明自动分析':`规则核对日期 ${esc(r.reviewedAt)}`} · 目标目录 ${esc(mod.profile.fileMappings?`逐文件映射（${mod.profile.fileMappings.length} 个文件）`:mod.profile.destination||'游戏目录')}</p>${(r.instructions||[]).map(item=>`<p>作者原文（${esc(({fileDescription:'所选文件说明',readmeInstructions:'包内 README',description:'模组介绍'})[item.source]||item.source)}）：${esc(item.excerpt)}</p>`).join('')}${(r.notes||[]).map(note=>`<p>${esc(note)}</p>`).join('')}${r.sources.map(url=>`<p><a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(url)}</a></p>`).join('')}</details>`:'';}
 function runCard(r){return `<div class="source-message"><span><b>本次运行</b>${esc(r.message)}<small> · ${new Date(r.started).toLocaleString('zh-CN')}${r.pid?' · PID '+r.pid:''}</small></span><button class="btn small" data-check-run="${esc(r.id)}">检查本次运行</button></div>`;}
 function updatePanel(m){if(!m.update)return '';const u=m.update;return `<p>${esc(u.message)}${u.currentVersion?' · 当前 v'+esc(u.currentVersion):''}</p>${u.files?.length?`<div class="file-list">${u.files.map(f=>`<div class="file-row"><div><strong>${esc(f.label||f.name)}</strong><small>v${esc(f.version||'未知')} · ${esc(f.category||'')} · ${size(f.size)}</small></div><button class="btn small" data-download-update="${m.id}" data-update-file="${esc(f.id)}">下载此更新</button></div>`).join('')}</div><p>更新下载会进入待安装库。安装前先卸载旧版并保留备份，再核对新版本方案和依赖。</p>`:''}`;}
 
@@ -214,7 +234,7 @@ async function restoreNative(gameId){
 function renderInstallModal(){let heading,body,actions='';const field=(id,label,value,hint='')=>`<label for="rule-${id}">${label}<input id="rule-${id}" value="${esc(value||'')}" placeholder="${esc(hint)}"></label>`;
  if(modal.kind==='auto-error'){
   heading='MOD 暂未安装';body=`<p>${esc(modal.error)}</p>`;
-  actions=modal.gameId.startsWith('catalog:')?`<button class="btn" data-workshop-job="${esc(modal.jobId)}">选择本机游戏</button>`:`<button class="btn" data-rule-game="${esc(modal.gameId)}" data-rule-job="${esc(modal.jobId)}">高级设置</button>`;
+  actions=modal.gameId.startsWith('catalog:')?`<button class="btn" data-workshop-job="${esc(modal.jobId)}">选择本机游戏</button>`:`<button class="btn" data-install-job="${esc(modal.jobId)}">重新读取说明并安装</button>`;
  }else if(modal.kind==='restore-result'){
   const r=modal.result;heading='已恢复原生游戏';body=`<p>${esc(modal.game.name)} · 已移除 ${r.removed} 个托管 MOD，并还原原始文件。</p><p>存档、截图及未托管文件保留在原处。</p>${r.preserved?`<p>另外保存了 ${r.preserved} 个修改过的托管文件：</p><div class="path-box">${esc(r.recoveryPath)}</div>`:''}`;
  }else if(modal.kind==='launch'){
@@ -331,7 +351,7 @@ function closeModal(immediate=false){if(!immediate&&(modal?.kind==='play'&&modal
 function renderInstallProgressModal(){
  const task=modal.task,running=task.status==='running',failed=task.status==='failed';
  const job=data.jobs.find(job=>job.id===task.jobId),gameId=job?.gameId||task.gameId;
- const retry=failed&&job?`<button class="btn" data-install-job="${esc(job.id)}">重试安装</button>${gameId.startsWith('catalog:')?`<button class="btn" data-workshop-job="${esc(job.id)}">选择本机游戏</button>`:`<button class="btn" data-rule-game="${esc(gameId)}" data-rule-job="${esc(job.id)}">高级设置</button>`}`:'';
+ const retry=failed&&job?`<button class="btn" data-install-job="${esc(job.id)}">重新读取说明并安装</button>${gameId.startsWith('catalog:')?`<button class="btn" data-workshop-job="${esc(job.id)}">选择本机游戏</button>`:''}`:'';
  setModalContent(document.getElementById('modal-root'),`<div class="modal-backdrop"><section class="modal install-progress-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" aria-busy="${running}"><div class="modal-head"><h2 id="modal-title">${running?'正在安装 MOD':failed?'MOD 安装未完成':'MOD 安装完成'}</h2><button class="icon-button" data-close aria-label="关闭弹窗" ${running?'disabled':''}>${icon('close')}</button></div><div class="modal-body">${renderInstallationProgress(task,{esc,icon})}</div><div class="modal-foot">${running?'<span class="modal-small">安装时会自动备份，完成后可查看安装结果。</span>':`<button class="btn" data-close>关闭</button>${retry}${!failed?'<button class="btn primary" data-nav="installed" data-close>查看已安装 MOD</button>':''}`}</div></section></div>`);
  document.querySelector('.install-progress-modal')?.setAttribute('aria-busy',String(running));
 }
@@ -421,7 +441,16 @@ document.addEventListener('click',async e=>{
  if(d.ruleGame)await openRule(d.ruleGame,d.ruleJob);
  if(d.launchGame)await playGame(d.launchGame);
  if(d.checkRun){const r=data.installations.runs.find(r=>r.id===d.checkRun);await api('installations/run',{gameId:r.gameId,id:r.id});await refresh();}
- if(d.modAction){const m=data.installations.mods.find(m=>m.id===d.managedId);if(d.modAction==='uninstall')openModal({kind:'uninstall',record:m});else{await api('installations/action',{gameId:m.gameId,id:m.id,action:d.modAction});await refresh();}}
+ if(d.modAction){
+  const m=data.installations.mods.find(m=>m.id===d.managedId);
+  if(!m||pendingModActions.has(m.id))return;
+  if(d.modAction==='uninstall')openModal({kind:'uninstall',record:m});
+  else{
+   pendingModActions.set(m.id,d.modAction);render();
+   try{await api('installations/action',{gameId:m.gameId,id:m.id,action:d.modAction});await refresh();}
+   finally{pendingModActions.delete(m.id);render();}
+  }
+ }
  if('saveRule'in d){const el=id=>document.getElementById('rule-'+id).value.trim();const gameId=modal.gameId,jobId=modal.jobId;await api('installations/profile',{gameId,rule:{mode:el('mode'),root:el('root'),sourcePrefix:el('prefix'),destination:el('destination'),executable:el('executable'),arguments:el('arguments').split('\n').map(s=>s.trim()).filter(Boolean),requires:el('requires').split('\n').map(s=>s.trim()).filter(Boolean),log:el('log'),marker:el('marker')}});closeModal();await refresh();toast('游戏专属安装规则已保存');if(jobId)await previewJob(jobId);}
  if('applyPlan'in d){if(!document.getElementById('plan-author').checked)throw new Error('请先核对作者的目录、前置和版本要求');const p=modal.plan;b.disabled=true;try{await api('installations/apply',{gameId:p.gameId,id:p.id,allowOverwrite:document.getElementById('plan-overwrite')?.checked===true});closeModal();view='installed';modManager.showInstalled();await refresh();toast('文件安装完成；可校验文件或运行验证');}finally{b.disabled=false;}}
  if('confirmUninstall'in d){const m=modal.record;b.disabled=true;try{await api('installations/action',{gameId:m.gameId,id:m.id,action:'uninstall'});closeModal();await refresh();toast('已卸载，已替换的原文件已还原');}finally{b.disabled=false;}}

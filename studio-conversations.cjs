@@ -1,6 +1,7 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { setTimeout: delay } = require('node:timers/promises');
 const { smallJson } = require('./game-diagnostics.cjs');
 const { recordEvent, finishEvents } = require('./studio-events.cjs');
 const { describeError, createStudioLogger, cleanDiagnostic } = require('./studio-errors.cjs');
@@ -8,6 +9,7 @@ const { describeError, createStudioLogger, cleanDiagnostic } = require('./studio
 const ACTIVE = new Set(['analyzing', 'planning', 'generating', 'validating', 'checking', 'building', 'verifying', 'repairing', 'deploying', 'launching', 'observing']);
 function commandFor(message) {
  const value = String(message || '').trim().replace(/[。！!？?\s]+$/g, '').replace(/^(?:(?:请|帮我|麻烦|给我)\s*)+/, '');
+ if (value === '自动验证并修复运行结果') return 'auto-runtime';
  if (/^(?:重新|再次|继续)?(?:编译|构建|制作)(?:(?:并|和)?(?:验证|校验))?(?:一下|产物|项目|这个项目)?$/.test(value) || /^(?:重新)?(?:验证|校验)(?:一下|产物|项目)?$/.test(value)) return 'build';
  if (/^(?:查看|打开)?(?:产物)?预览(?:产物|一下)?$/.test(value)) return 'preview';
  if (/^导出(?:一下|文件|产物|项目|ZIP|zip|编译包)?$/.test(value)) return /编译包/.test(value) ? 'export-build' : 'export';
@@ -52,7 +54,7 @@ function validatedPlan(input, types) {
  } catch (error) { error.code = 'STUDIO_PLAN_INVALID'; throw error; }
 }
 class StudioConversations {
- constructor(studio) { this.studio = studio; this.runs = new Map(); this.queues = new Map(); this.writes = new Map(); this.loggers = new Map(); }
+ constructor(studio) { this.studio = studio; this.runs = new Map(); this.queues = new Map(); this.writes = new Map(); this.loggers = new Map(); this.backgrounds=new Map(); }
  key(owner, id) { return owner + ':' + id; }
  file(owner, id) { this.studio.recordPath(owner, id); return path.join(this.studio.directory(owner), 'conversations', id + '.json'); }
  async persist(owner, item) {
@@ -64,9 +66,21 @@ class StudioConversations {
  async write(owner, item) {
   item.updated = new Date().toISOString();
   const file = this.file(owner, item.id), temporary = file + '.' + crypto.randomUUID() + '.tmp';
-  await fs.mkdir(path.dirname(file), { recursive: true });
-  try { await fs.writeFile(temporary, JSON.stringify(item), { flag: 'wx' }); await fs.rename(temporary, file); }
-  finally { await fs.rm(temporary, { force: true }); }
+  try {
+   await fs.mkdir(path.dirname(file), { recursive: true });
+   await fs.writeFile(temporary, JSON.stringify(item), { flag: 'wx' });
+   // Windows readers and virus scanners can briefly deny replacement. Keep the
+   // previous complete record until the atomic rename succeeds.
+   for (let attempt = 0; ; attempt++) {
+    try { await fs.rename(temporary, file); break; }
+    catch (error) {
+     if (!['EPERM', 'EACCES', 'EBUSY'].includes(error.code) || attempt >= 7) throw error;
+     await delay(Math.min(50 * 2 ** attempt, 400));
+    }
+   }
+  } catch (cause) {
+   throw Object.assign(new Error('保存创作进度失败：' + cause.message, { cause }), { code: 'STUDIO_PERSIST_FAILED' });
+  } finally { await fs.rm(temporary, { force: true }).catch(() => {}); }
  }
  message(item, role, content, source) { item.messages.push({ id: crypto.randomUUID(), role, content, ...(source ? { source } : {}), created: new Date().toISOString() }); }
  async log(owner, item, diagnostic) {
@@ -112,6 +126,10 @@ class StudioConversations {
   const previous = this.queues.get(owner) || Promise.resolve();
   const operation = previous.catch(() => {}).then(async () => {
    if (!current()) throw new Error('账号已切换');
+   if(this.studio.pending.has(owner) && !input.runtimeAuto && this.backgrounds.get(owner)?.controller===this.studio.pending.get(owner)) {
+    const background=this.backgrounds.get(owner);background.controller.abort(new Error('用户开始新操作，后台观察已停止'));
+    await this.runs.get(background.key);
+   }
    if (this.studio.pending.has(owner)) throw new Error('已有创作正在处理，请等待或先停止');
    let item;
    if (input.id) item = await this.read(owner, game, input.id);
@@ -120,7 +138,7 @@ class StudioConversations {
     const now = new Date().toISOString();
     item = { id: crypto.randomUUID(), gameId: game.id, title: message.slice(0, 32), messages: [], status: 'idle', created: now, updated: now, analysis: null, plan: null, artifactId: null };
    }
-   if (item.messages.length >= 50) throw new Error('此对话已达到消息上限，请新建创作');
+   if (item.messages.length >= 50 && !input.runtimeAuto) throw new Error('此对话已达到消息上限，请新建创作');
    if (input.artifactId) {
     const artifact = await this.studio.read(owner, input.artifactId);
     if (artifact.gameId !== game.id) throw new Error('创作不属于当前游戏');
@@ -130,18 +148,23 @@ class StudioConversations {
    }
    if (input.mode && input.mode !== 'ai') throw new Error('仅支持真实 AI 创作');
    item.mode = 'ai';
-   if (message) this.message(item, 'user', message);
-   item.command = commandFor(message); item.action = null;
+   if (message && !input.runtimeAuto) this.message(item, 'user', message);
+   item.runtimeAuto=input.runtimeAuto===true;
+   // Resume runtime recovery from its saved evidence, including a service-quota
+   // interruption. A null resume message must not start a new paid generation.
+   item.command = input.resume ? item.runtimeRecovery && item.artifactId ? 'runtime' : item.command || null : commandFor(message); item.action = null;
    item.status = 'analyzing'; item.error = ''; item.diagnostic = null; item.activeTask = null;
-   if (!item.command) { item.plan = null; item.analysis = null; item.toolchain = null; item.planningAttempts = []; item.capability = null; item.toolCalls = []; item.harness = null; }
+   if (!item.command) { item.plan = null; item.analysis = null; item.toolchain = null; item.planningAttempts = []; item.capability = null; item.toolCalls = []; item.harness = null; item.runtimeRecovery = null; item.runtimeVerification = null; }
    if (item.command === 'build') item.toolchain = null;
    const controller = new AbortController(), key = this.key(owner, item.id);
    this.studio.pending.set(owner, controller); this.runs.set(key, null);
+   if(input.runtimeAuto) this.backgrounds.set(owner,{controller,key});
    try { await this.persist(owner, item); }
    catch (error) { this.runs.delete(key); this.studio.pending.delete(owner); throw error; }
    const response = structuredClone(item);
    const run = this.run(owner, game, item, controller, current, authorize).finally(() => {
     this.runs.delete(key); if (this.studio.pending.get(owner) === controller) this.studio.pending.delete(owner);
+    if(this.backgrounds.get(owner)?.controller===controller)this.backgrounds.delete(owner);
    });
    this.runs.set(key, run);
    // A failed final persistence must not become an unhandled rejection in the host.
@@ -152,10 +175,11 @@ class StudioConversations {
   try { return await operation; } finally { if (this.queues.get(owner) === operation) this.queues.delete(owner); }
  }
  async run(owner, game, item, controller, current, authorize) {
-  const timer = setTimeout(() => controller.abort(), 900000);
-  const check = () => { if (controller.signal.aborted || !current()) throw new Error('创作已停止或账号已切换'); };
+  const timer = setTimeout(() => controller.abort(Object.assign(new Error('创作超过 15 分钟，已停止'), { code: 'STUDIO_TIMEOUT' })), 900000);
+  const abortError = () => controller.signal.reason instanceof Error ? controller.signal.reason : new Error('创作已停止');
+  const check = () => { if (controller.signal.aborted) throw abortError(); if (!current()) throw new Error('账号已切换'); };
   const aborted = new Promise((_, reject) => {
-   const stop = () => reject(new Error('创作已停止或超时'));
+   const stop = () => reject(abortError());
    if (controller.signal.aborted) stop(); else controller.signal.addEventListener('abort', stop, { once: true });
   });
   // Cancellation may happen while the read-only scanner is running.
@@ -165,14 +189,14 @@ class StudioConversations {
   const onEvent = event => {
    if (controller.signal.aborted || !current() || !ACTIVE.has(item.status)) return;
    if (recordEvent(item, event) && !eventTimer) eventTimer = setTimeout(() => {
-    eventTimer = null; this.persist(owner, item).catch(() => controller.abort());
+    eventTimer = null; this.persist(owner, item).catch(error => controller.abort(error));
    }, 120);
   };
   const onTask = task => {
    if (controller.signal.aborted || !current()) return;
    const { diagnostic, ...progress } = task; item.activeTask = progress;
    if (diagnostic) void this.log(owner, item, diagnostic).catch(() => {});
-   if (!eventTimer) eventTimer = setTimeout(() => { eventTimer = null; this.persist(owner, item).catch(() => controller.abort()); }, 120);
+   if (!eventTimer) eventTimer = setTimeout(() => { eventTimer = null; this.persist(owner, item).catch(error => controller.abort(error)); }, 120);
   };
   try {
    if (item.command) {
@@ -194,10 +218,19 @@ class StudioConversations {
       if (!lifecycle) throw new Error('当前宿主尚未接入安装与启动');
       const context = { owner, game, artifactId: saved.id, current: () => !controller.signal.aborted && current(), authorize, signal: controller.signal };
       if (item.command !== 'launch') { await stage('deploying'); const installed = await lifecycle.install(context); this.message(item, 'system', installed.message); check(); }
-      if (item.command !== 'install') { await stage('launching'); const launched = await lifecycle.launch(context); this.message(item, 'system', launched.message); check(); await stage('observing'); const report = await lifecycle.observe(context); check(); item.toolchain = { id: report.id, status: report.status, summary: report.summary, updated: report.updated }; this.message(item, 'system', report.runtime.detail); }
-     } else if (item.command === 'runtime') {
-      await stage('verifying'); const report = await this.studio.toolchain.checkRuntime(owner, game, saved.id, () => !controller.signal.aborted && current()); check();
-      item.toolchain = { id: report.id, status: report.status, summary: report.summary, updated: report.updated }; this.message(item, 'system', report.runtime.detail);
+      if (item.command !== 'install') {
+       if (!item.runtimeRecovery?.pendingArtifactId) {await stage('launching'); const launched = await lifecycle.launch(context); this.message(item, 'system', launched.message); check();}
+       if (!item.runtimeRecovery?.pendingArtifactId) item.runtimeRecovery = null;
+       await require('./studio-runtime-cycle.cjs').runtimeCycle({studio:this.studio,owner,game,item,context,stage,persist:()=>this.persist(owner,item),message:content=>this.message(item,'system',content),onEvent,onTask});
+       if(!item.runtimeVerification?.exited && ['completed','awaiting_runtime','awaiting_exit'].includes(item.status)) lifecycle.watchCaptured?.(owner,game,[{artifact:await this.studio.read(owner,item.artifactId)}],current,authorize);
+       check(); finishEvents(item,item.status); await this.persist(owner,item); return;
+      }
+     } else if (['runtime','auto-runtime'].includes(item.command)) {
+      const context = {owner,game,artifactId:saved.id,current:()=>!controller.signal.aborted&&current(),authorize,signal:controller.signal,...(item.runtimeAuto?{observationMs:this.studio.options.runtimeAutoObservationMs ?? 15000}:{})};
+      if (!this.studio.options.lifecycle) throw new Error('当前宿主尚未接入运行验证');
+      await require('./studio-runtime-cycle.cjs').runtimeCycle({studio:this.studio,owner,game,item,context,stage,persist:()=>this.persist(owner,item),message:content=>this.message(item,'system',content),onEvent,onTask});
+      if(!item.runtimeAuto && !item.runtimeVerification?.exited && ['completed','awaiting_runtime','awaiting_exit'].includes(item.status)) this.studio.options.lifecycle.watchCaptured?.(owner,game,[{artifact:await this.studio.read(owner,item.artifactId)}],current,authorize);
+      check(); finishEvents(item,item.status); await this.persist(owner,item); return;
      } else if (item.command === 'report') this.message(item, 'system', saved.toolchain ? buildMessage(saved.toolchain) : '此产物尚未运行工具链，可说“编译并验证”。');
      else {
       if (item.command === 'export-build' && !saved.toolchain?.bundle) throw new Error('尚无可导出的编译包，可先说“编译并验证”。');
@@ -299,8 +332,10 @@ class StudioConversations {
    this.message(item, 'system', `已保存「${artifact.draft.name}」：${artifact.files.length} 个文件，${artifact.output}。` + (item.status !== 'completed' ? '制作尚未通过验证，请根据错误继续修复；当前文件仍可预览或导出。' : ['project-plan', 'custom-project'].includes(artifact.adapterId) ? '这是你要求的开发方案或源码，尚未生成可安装的 Mod。' : '实际 Mod 文件已生成并通过制作校验。可安装、预览或导出，游戏内效果待实测。'));
    await this.persist(owner, item);
   } catch (error) {
-   item.status = controller.signal.aborted || !current() ? 'cancelled' : 'failed'; item.error = String(error.message || '创作未完成').slice(0, 500);
-   item.diagnostic = error.diagnostic || describeError(error, item.activeTask?.action || item.status, item.activeTask?.id);
+   clearTimeout(eventTimer);
+   if (controller.signal.aborted && ['STUDIO_PERSIST_FAILED', 'STUDIO_TIMEOUT'].includes(controller.signal.reason?.code)) error = controller.signal.reason;
+   item.status = ['STUDIO_PERSIST_FAILED', 'STUDIO_TIMEOUT'].includes(error.code) ? 'failed' : controller.signal.aborted || !current() ? 'cancelled' : 'failed'; item.error = cleanDiagnostic(error.message || '创作未完成', 500);
+   item.diagnostic = error.diagnostic || describeError(error, error.code === 'STUDIO_PERSIST_FAILED' ? 'persistence' : item.activeTask?.action || item.status, item.activeTask?.id);
    await this.log(owner, item, item.diagnostic).catch(() => {});
    finishEvents(item, item.status);
    this.message(item, 'system', item.status === 'cancelled' ? '创作已停止，想法与已有产物已保留。' : '创作未完成：' + item.error);

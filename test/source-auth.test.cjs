@@ -25,7 +25,7 @@ async function fixture(t, options = {}) {
   return service;
  }
  await start();
- t.after(async () => { if (service.server.listening) await new Promise(resolve => service.server.close(resolve)); await fs.rm(root, { recursive: true, force: true }); });
+ t.after(async () => { if (service.server.listening) await new Promise(resolve => service.server.close(resolve)); await fs.rm(root, { recursive: true, force: true, maxRetries: 3 }); });
  return { root, sourceKeyStore, sockets, pages, requests, account, get service() { return service; }, async restart() {
   await new Promise(resolve => service.server.close(resolve)); return start();
  } };

@@ -20,6 +20,6 @@ const {createServer}=require('./server-fixture.cjs'),{hash}=require('../installe
  await page.locator('[data-manager-tab="pending"]').click();await page.getByRole('heading',{name:'暂无待安装 Mod',exact:true}).waitFor();await page.locator('[data-manager-tab="pending"]').press('ArrowLeft');await page.locator('.managed-row').waitFor();
  await fs.mkdir(path.resolve(__dirname,'../output/playwright/mod-manager'),{recursive:true});await page.screenshot({path:path.resolve(__dirname,'../output/playwright/mod-manager/installations.png'),fullPage:true});
  await page.locator('.manager-details-button').click();await page.locator('[data-mod-action="uninstall"]').click();await page.locator('[data-confirm-uninstall]').click();await page.locator('.empty h3').filter({hasText:'还没有托管 Mod'}).waitFor();assert.equal(await fs.readFile(path.join(g.installPath,'Content/config.ini'),'utf8'),'original');await assert.rejects(fs.stat(path.join(g.installPath,'Content/assets/new.txt')),/ENOENT/);assert.deepEqual(errors,[]);console.log('安装界面通过：实际安装 → 详情校验 → 开关启停 → 搜索与游戏筛选 → 待安装页签与键盘切换 → 卸载还原。');
- }finally{await browser?.close();await new Promise(r=>service.server.close(r));await fs.rm(root,{recursive:true,force:true});}
+ }finally{await browser?.close();await new Promise(r=>service.server.close(r));await fs.rm(root,{recursive:true,force:true,maxRetries:3});}
 })().catch(e=>{console.error(e);process.exitCode=1});
 const { openHome } = require('./ui-open.cjs');

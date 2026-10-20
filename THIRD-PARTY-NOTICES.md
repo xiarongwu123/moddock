@@ -1,5 +1,15 @@
 # Third-party notices
 
+## 7-Zip Extra
+
+`vendor/archive-tools/7za.exe` is the unmodified x64 standalone console binary
+from 7-Zip Extra 26.04 (Igor Pavlov). It runs only to list and stream entries from
+7z archives; the application validates paths and writes each ordinary file itself.
+The upstream license is included at `vendor/archive-tools/License.txt`.
+Binary: https://github.com/ip7z/7zip/releases/download/26.04/7z2604-extra.7z
+Corresponding source: https://github.com/ip7z/7zip/releases/tag/26.04
+SHA-256 of bundled executable: `15d4c788c148e3677e2fc1c4a01f191fb6669eba4f6acf8a465f0f1a6f1e1260`.
+
 ## BG3 API reference and Lua compiler
 
 `vendor/bg3-api/Osiris.txt` is the generated Osiris interface reference from
@@ -82,6 +92,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 # Pi Agent and Mod authoring skills
+
+UE4SS static risk analysis uses luaparse 0.3.1 (MIT), https://github.com/fstirlitz/luaparse. The original parser, complete license, npm SHA-512 integrity and per-file SHA-256 are retained in vendor/luaparse. Analysis does not execute generated Lua or game code.
 
 The private creation service uses @earendil-works/pi-coding-agent 1.3.0 (MIT), https://github.com/earendil-works/pi.
 Pinned MIT-licensed skill sources and per-file hashes are recorded in vendor/studio-skills/UPSTREAM.json. Each source includes its LICENSE.

@@ -21,18 +21,25 @@ function creationPayload(payload) {
 async function readCreationResponse(response, onEvent, signal, delivery) {
  const streaming = response.headers.get('content-type')?.includes('application/x-ndjson');
  const decoder = new TextDecoder(); let pending = '', bytes = 0, final;
- const handle = line => {
+ const handle = async line => {
   if (!line.trim()) return;
   const frame = JSON.parse(line);
   if (delivery && frame.type === 'task') {
    if (frame.version !== 1 || frame.id !== delivery.id) throw Object.assign(new Error('创作任务编号不匹配'), { code: 'STUDIO_TASK_INVALID' });
    delivery.negotiated = true; delivery.connected?.(); return;
   }
+  const usage = frame.usage || frame.result?.usage || frame.event?.usage;
+  if (usage && delivery && !delivery.negotiated) throw Object.assign(new Error('用量缺少已验证的创作任务'), { code: 'STUDIO_TASK_INVALID' });
   if (delivery && frame.type === 'checkpoint') { delivery.rotate = true; return; }
-  if (delivery && ['event', 'result', 'error'].includes(frame.type)) {
+  if (delivery && (['event', 'result', 'error'].includes(frame.type) || frame.type === 'usage' && frame.seq !== undefined)) {
    if (!delivery.negotiated || !Number.isSafeInteger(frame.seq) || frame.seq < 1) throw Object.assign(new Error('创作任务缺少可恢复的进度编号'), { code: 'STUDIO_TASK_INVALID' });
    if (frame.seq <= delivery.after) return;
    if (frame.seq !== delivery.after + 1) throw Object.assign(new Error('创作进度传输不完整，正在重新连接'), { code: 'STUDIO_STREAM_GAP' });
+  }
+  if (usage) await delivery?.onUsage?.(usage);
+  if (frame.type === 'usage') {
+   if (delivery && Number.isSafeInteger(frame.seq)) { delivery.after = frame.seq; delivery.checkpoint?.(); }
+   return;
   }
   if (frame.type === 'event') onEvent?.(frame.event);
   else if (frame.type === 'result') { if (final !== undefined) throw new Error('创作服务重复返回结果'); final = frame.result; }
@@ -50,13 +57,13 @@ async function readCreationResponse(response, onEvent, signal, delivery) {
    if (bytes > (streaming ? 2 * 1024 * 1024 : 256 * 1024)) throw new Error('创作服务返回内容过大');
    pending += decoder.decode(chunk, { stream: true });
    if (streaming) {
-    let end; while ((end = pending.indexOf('\n')) >= 0) { handle(pending.slice(0, end)); pending = pending.slice(end + 1); }
+    let end; while ((end = pending.indexOf('\n')) >= 0) { await handle(pending.slice(0, end)); pending = pending.slice(end + 1); }
     if (pending.length > 256 * 1024) throw new Error('创作事件过大');
    }
   }
   pending += decoder.decode(); signal?.throwIfAborted();
-  if (!streaming) return JSON.parse(pending);
-  if (pending.trim()) handle(pending);
+  if (!streaming) { const result = JSON.parse(pending); if (result.usage) await delivery?.onUsage?.(result.usage); return result; }
+  if (pending.trim()) await handle(pending);
   if (final === undefined && delivery?.rotate) return;
   if (final === undefined) throw Object.assign(new Error('创作连接已中断，未收到完整结果。想法与已有产物已保留。'), { code: 'STUDIO_CONNECTION_INTERRUPTED' });
   return final;
@@ -72,12 +79,12 @@ async function readCreationResponse(response, onEvent, signal, delivery) {
   throw error;
  }
 }
-function createMuStudioAI(request, { retryDelay = 1000, maxRetryDelay = 15000, requestTimeout = 45000 } = {}) {
+function createMuStudioAI(request, { retryDelay = 1000, maxRetryDelay = 15000, requestTimeout = 45000, onUsage } = {}) {
  const call = async (route, payload) => {
   const content = creationPayload(payload), id = crypto.randomUUID(), signal = payload.signal || AbortSignal.timeout(900000);
   let attempt = 0, reconnecting = false, finished = false;
   const notify = status => payload.onEvent?.({ type: 'connection', status, taskId: id, attempt, detail: status === 'reconnecting' ? '连接中断，正在自动重连。已保存的代码和进度会继续保留。' : '连接已恢复，继续接收同一次创作。' });
-  const delivery = { id, after: 0, checkpoint: () => payload.onTask?.({ id, action: route, after: delivery.after }),
+  const delivery = { id, after: 0, onUsage: usage => onUsage?.(payload.accountId, id, usage), checkpoint: () => payload.onTask?.({ id, action: route, after: delivery.after }),
    connected: () => { if (reconnecting) { reconnecting = false; notify('connected'); } } };
   const bodyFor = operation => JSON.stringify({ ...content, delivery: { version: 1, id, after: delivery.after, operation } });
   if (Buffer.byteLength(bodyFor('subscribe')) > 192 * 1024) throw new Error('本次创作上下文过大，请缩短需求后重试');

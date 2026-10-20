@@ -65,9 +65,9 @@ test('native restore validates all original backups and running games before cha
 
 test('unknown Paks folders, generic layouts and saved manual rules never authorize automatic deployment',async t=>{
  const x=await setup(t);await fs.mkdir(path.join(x.game.installPath,'Project/Content/Paks'),{recursive:true});
- await assert.rejects(detectRule(x.game,files('mod.pak')),/不能仅凭 Paks/);
+ await assert.rejects(detectRule(x.game,files('mod.pak')),/作者安装说明|不能仅凭 Paks/);
  const j=await x.job([{name:'Content/new.bin'}]);await x.engine.setProfile(x.game,{mode:'copy',destination:''});
- await assert.rejects(x.engine.installAuto(x.game,j.id),/已停止自动安装/);assert.equal(x.engine.state.mods.length,0);
+ await assert.rejects(x.engine.installAuto(x.game,j.id),/作者安装说明|已停止自动安装/);assert.equal(x.engine.state.mods.length,0);
  await assert.rejects(fs.access(path.join(x.game.installPath,'Content/new.bin')),/ENOENT/);
 });
 

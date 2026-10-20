@@ -36,7 +36,10 @@ function selectSkills(game = {}, diagnostic = {}) {
   add(il2cpp ? 'bepinex-il2cpp' : 'bepinex-mono', il2cpp ? 'BepInEx · IL2CPP' : 'BepInEx · Mono', `skills/bepinex-${il2cpp ? 'il2cpp' : 'mono'}/SKILL.md`, '检测到 ' + engine);
  }
  if (engine === 'unity') add('unity-mod-frameworks', 'Unity 引擎诊断', bundle + 'unity-mod-frameworks/SKILL.md', 'Unity 后端尚未确定，先核对 Mono / IL2CPP');
- if (engine === 'unreal') add('unreal-mod-frameworks', 'Unreal / UE4SS', bundle + 'unreal-mod-frameworks/SKILL.md', '检测到 Unreal');
+ if (engine === 'unreal') {
+  add('unreal-mod-frameworks', 'Unreal / UE4SS', bundle + 'unreal-mod-frameworks/SKILL.md', '检测到 Unreal');
+  add('ue4ss-runtime-safety', 'UE4SS 运行稳定性', 'skills/ue4ss-runtime-safety/SKILL.md', '生成、修复 UE4SS 脚本时核对原生崩溃风险');
+ }
  if (engine === 'creation') add('bethesda-creation-modding', 'Bethesda Creation', bundle + 'bethesda-creation-modding/SKILL.md', '检测到 Creation Engine');
  const readyOrNot = require('./studio-game-api.cjs').isReadyOrNot(game);
  if (readyOrNot) add('ready-or-not', '严阵以待专项', 'skills/ready-or-not/SKILL.md', '匹配严阵以待游戏身份');
@@ -47,6 +50,7 @@ function selectSkills(game = {}, diagnostic = {}) {
  const match = GAME_RULES.find(([, ids, pattern]) => appId ? ids.includes(appId) : pattern.test(name));
  const references = match ? [{ id: match[0], name: name || match[0], path: bundle + 'game-modding/references/' + match[3] }] : [];
  if (family) references.push({ id: 'engine-' + family, name: require('./studio-engines.cjs').FAMILIES[family] + ' 开发与加载', path: 'skills/engine-development/references/' + family + '.md' });
+ if (engine === 'unreal') references.push({ id: 'ue4ss-runtime-safety', name: 'UE4SS 对象、线程与原生调用规则', path: 'skills/ue4ss-runtime-safety/references/runtime-contract.md' });
  if (readyOrNot) references.push({ id: 'ready-or-not', name: '严阵以待接口与制作流程', path: 'skills/ready-or-not/references/implementation.md' });
  if (readyOrNot) references.push({ id: 'ready-or-not-ue4ss', name: '严阵以待 Lua 加载接口', path: 'skills/ready-or-not/references/ue4ss-lua.md' });
  if (match) add('game-specialist', '游戏专项 · ' + (name || match[0]), 'skills/game-specialist/SKILL.md', '匹配游戏身份');

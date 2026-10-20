@@ -5,7 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { createAccountClient } = require('../account.cjs');
 const { createMuStudioAI, creationPayload } = require('../studio-mu-client.cjs');
-const { createStudioService } = require('../platform/studio-service.cjs');
+const { createStudioService } = require('./ai-ledger-fixture.cjs');
 const { accountFixture } = require('./account-fixture.cjs');
 const { createServer } = require('../server.cjs');
 const { loginFixture } = require('./server-fixture.cjs');
@@ -108,6 +108,7 @@ test('MU creation requests reuse login, refresh once, preserve cancellation and 
 });
 test('slow MU AI requests do not hold the session queue or delay logout cancellation', async () => {
  const account = accountFixture(); let started;
+ account.updateAccount({ membership: { tier: 'pro', expiresAt: null } });
  const ready = new Promise(resolve => { started = resolve; });
  const client = createAccountClient({ ...account.options, fetch: async (url, init) => {
   if (!new URL(url).pathname.startsWith('/api/v1/studio/')) return account.options.fetch(url, init);

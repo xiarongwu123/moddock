@@ -3,6 +3,8 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { downloadAllowed } = require('./sources.cjs');
 const { LIMITS, assertSize } = require('./archive-limits.cjs');
+const {archiveFormat,formatError}=require('./archive-format.cjs');
+const { transfer } = require('./download-transfer.cjs');
 function filename(value) { const name = String(value || 'mod.zip').split(/[\\/]/).pop().replace(/[<>:"|?*\x00-\x1f]/g, '_').replace(/[. ]+$/g, '').slice(0, 150); return !name || /^(con|prn|aux|nul|com\d|lpt\d)(\.|$)/i.test(name) ? 'mod-' + (name || 'file.zip') : name; }
 class Downloads {
  constructor(root, sources, options = {}) { this.root = path.resolve(root, 'downloads'); this.sources = sources; this.clients = new Map(); this.verifications = new Map(); this.fetch = options.fetch || globalThis.fetch; this.jobs = []; this.controllers = new Map(); this.persist = Promise.resolve(); this.authorizations=new Map(); this.onCompleted=options.onCompleted; this.onAuthorizationRequired=options.onAuthorizationRequired; this.maxParallel=options.maxParallel||3; this.beforeDownload=options.beforeDownload; }
@@ -56,13 +58,13 @@ class Downloads {
  }
  cancel(id) { const job = this.jobs.find(j => j.id === id); if (!job || !['queued','running','authorization_required'].includes(job.status)) throw new Error('任务不能取消'); job.status = 'cancelled'; job.message = '下载已取消'; this.controllers.get(id)?.abort(); if (!this.controllers.has(id)) { this.clients.delete(id); this.authorizations.delete(id); } this.save(); }
  releaseClient(client) { for (const job of this.jobs) if (this.clients.get(job.id) === client && ['queued', 'running'].includes(job.status)) this.cancel(job.id); }
- async response(url, controller) {
+ async response(url, controller, headers = {}) {
   for (let hop = 0; hop < 6; hop++) {
    if (!downloadAllowed(url)) throw new Error('下载地址不在受支持的来源中');
    const timeout = new AbortController(); const timer = setTimeout(() => timeout.abort(new Error('下载服务器响应超时')), 30000); let r;
-   try { r = await this.fetch(url, { redirect: 'manual', signal: AbortSignal.any([controller.signal, timeout.signal]), headers: { 'User-Agent': 'Moddock/0.3', 'Accept-Encoding': 'identity' } }); } finally { clearTimeout(timer); }
+   try { r = await this.fetch(url, { redirect: 'manual', signal: AbortSignal.any([controller.signal, timeout.signal]), headers: { 'User-Agent': 'Moddock/0.3', 'Accept-Encoding': 'identity', ...headers } }); } finally { clearTimeout(timer); }
    if ([301,302,303,307,308].includes(r.status)) { const target = r.headers.get('location'); await r.body?.cancel(); if (!target) throw new Error('下载重定向无效'); url = new URL(target, url).href; continue; }
-   if (!r.ok) throw new Error(`下载失败（HTTP ${r.status}）`);
+   if (!r.ok) { await r.body?.cancel(); throw Object.assign(new Error(`下载失败（HTTP ${r.status}）`), { status: r.status, retryAfterSeconds: Number(r.headers.get('retry-after')) || 0 }); }
    if (/text\/html|application\/json/.test(r.headers.get('content-type') || '')) { await r.body?.cancel(); throw new Error('来源返回了网页或错误信息，没有返回 Mod 文件'); }
    return r;
   }
@@ -82,7 +84,7 @@ class Downloads {
   }
  }
  async run(j, ctrl) {
-  const partial = path.join(this.root, j.id + '.part'); let handle, idleTimer, usedAuthorization; const resetIdle = () => { clearTimeout(idleTimer); idleTimer = setTimeout(() => ctrl.abort(new Error('下载超过 60 秒没有返回数据，请重试')), 60000); };
+  const partial = path.join(this.root, j.id + '.part'); let usedAuthorization;
   try {
    j.status = 'running'; j.message = '获取来源下载授权'; await this.save();
    if (ctrl.signal.aborted) throw new Error('cancelled');
@@ -97,27 +99,30 @@ class Downloads {
    assertSize(file.size, LIMITS.downloadBytes, '下载文件体积', file.name || j.name);
    await this.beforeDownload?.(file);
    j.filename = filename(file.name); j.name = file.label || file.name || j.name;
-   const response = file._open ? await file._open(ctrl.signal) : await this.response(file._url, ctrl);
-   const length = Number(response.headers.get('content-length') || 0); j.total = length || file.size || null;
-   if (j.total > LIMITS.downloadBytes) { await response.body?.cancel(); assertSize(j.total, LIMITS.downloadBytes, '下载文件体积', j.filename); }
-   resetIdle(); handle = await fs.open(partial, 'wx'); const sha = crypto.createHash('sha256'), md5 = crypto.createHash('md5'); let last = 0;
-   j.message = '正在下载';
-   for await (const chunk of response.body) {
-    if (ctrl.signal.aborted) throw new Error('cancelled');
-    resetIdle(); j.bytes += chunk.length; assertSize(j.bytes, LIMITS.downloadBytes, '下载文件体积', j.filename);
-    await handle.writeFile(chunk); sha.update(chunk); md5.update(chunk); j.progress = j.total ? Math.min(99, Math.floor(j.bytes / j.total * 100)) : null;
-    if (Date.now() - last > 1000) { await this.save(); last = Date.now(); }
+   let last = 0;
+   const result = await transfer({ file, partial, signal: ctrl.signal, maxBytes: LIMITS.downloadBytes,
+    open: (signal, headers) => file._open ? file._open(signal, headers) : this.response(file._url, { signal }, headers),
+    onProgress: async (bytes, total, message) => {
+     j.bytes = bytes; j.total = total; j.progress = total ? Math.min(99, Math.floor(bytes / total * 100)) : null;
+     if (message) j.message = message;
+     if (message || Date.now() - last > 1000) { await this.save(); last = Date.now(); }
+    }
+   });
+   if (file.md5 && result.md5 !== file.md5.toLowerCase()) throw new Error('来源文件校验值不匹配');
+   j.sha256 = result.sha256;
+   if (file.sha256 && j.sha256 !== file.sha256.toLowerCase()) throw new Error('下载文件与后台文件校验值不一致');
+   const actualFormat=await archiveFormat(partial);if(actualFormat==='html')throw formatError(actualFormat);
+   j.archiveFormat=actualFormat;
+   if(['zip','7z','rar'].includes(actualFormat)&&/\.(zip|7z|rar)$/i.test(j.filename)){
+    j.filename=j.filename.replace(/\.(zip|7z|rar)$/i,'.'+actualFormat);
+    if(/\.(zip|7z|rar)$/i.test(j.name))j.name=j.name.replace(/\.(zip|7z|rar)$/i,'.'+actualFormat);
    }
-   await handle.sync(); await handle.close(); handle = null;
-   if (ctrl.signal.aborted) throw new Error('cancelled');
-   if (!j.bytes || (length && length !== j.bytes) || (file.size && file.sizeExact !== false && file.size !== j.bytes)) throw new Error('文件大小校验失败，下载未完成');
-   if (file.md5 && md5.digest('hex') !== file.md5.toLowerCase()) throw new Error('来源文件校验值不匹配');
-   j.sha256 = sha.digest('hex'); if (file.sha256 && j.sha256 !== file.sha256) throw new Error('下载文件与后台文件校验值不一致'); const dir = path.join(this.root, j.id); await fs.mkdir(dir); await fs.rename(partial, path.join(dir, j.filename));
+   const dir = path.join(this.root, j.id); await fs.mkdir(dir); await fs.rename(partial, path.join(dir, j.filename));
    j.path = path.join(dir, j.filename); j.progress = 100; j.status = 'completed'; j.message = file.md5 ? '下载完成 · 大小与来源 MD5 校验通过' : '下载完成 · 大小校验通过，已记录 SHA-256'; j.finished = new Date().toISOString();
   } catch (e) {
-   await handle?.close().catch(() => {}); await fs.rm(partial, { force: true });
+   await fs.rm(partial, { force: true });
    const cancelled = j.status === 'cancelled'; const freshGrant=this.authorizations.get(j.id);const retryWithGrant=e.code==='NEXUS_NXM_REQUIRED'&&freshGrant&&freshGrant!==usedAuthorization&&!cancelled; j.code=e.code||null; j.status = retryWithGrant?'queued': cancelled ? 'cancelled' : e.code==='NEXUS_NXM_REQUIRED'?'authorization_required':'failed'; j.message = cancelled ? '下载已取消' : (ctrl.signal.reason?.message || (e.message === 'fetch failed' ? '无法连接下载服务器，请重试' : e.message));
-  } finally { clearTimeout(idleTimer); this.verifications.delete(j.id); delete j.verificationRequired; if(j.status!=='queued'){this.authorizations.delete(j.id);this.clients.delete(j.id);} await this.save(); }
+  } finally { this.verifications.delete(j.id); delete j.verificationRequired; if(j.status!=='queued'){this.authorizations.delete(j.id);this.clients.delete(j.id);} await this.save(); }
   if(j.status==='completed'&&this.onCompleted){try{await this.onCompleted(j);}catch(e){j.import={status:'failed',message:e.message};await this.save();}}
  }
  async completedFile(id) { const j = this.jobs.find(j => j.id === id && j.status === 'completed'); if (!j) throw new Error('文件尚未下载完成'); const file = path.join(this.root, j.id, filename(j.filename)); await fs.access(file); return { file, name: filename(j.filename) }; }

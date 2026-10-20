@@ -13,9 +13,7 @@ const { selectSkills } = require('./studio-skills.cjs');
 const { removeStudioSamples } = require('./studio-migration.cjs');
 
 function studioAccess(account) {
- const feature = account?.features?.find(item => item.key === 'modding.studio');
- const expires = account?.membership?.expiresAt;
- return account?.membership?.tier === 'pro' && (!expires || Date.parse(expires) > Date.now()) && (!feature || feature.enabled && feature.allowed);
+ return require('./ai-policy.cjs').hasPro(account);
 }
 class ModStudio {
  constructor(root, options = {}) { this.root = path.join(root, 'creations'); this.options = options; this.integration = new UniversalModder(options.integration); this.pending = new Map(); this.queues = new Map(); this.native = new (require('./studio-native-projects.cjs').NativeProjects)(options.tools); this.toolchain = new StudioToolchain(this, options.tools); this.conversations = new StudioConversations(this); this.ready = removeStudioSamples(this.root); this.ready.catch(() => {}); }
@@ -26,6 +24,16 @@ class ModStudio {
   const context = await this.integration.context(game, diagnostic);
   context.engineEvidence = await require('./studio-engines.cjs').collectEngineEvidence(game, diagnostic);
   context.engineEvidence = await this.native.snapshot(game, context.engineEvidence);
+  if (diagnostic.engine.key === 'unreal') {
+   const safety = require('./studio-ue4ss-safety.cjs');
+   context.engineEvidence.installedUE4SS = await safety.installedUE4SS(game, diagnostic);
+   context.guide.text = await safety.agentGuide(context.guide.text);
+  }
+  if (diagnostic.engine.key !== 'unreal' && recipesFor(game,diagnostic).some(t=>t.id==='reframework-lua' && t.available)) {
+   const skill=await fs.readFile(path.join(__dirname,'skills/ue4ss-runtime-safety/SKILL.md'),'utf8');
+   const contract=skill.split('## Mandatory executable acceptance contract')[1]?.split('\n## ')[0] || '';
+   context.guide.text=('REFramework host runtime verification contract:\n'+contract+'\n'+context.guide.text).slice(0,12000);
+  }
   return { diagnostic, context, skills: selectSkills(game, diagnostic), types: this.toolchain.catalog(recipesFor(game, diagnostic)) };
  }
  async prepareNative(game, context) {
@@ -35,12 +43,20 @@ class ModStudio {
   await this.native.prepare(game, evidence, { ...context, diagnostic });
  }
  async ruleFor(game, item, savedRule, owner) {
+  if (owner && item.artifactId && ['ue4ss-lua', 'reframework-lua'].includes(item.adapterId) && !item.draft?.code) {
+   item = (await this.deploymentArchive(owner, game, item.artifactId)).item;
+  }
   if (item.adapterId === 'engine-mod' && item.compiled && !item.toolchain?.deployment && item.artifactId && owner) {
    const saved = await this.deploymentArchive(owner, game, item.artifactId);
    if (saved.item.buildId !== item.buildId) throw new Error('此创作已有更新构建，请在创作中重新存入 Mod 库');
    item = saved.item;
   }
   if (item.toolchain && item.toolchain.status !== 'passed') throw new Error('此产物尚未通过制作与文件验证，请先在对话中处理构建结果。');
+  if (item.runtime?.verification && !require('./studio-runtime-verification.cjs').contract(item.draft.code).passed) throw new Error('此版本缺少有效的功能回读验收，请由 Agent 重新制作并验证。');
+  if (item.adapterId === 'ue4ss-lua') {
+   const risk = require('./studio-ue4ss-safety.cjs').analyzeUE4SS(item.draft.code, { game });
+   if (!risk.passed) throw Object.assign(new Error('此脚本未通过当前 UE4SS 风险校验，请在创作中要求修复该作品，Agent 会收到以下诊断：' + risk.findings.filter(f => f.severity === 'error').map(f => `${f.code}:${f.line} ${f.message}`).join('；')), { code: 'UE4SS_RISK_CHECK_FAILED', findings: risk.findings });
+  }
   const { diagnostic, types } = await this.workspace(game), kind = item.adapterId || item.draft.kind;
   if (!types.find(type => type.id === kind)?.available) throw new Error('当前游戏环境不支持这份创作，请重新诊断并核对适配类型。');
   if (!['dialogue','texture'].includes(kind)) return projectRule(item, diagnostic);

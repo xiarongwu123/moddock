@@ -9,14 +9,18 @@ async function readLog(root, relative) {
  if (!relative) return null;
  try {
   const file = await target(root, relative), stat = await fs.lstat(file);
-  if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 8 * 1024 * 1024) throw new Error('运行日志不是普通文件或超过 8 MB');
-  const bytes = await fs.readFile(file);
-  return { bytes, hash: digest(bytes), size: bytes.length, mtime: stat.mtimeMs };
+  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('运行日志不是普通文件');
+  const offset=Math.max(0,stat.size-8*1024*1024),handle=await fs.open(file,'r');
+  let bytes;
+  try {const buffer=Buffer.alloc(stat.size-offset),read=await handle.read(buffer,0,buffer.length,offset);bytes=buffer.subarray(0,read.bytesRead);}finally{await handle.close();}
+  return { bytes, hash: digest(bytes), size: offset+bytes.length, offset, fileId:`${stat.dev}:${stat.ino}:${stat.birthtimeMs}`, mtime: stat.mtimeMs };
  } catch (error) { if (error.code === 'ENOENT') return null; throw error; }
 }
 function freshText(log, baseline, started) {
  if (!log || log.hash === baseline?.hash || log.mtime < Date.parse(started)) return '';
  if (!baseline) return log.bytes.toString('utf8');
+ if(baseline.fileId && log.fileId && baseline.fileId!==log.fileId) return log.bytes.toString('utf8');
+ if(log.offset>0 && log.size>=baseline.size) return log.bytes.subarray(Math.max(0,baseline.size-log.offset)).toString('utf8');
  if (log.size >= baseline.size && digest(log.bytes.subarray(0, baseline.size)) === baseline.hash) return log.bytes.subarray(baseline.size).toString('utf8');
  return log.bytes.toString('utf8');
 }
@@ -126,7 +130,7 @@ class StudioLifecycle {
   await this.permission(context, 'game.launch');
   const run = await this.installers.launch(game);
   const deployment = { ...item.deployment, status: 'launch_requested', modId: mod.id, jobId: job.id, buildId: item.buildId, sha256: item.sha256,
-   runId: run.id, started: run.started, gameRoot: await fs.realpath(game.installPath), logRelative: relative, baseline: log ? { hash: log.hash, size: log.size } : null, runtime: null, message: run.message };
+   runId: run.id, started: run.started, gameRoot: await fs.realpath(game.installPath), logRelative: relative, baseline: log ? { hash: log.hash, size: log.size, fileId:log.fileId } : null, runtime: null, message: run.message };
   await this.persist(owner, artifactId, deployment); return deployment;
  }
  async runtime({ owner, game, artifact }) {
@@ -136,7 +140,13 @@ class StudioLifecycle {
   const deployment = artifact.deployment;
   const run = deployment?.runId && this.installers.state.runs.find(run => run.id === deployment.runId && run.gameId === game.id && run.managed?.some(entry => entry.id === mod.id));
   if (!run) return { status: 'not_run', detail: '当前产物尚无对应启动记录，请说“启动游戏并检查日志”。' };
+  const compiled=['bepinex-plugin','bg3-lua','bg3-follower','engine-mod'].includes(artifact.adapterId);
+  const expectedSha=compiled?artifact.toolchain?.bundle?.sha256:artifact.sha256,expectedBuild=compiled?artifact.toolchain?.id:artifact.buildId;
+  if(deployment.sha256!==expectedSha || deployment.buildId && deployment.buildId!==expectedBuild) return {status:'stale_run',detail:'运行记录对应旧构建，必须重新启动后验证当前版本。'};
+  const latest=this.installers.state.runs.find(r=>r.gameId===game.id);
+  if(latest && latest.id!==run.id) return {status:'stale_run',detail:'游戏已有新的启动记录，旧会话证据不能用于自动修复当前运行。'};
   if (deployment.gameRoot !== await fs.realpath(game.installPath)) throw new Error('游戏路径已变化，不能使用旧启动记录');
+  await require('./studio-game-process.cjs').observePlatformProcess(this.installers,game,run);
   let runtime;
   if (mod.profile.mode === 'smapi') {
    const checked = await this.installers.checkRun(game, run.id), verification = mod.verification;
@@ -148,8 +158,17 @@ class StudioLifecycle {
    const loaded = !!artifact.runtime?.marker && text.split('\n').some(line => line.includes(artifact.runtime.marker) && !/\b(ERROR|FATAL)\b/i.test(line));
    runtime = { status: loaded ? errors.length ? 'loader_with_errors' : 'loader_loaded' : errors.length ? 'log_error' : 'unconfirmed',
     detail: loaded ? `本次 ${artifact.runtime.loader} 日志确认当前产物初始化完成；${errors.length ? '日志存在错误：' + errors.slice(0, 3).join(' / ') : '玩法效果仍需在游戏中确认。'}` : errors.length ? '本次日志检测到错误：' + errors.slice(0, 3).join(' / ') : '已请求启动，尚未发现本次产物的加载日志。游戏完成启动后可说“检查本次运行”。' };
+   const { evaluate } = require('./studio-runtime-verification.cjs');
+   const crashed = /Fatal error:|Unhandled Exception:|EXCEPTION_ACCESS_VIOLATION|Assertion failed:/i.test(text) || run.exited && (run.signal || typeof run.exitCode === 'number' && run.exitCode !== 0);
+   const result = evaluate({text,marker:artifact.runtime?.marker,contract:artifact.runtime?.verification,previous:deployment.runtime,crashed:!!crashed,exitCode:run.exitCode,triggerTimeoutMs:this.studio.options.runtimeTriggerTimeoutMs || 15000});
+   if (result.status !== 'unsupported' && (loaded || result.repairable)) runtime = {...runtime,...result};
+   // Unrelated loader errors cannot establish which Mod failed.
+   const lines=text.split('\n'), identity=artifact.manifest?.UniqueID;
+   const ownErrors=identity ? lines.flatMap((line,i)=> /\b(ERROR|FATAL)\b|failed to load|could not be loaded/i.test(line) && lines.slice(Math.max(0,i-2),i+4).join('\n').includes(identity) ? [line] : []) : [];
+   if (!result.repairable && ownErrors.length) runtime = {...runtime,status:'loader_error',repairable:true,detail:'本次日志包含当前产物相关的加载错误，将携带证据自动修复。',evidence:ownErrors.slice(0,5)};
+   else if(!result.repairable && errors.length) runtime={...runtime,warnings:errors.slice(0,5)};
   }
-  runtime = { ...runtime, detail: runtime.detail.slice(0, 2000), runId: run.id, checked: new Date().toISOString() };
+  runtime = { ...runtime, detail: runtime.detail.slice(0, 2000), runId: run.id, gamePid:run.gamePid || run.pid, processObservationError:run.processObservationError, exited:!!run.exited, checked: new Date().toISOString() };
   await this.persist(owner, artifact.id, { ...deployment, runtime }); return runtime;
  }
  async observe(context) {
@@ -161,6 +180,81 @@ class StudioLifecycle {
    if (attempt < 2) await delay(1000, undefined, { signal: context.signal });
   }
   return report;
+ }
+ async idle(game) {
+  const mods=this.installers.state.mods.filter(m=>m.gameId===game.id && m.status==='enabled');
+  const profile=mods[0]?.profile || this.installers.getProfile(game).rule;
+  if(!profile) return false;
+  try { await this.installers.guard(await this.installers.gameRoot(game,profile),profile); return true; }
+  catch(error) { if(error.message.includes('请先退出游戏及加载器')) return false; throw error; }
+ }
+ async capture(owner,game,enabledModIds) {
+  const captured=[];
+  for(const mod of this.installers.state.mods.filter(m=>m.gameId===game.id && (enabledModIds ? enabledModIds.includes(m.id) : m.status==='enabled'))) {
+   const job=this.downloads.jobs.find(j=>j.id===mod.jobId && j.source==='studio' && j.creationOwner===owner);
+   const artifactId=job?.studio?.artifactId || job?.resourceId?.replace(/^studio:/,'');
+   if(!job || !artifactId) continue;
+   const artifact=await this.studio.read(owner,artifactId);
+   const relative=await this.logRelative(game,artifact), log=await readLog(['bg3-lua','bg3-follower'].includes(artifact.adapterId)?mod.root:game.installPath,relative);
+   captured.push({mod,artifact,relative,baseline:log?{hash:log.hash,size:log.size,fileId:log.fileId}:null});
+  }
+  return captured;
+ }
+ async attachCaptured(owner,game,run,captured) {
+  for(const {mod,artifact,relative,baseline} of captured) {
+   if(!run.managed?.some(m=>m.id===mod.id)) continue;
+   const job=this.downloads.jobs.find(j=>j.id===mod.jobId);
+   await this.persist(owner,artifact.id,{...artifact.deployment,status:'launch_requested',modId:mod.id,jobId:mod.jobId,buildId:job.studio?.buildId,sha256:job.sha256,runId:run.id,started:run.started,gameRoot:await fs.realpath(game.installPath),logRelative:relative,baseline,runtime:null});
+  }
+ }
+ watchCaptured(owner,game,captured,current,authorize) {
+  const ownerCurrent=current;current=()=>!this.closed && ownerCurrent();
+  // Account queue prevents two Mods from installing/relaunching concurrently.
+  this.watchQueues ||= new Map();
+  const previous=this.watchQueues.get(owner) || Promise.resolve();
+  const pending=previous.catch(()=>{}).then(async()=>{
+   let candidates=captured;
+   while(current() && candidates.length) {
+    const next=[];
+    for(const {artifact} of candidates) {
+    if(!current()) return;
+    const id=artifact.lineage?.conversationId;
+    if(!id) continue;
+    while(this.studio.pending.has(owner)) {if(!current())return;await delay(3000);}
+    const conversation=await this.studio.conversations.read(owner,game,id);
+    if(conversation.artifactId!==artifact.id && !conversation.runtimeRecovery?.pendingArtifactId) continue;
+    await this.studio.conversations.send(owner,game,{id,message:'自动验证并修复运行结果',runtimeAuto:true},current,authorize);
+    await this.studio.conversations.runs.get(this.studio.conversations.key(owner,id));
+    const checked=await this.studio.conversations.read(owner,game,id);
+    if(!['cancelled','failed'].includes(checked.status) && !checked.runtimeVerification?.exited && !['stale_run','unsupported','unavailable','not_run','not_installed'].includes(checked.runtimeVerification?.status)) {
+     const updated=await this.studio.read(owner,checked.artifactId);
+     next.push({artifact:updated});
+    }
+    }
+    candidates=next;
+    if(candidates.length) await delay(3000);
+   }
+  });
+  this.watchQueues.set(owner,pending);
+  pending.catch(error=>{if(this.studio.options.onRuntimeError)this.studio.options.onRuntimeError(error);else console.warn('自动运行观察已停止：'+String(error.message).slice(0,500));}).finally(()=>{if(this.watchQueues.get(owner)===pending)this.watchQueues.delete(owner);});
+ }
+ close() {this.closed=true;require('./studio-game-process.cjs').stopPlatformMonitors(this.installers);}
+ async prepareRecoveries(owner,game,current,authorize,enabledModIds) {
+  const replacements=new Map();
+  if(this.studio.pending.has(owner)) return replacements;
+  for(const row of await this.studio.conversations.list(owner,game)) {
+   const item=await this.studio.conversations.read(owner,game,row.id), recovery=item.runtimeRecovery;
+   if(!recovery?.pendingArtifactId || ['cancelled','failed'].includes(item.status)) continue;
+   this.check({current});
+   const pending=await this.studio.read(owner,recovery.pendingArtifactId);
+   const previous=this.predecessors(owner,game,pending)[0],oldId=previous?.id;
+   if(!previous || (enabledModIds ? !enabledModIds.includes(oldId) : previous.status!=='enabled')) continue;
+   const deployment=await this.install({owner,game,artifactId:recovery.pendingArtifactId,current,authorize});
+   item.artifactId=recovery.pendingArtifactId;recovery.artifactId=item.artifactId;recovery.pendingArtifactId=null;recovery.expectingNewRun=true;item.status='awaiting_runtime';
+   await this.studio.conversations.persist(owner,item);
+   if(oldId)replacements.set(oldId,deployment.modId);
+  }
+  return replacements;
  }
 }
 module.exports = { StudioLifecycle, readLog, freshText };

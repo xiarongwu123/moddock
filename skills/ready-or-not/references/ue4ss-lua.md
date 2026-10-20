@@ -15,8 +15,12 @@ accessed through search_api; no vendor/ready-or-not-api/README.md exists.
   The UFunction must exist before hook registration. Catch registration errors,
   keep retries bounded if waiting for game classes, and report incompatibility.
   Remove it with `UnregisterHook(fullFunctionPath, preId, postId)` in one call.
-- ExecuteWithDelay(ms, callback) runs on a UE4SS thread. It may only marshal
-  ExecuteInGameThread(body); all UObject access belongs inside body.
+- Prefer supported ExecuteInGameThreadWithDelay / LoopInGameThreadWithDelay;
+  feature-detect them. ExecuteWithDelay runs on a worker thread. A supported
+  ExecuteInGameThread bridge may be used for older loaders, with every UObject
+  access inside its body; it does not prove the loader has no threading defects.
+- StaticFindObject failure can return a non-nil invalid object: check IsValid().
+  Read ../../ue4ss-runtime-safety/references/runtime-contract.md before coding.
 - NotifyOnNewObject(fullClassPath, callback) receives the UObject directly,
   includes subclasses, and unregisters if the callback returns true.
 - `local UEHelpers = require('UEHelpers')` is available from the pinned loader's

@@ -81,7 +81,7 @@ test('malformed ZIP ratio reports the file through the install API and cleans st
  bytes.writeUInt32LE(4 * 1024 ** 2, central + 24);
  const id = crypto.randomUUID(), directory = path.join(service.downloads.root, id), file = path.join(directory, 'large.zip');
  await fs.mkdir(directory); await fs.writeFile(file, bytes);
- service.downloads.jobs.push({ id, gameId: game.id, resourceId: 'banana:1', source: 'banana', name: 'Archive fixture', filename: 'large.zip', status: 'completed', sha256: await hash(file) });
+ service.downloads.jobs.push({ id, gameId: game.id, resourceId: 'local:archive-fixture', source: 'local', name: 'Archive fixture', filename: 'large.zip', status: 'completed', sha256: await hash(file) });
  const auth = await loginFixture(service);
  const response = await auth.fetch(service.url + '/api/installations/auto', {
   method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Moddock-Token': auth.state.token }, body: JSON.stringify({ jobId: id })
@@ -138,7 +138,7 @@ test('download metadata, response length and streamed bytes each report the new 
  let cancelled = false;
  const headers = await download(t, { name: 'large.zip', _open: async () => new Response(new ReadableStream({ cancel() { cancelled = true; } }), { headers: { 'content-length': String(LIMITS.downloadBytes + 1) } }) });
  assert.equal(cancelled, true);
- const streamed = await download(t, { name: 'large.zip', _open: async () => ({ headers: new Headers(), body: (async function* () { yield { length: LIMITS.downloadBytes + 1 }; })() }) });
+ const streamed = await download(t, { name: 'large.zip', _open: async () => ({ ok: true, status: 200, headers: new Headers(), body: (async function* () { yield { length: LIMITS.downloadBytes + 1 }; })() }) });
  for (const { engine, job } of [metadata, headers, streamed]) {
   assert.equal(job.status, 'failed');
   for (const text of ['下载文件体积超限', 'large.zip', String(LIMITS.downloadBytes + 1), '128 GiB']) assert.ok(job.message.includes(text), job.message);

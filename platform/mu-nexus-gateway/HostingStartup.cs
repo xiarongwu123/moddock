@@ -15,6 +15,8 @@ public sealed class GatewayHostingStartup : IHostingStartup
             .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
         services.AddHttpClient("StudioBackend", client => client.Timeout = TimeSpan.FromSeconds(190))
             .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+        services.AddHttpClient("AiQuota", client => client.Timeout = TimeSpan.FromSeconds(5))
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
         services.AddTransient<IStartupFilter, GatewayStartupFilter>();
     });
 }
@@ -32,8 +34,9 @@ internal sealed class GatewayStartupFilter : IStartupFilter
             }
             await nextRequest();
         });
+        app.Use(AiAccounts.Serialize);
         next(app);
         // Add to the host's existing routing table, preserving its complete middleware pipeline.
-        app.UseEndpoints(endpoints => { endpoints.MapNexusDownloads(); endpoints.MapStudio(); });
+        app.UseEndpoints(endpoints => { endpoints.MapNexusDownloads(); endpoints.MapStudio(); endpoints.MapAiAccount(); });
     };
 }

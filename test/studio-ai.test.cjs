@@ -38,8 +38,8 @@ test('Pi errors are bounded, redacted and never fall back to direct model reques
  for (const status of [400, 401, 402, 429, 500]) {
   const fixture = await piFixture(t, { respond: async () => ({ status }) });
   const ai = createDeepSeek({ apiKey: key, pi: fixture.pi });
-  await assert.rejects(ai.plan(planPayload), error => !error.message.includes(key) && error.diagnostic.upstreamStatus === status && error.diagnostic.reason.includes('fixture failure'));
-  assert.equal(fixture.requests.length, status === 429 || status >= 500 ? 4 : 1);
+  await assert.rejects(ai.plan(planPayload), error => error.code === 'ai_quota_unconfigured' && !error.message.includes(key) && error.diagnostic.upstreamStatus === status && error.diagnostic.reason.includes('fixture failure'));
+  assert.equal(fixture.requests.length, 1, 'unknown provider usage blocks another inference until reconciled');
  }
  const fixture = await piFixture(t), ai = createDeepSeek({ apiKey: key, pi: fixture.pi });
  await assert.rejects(ai.plan({ ...planPayload, signal: AbortSignal.abort() })); assert.equal(fixture.requests.length, 0);
@@ -104,5 +104,8 @@ test('runtime accepts fresh appended or rotated logs and refuses linked logs', a
  await fs.appendFile(file, 'new-marker\n'); assert.equal(freshText(await readLog(root, 'UE4SS.log'), baseline, started), 'new-marker\n');
  await fs.writeFile(file, 'rotated-marker\n'); assert.equal(freshText(await readLog(root, 'UE4SS.log'), baseline, started), 'rotated-marker\n');
  assert.equal(freshText({ ...await readLog(root, 'UE4SS.log'), mtime: Date.parse(started) - 10000 }, baseline, started), '');
- await fs.symlink(file, path.join(root, 'linked.log')); await assert.rejects(readLog(root, 'linked.log'), /链接/); await fs.truncate(file, 9 * 1024 * 1024); await assert.rejects(readLog(root, 'UE4SS.log'), /8 MB/);
+ await fs.symlink(file, path.join(root, 'linked.log')); await assert.rejects(readLog(root, 'linked.log'), /链接/);
+ await fs.truncate(file, 9 * 1024 * 1024);
+ const tail = await readLog(root, 'UE4SS.log');
+ assert.equal(tail.bytes.length, 8 * 1024 * 1024); assert.equal(tail.offset, 1024 * 1024); assert.equal(tail.size, 9 * 1024 * 1024);
 });

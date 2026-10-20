@@ -1,0 +1,82 @@
+{
+  "id": "7aa987fa-19ab-4652-b7f6-4c3c2744fd35",
+  "status": "observing",
+  "error": "",
+  "artifactId": "a0c5bc6d-8ff8-4a9c-ba91-0747800c5992",
+  "runtimeRecovery": {
+    "artifactId": "a0c5bc6d-8ff8-4a9c-ba91-0747800c5992",
+    "attempts": [
+      {
+        "artifactId": "3d552d4b-4ba4-49c4-b4b9-f814c55df4a2",
+        "runId": "306810dd-9c1a-48c1-a695-6bb318d435b7",
+        "reason": "behavior_failed",
+        "evidence": [
+          {
+            "id": "fov_toggle_110",
+            "kind": "failed_readback",
+            "actual": "90",
+            "expected": "110",
+            "tolerance": "0.050000000000000003"
+          },
+          {
+            "id": "fov_toggle_110",
+            "seq": 2,
+            "status": "failed",
+            "actual": "90",
+            "expected": "110",
+            "tolerance": "0.050000000000000003"
+          }
+        ],
+        "started": "2026-10-19T05:49:42.973Z",
+        "repairedArtifactId": "a0c5bc6d-8ff8-4a9c-ba91-0747800c5992"
+      }
+    ],
+    "pendingArtifactId": null,
+    "lastRunId": "695222c2-6a83-46ed-9468-110d1350a23e",
+    "expectingNewRun": false
+  },
+  "runtimeVerification": {
+    "status": "behavior_verified",
+    "detail": "声明的功能验收已通过游戏状态回读；继续观察本次运行。",
+    "evidence": [
+      {
+        "id": "fov_toggle_110",
+        "seq": 2,
+        "status": "passed",
+        "actual": "110",
+        "expected": "110",
+        "tolerance": "0.10000000000000001"
+      },
+      {
+        "id": "fov_restore_original",
+        "seq": 4,
+        "status": "passed",
+        "actual": "90",
+        "expected": "90",
+        "tolerance": "0.20000000000000001"
+      }
+    ],
+    "states": {
+      "fov_toggle_110": {
+        "seq": 2,
+        "status": "passed",
+        "actual": "110",
+        "expected": "110",
+        "tolerance": "0.10000000000000001"
+      },
+      "fov_restore_original": {
+        "seq": 4,
+        "status": "passed",
+        "actual": "90",
+        "expected": "90",
+        "tolerance": "0.20000000000000001"
+      }
+    },
+    "pending": {},
+    "repairable": false,
+    "runId": "695222c2-6a83-46ed-9468-110d1350a23e",
+    "gamePid": 35472,
+    "exited": false,
+    "checked": "2026-10-19T05:55:50.227Z"
+  }
+}

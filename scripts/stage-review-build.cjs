@@ -21,6 +21,8 @@ const { build } = require('esbuild');
  runtime.push('studio-errors.cjs');
  runtime.push('studio-native-tools.cjs', 'studio-native-projects.cjs', 'studio-native-patch.cjs', 'studio-godot.cjs', 'studio-rgss.cjs', 'studio-ruby.cjs', 'studio-il2cpp.cjs');
  runtime.push('game-components.cjs', 'game-environment.cjs', 'studio-compiler-setup.cjs');
+ runtime.push('ai-policy.cjs', 'ai-usage.cjs', 'ai-install.cjs', 'archive-format.cjs', 'author-install.cjs', 'install-instructions.cjs', 'replacement-evidence.cjs', 'download-transfer.cjs', 'download-bundles.cjs');
+ runtime.push('studio-game-process.cjs', 'studio-runtime-cycle.cjs', 'studio-runtime-verification.cjs', 'studio-ue4ss-safety.cjs');
  for (const file of runtime) await fs.copyFile(path.join(project, file), path.join(app, file));
  for (const directory of ['src', 'public', 'vendor', 'skills']) await fs.cp(path.join(project, directory), path.join(app, directory), { recursive: true });
  await fs.mkdir(path.join(app, 'scripts'));

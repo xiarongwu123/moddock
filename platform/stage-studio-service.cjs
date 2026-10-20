@@ -8,6 +8,7 @@ const crypto = require('node:crypto');
  const hashes = {};
  names.push('studio-engines.cjs');
  names.push('studio-errors.cjs', 'studio-mu-client.cjs', 'platform/studio-tasks.cjs', 'platform/studio-progress.cjs');
+ names.push('ai-policy.cjs', 'platform/ai-ledger.cjs', 'platform/ai-ledger.sql', 'platform/ai-meter.mjs', 'platform/reconcile-ai-usage.cjs');
  for (const name of names) {
   const bytes = await fs.readFile(path.join(root, name));
   await fs.mkdir(path.dirname(path.join(destination, name)), { recursive: true });

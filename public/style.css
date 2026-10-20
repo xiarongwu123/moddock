@@ -343,6 +343,8 @@ body:has(.workshop-backdrop){overflow:hidden}
 .manager-mod-copy p>span{color:#4e6554}
 .manager-state{font-size:11px;color:#718479;white-space:nowrap}
 .manager-state.is-enabled{color:#a4c98c}
+.managed-row[aria-busy="true"] .manager-state{display:inline-flex;align-items:center;gap:6px;color:#b7de99}
+.managed-row[aria-busy="true"] .manager-state svg{width:14px;height:14px;flex-shrink:0}
 .manager-switch{position:relative;flex-shrink:0;width:32px;height:19px;padding:2px;border:1px solid #62726a;border-radius:20px;background:#46544a;cursor:pointer;transition:background .18s}
 .manager-switch>span{display:block;width:13px;height:13px;border-radius:50%;background:#bfcbc2;transition:transform .18s}
 .manager-switch[aria-checked=true]{border-color:#a9d66d;background:#a9d66d}

@@ -266,4 +266,3 @@ export default function ThoughtLine({
     </div>
   );
 }
-

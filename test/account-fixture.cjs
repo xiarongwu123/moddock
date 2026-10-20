@@ -11,7 +11,13 @@ function accountFixture() {
   calls,
   advance(milliseconds) { now += milliseconds; },
   revoke() { revoked = true; },
-  updateAccount(change) { account = { ...account, ...change }; },
+  updateAccount(change) {
+   account = { ...account, ...change };
+   if (account.membership.tier === 'pro' && !Object.hasOwn(change, 'aiUsage') && account.aiUsage === undefined) {
+    const date = new Date(now);
+    account.aiUsage = { limitTokens: 1000000, usedTokens: 0, periodStart: new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1)).toISOString(), periodEnd: new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1)).toISOString() };
+   }
+  },
   fail(status, code, message, retryAfterSeconds) { failure = { status, code, message, retryAfterSeconds }; },
   options: {
    now: () => now,

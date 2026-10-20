@@ -85,7 +85,9 @@ function buildStudioProject(game, input, id, report, context) {
  } else if (input.kind === 'ue4ss-lua' || input.kind === 'reframework-lua') {
   draft.code = requiredText(input.code, 'Lua 脚本', 24000);
   runtime = { loader: input.kind === 'ue4ss-lua' ? 'UE4SS' : 'REFramework', marker: `Moddock:${uniqueId}:loaded` };
-  const wrapped = `local function moddock_initialize()\n${draft.code}\nend\nlocal ok, err = pcall(moddock_initialize)\nif not ok then error(err) end\n${input.kind === 'ue4ss-lua' ? 'print' : 'log.info'}(${JSON.stringify(runtime.marker)})\n`;
+  const verifier = require('./studio-runtime-verification.cjs');
+  runtime.verification = verifier.contract(draft.code);
+  const wrapped = verifier.bootstrap(runtime.marker, draft.code, input.kind === 'ue4ss-lua' ? 'print' : 'log.info');
   content = { language: 'Lua', loader: runtime.loader, code: wrapped };
   summary = `${game.name} · ${content.loader} 脚本`;
   if (input.kind === 'ue4ss-lua') files.push(textFile('mod/Scripts/main.lua', wrapped), textFile('mod/enabled.txt', ''));

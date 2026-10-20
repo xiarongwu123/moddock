@@ -77,17 +77,31 @@ class GameEnvironment {
   await context.authorize('library.manage');
   if (!context.current() || context.signal?.aborted) throw new Error('操作已停止或账号已切换');
  }
- async asset(id, stage, signal) {
+ async asset(id, stage, signal, report = () => {}) {
   const item = (this.options.components || components)[id]; if (!item) throw new Error('没有已核对的官方组件');
   const cacheRoot = path.join(this.root, 'cache'); await fs.mkdir(cacheRoot, { recursive: true });
   const file = path.join(cacheRoot, item.sha256 + '.zip');
   if (await existing(file) !== item.sha256) {
-   const bytes = await download(this.options.fetch || fetch, item, signal);
-   if (bytes.length !== item.size || digest(bytes) !== item.sha256) throw new Error('官方组件 SHA-256 校验失败');
+   report('environment', 2.5, '正在下载官方前置组件…', { file: item.name });
+   let bytes;
+   try {
+    bytes = await download(this.options.fetch || fetch, item, signal);
+    if (bytes.length !== item.size || digest(bytes) !== item.sha256) throw new Error('官方组件 SHA-256 校验失败');
+   } catch (error) {
+    signal?.throwIfAborted();
+    if (!item.bundled) throw error;
+    const bundled = path.resolve(__dirname, item.bundled);
+    if (!bundled.startsWith(path.resolve(__dirname) + path.sep)) throw new Error('随包官方组件路径无效');
+    report('environment', 2.5, '官方下载暂不可用，正在校验随包官方组件…', { file: item.name });
+    bytes = await fs.readFile(bundled);
+    if (bytes.length !== item.size || digest(bytes) !== item.sha256) throw new Error('随包官方组件 SHA-256 校验失败');
+   }
+   signal?.throwIfAborted();
    const tmp = file + '.' + crypto.randomUUID() + '.tmp';
    try { await fs.writeFile(tmp, bytes, { flag: 'wx' }); await fs.rename(tmp, file); } finally { await fs.rm(tmp, { force: true }); }
   }
-  const directory = path.join(stage, id); const files = await extract(file, directory);
+  const directory = path.join(stage, id);
+  const files = await extract(file, directory, (done, total, file) => report('environment', 2.5 + 0.4 * done / Math.max(1, total), '正在解压官方前置组件…', { file, processed: Math.floor(done), total }));
   return { directory, files, item };
  }
  async recover(root, journal, guard) {
@@ -112,30 +126,54 @@ class GameEnvironment {
   await fs.rm(journal);
  }
  async prepare(context) {
+  const report = context.report || (() => {});
+  const now = this.options.now || Date.now;
+  const current = () => {
+   if (!context.current?.() || context.signal?.aborted) throw new Error('操作已停止或账号已切换');
+  };
+  let permissionAt = -Infinity, guardAt = -Infinity;
   await this.permission(context);
+  permissionAt = now();
+  report('environment', 2, '正在识别游戏环境和前置组件…');
   const location = await this.describe(context.game), { root, profile } = location;
   const guard = () => this.installers.guard(root, { mode: 'copy', executable: profile?.executable || context.game.executable });
+  // Cache only within this operation. Local cancellation/account checks still run
+  // before every file; remote permission and OS process scans refresh on a clock.
+  const checkpoint = async (force = false) => {
+   current();
+   if (force || now() - permissionAt >= 10000) { await this.permission(context); permissionAt = now(); }
+   current();
+   if (force || now() - guardAt >= 2000) { await guard(); guardAt = now(); }
+   current();
+  };
   const recordDir = path.join(this.root, digest(Buffer.from(root))), journal = path.join(recordDir, 'pending.json');
-  await fs.mkdir(recordDir, { recursive: true }); await this.recover(root, journal, guard);
+  await fs.mkdir(recordDir, { recursive: true });
+  report('environment', 2, '正在检查并恢复上次组件安装记录…');
+  await this.recover(root, journal, guard);
   const before = await this.status(context.game);
   if (before.ready || !before.canPrepare) return before;
   if (!profile?.executable) return before;
-  await guard();
+  await checkpoint();
   const arch = await machine(await target(root, profile.executable));
   if (['ue4ss', 'reframework', 'smapi'].includes(profile.id) && arch !== 'x64') throw new Error('当前专用组件需要 x64 游戏');
   const stage = await fs.mkdtemp(path.join(recordDir, 'stage-')), files = [];
   const signal = context.signal ? AbortSignal.any([context.signal, AbortSignal.timeout(180000)]) : AbortSignal.timeout(180000);
   const add = (name, source) => files.push({ name: relative(name), source });
+  const loadAsset = async id => {
+   current();
+   report('environment', 2.5, '正在准备官方前置组件（下载、校验及解压）…', { file: (this.options.components || components)[id]?.name || id });
+   return this.asset(id, stage, signal, report);
+  };
   try {
    if (['bepinex', 'bepinex-il2cpp'].includes(profile.id)) {
-    const asset = await this.asset(profile.id + '-' + arch, stage, signal);
-    for (const file of asset.files.filter(file => /^BepInEx\/core\//.test(file.source) || profile.id === 'bepinex-il2cpp' && /^dotnet\//.test(file.source) || ['winhttp.dll', 'doorstop_config.ini', '.doorstop_version'].includes(file.source))) add(path.posix.join(profile.base, file.source), path.join(asset.directory, file.source));
+    const payload = await loadAsset(profile.id + '-' + arch);
+    for (const file of payload.files.filter(file => /^BepInEx\/core\//.test(file.source) || profile.id === 'bepinex-il2cpp' && /^dotnet\//.test(file.source) || ['winhttp.dll', 'doorstop_config.ini', '.doorstop_version'].includes(file.source))) add(path.posix.join(profile.base, file.source), path.join(payload.directory, file.source));
    } else if (profile.id === 'reframework') {
-    const asset = await this.asset('reframework', stage, signal), file = asset.files.find(file => file.source === 'dinput8.dll');
+    const asset = await loadAsset('reframework'), file = asset.files.find(file => file.source === 'dinput8.dll');
     if (!file) throw new Error('官方 REFramework 包缺少 dinput8.dll'); add('dinput8.dll', path.join(asset.directory, file.source));
    } else if (profile.id === 'ue4ss') {
     if (!profile.custom && !profile.releaseDefaults) return before;
-    const asset = await this.asset('ue4ss', stage, signal);
+    const asset = await loadAsset('ue4ss');
     for (const name of ['dwmapi.dll', 'ue4ss/UE4SS.dll']) { if (!asset.files.some(file => file.source === name)) throw new Error('官方 UE4SS 包结构不匹配'); add(path.posix.join(profile.base, name), path.join(asset.directory, name)); }
     if (profile.releaseDefaults) {
      for (const name of ['ue4ss/UE4SS-settings.ini', 'ue4ss/LICENSE', 'ue4ss/Mods/shared/UEHelpers/UEHelpers.lua', 'ue4ss/UE4SS_SDK_Backends/UE4SS.json']) {
@@ -143,14 +181,14 @@ class GameEnvironment {
       add(path.posix.join(profile.base, name), path.join(asset.directory, name));
      }
     } else {
-     const config = await this.asset('ue4ss-configs', stage, signal);
+     const config = await loadAsset('ue4ss-configs');
      for (const name of ['UE4SS-settings.ini', 'VTableLayout.ini']) {
       const source = profile.custom + '/' + name; if (!config.files.some(file => file.source === source)) throw new Error('缺少此游戏的官方 UE4SS 配置');
       add(path.posix.join(profile.base, 'ue4ss', name), path.join(config.directory, source));
      }
     }
    } else if (profile.id === 'smapi' && !location.report.loaders.includes('SMAPI')) {
-    const asset = await this.asset('smapi', stage, signal), nested = asset.files.filter(file => /\/internal\/windows\/install\.dat$/.test(file.source));
+    const asset = await loadAsset('smapi'), nested = asset.files.filter(file => /\/internal\/windows\/install\.dat$/.test(file.source));
     if (nested.length !== 1) throw new Error('官方 SMAPI 包结构不匹配');
     const directory = path.join(stage, 'smapi-payload'), payload = await extract(path.join(asset.directory, nested[0].source), directory);
     for (const file of payload.filter(file => !file.source.startsWith('Mods/'))) add(file.source, path.join(directory, file.source));
@@ -159,26 +197,35 @@ class GameEnvironment {
    }
    const planned = [], seen = new Set();
    for (const file of files) {
+    current(); signal.throwIfAborted();
+    report('environment', 3 + 1.5 * seen.size / Math.max(1, files.length), '正在核对组件文件和目标冲突…', { file: file.name, processed: seen.size, total: files.length });
     if (seen.has(file.name.toLowerCase())) throw new Error('组件包存在重复目标文件'); seen.add(file.name.toLowerCase());
     const actual = await existing(await target(root, file.name)), sha256 = await hash(file.source);
     if (actual && actual !== sha256) throw new Error('现有文件与官方组件冲突，已保留：' + file.name);
     if (!actual) planned.push({ ...file, sha256, marker: file.name + '.moddock-' + crypto.randomUUID() + '.tmp' });
    }
-   await this.permission(context); signal.throwIfAborted(); await guard();
+   await checkpoint(true); signal.throwIfAborted();
    if (await fs.realpath(context.game.installPath) !== root) throw new Error('游戏安装路径已变化');
    const record = { root, files: planned.map(({ name, sha256, marker }) => ({ name, sha256, marker })) };
    await fs.writeFile(journal, JSON.stringify(record), { flag: 'wx' });
    try {
-    for (const file of planned) {
-     await this.permission(context); signal.throwIfAborted(); await guard();
+    for (const [index, file] of planned.entries()) {
+     await checkpoint(); signal.throwIfAborted();
+     report('environment', 4.5 + 2 * index / Math.max(1, planned.length), '正在安装前置组件…', { file: file.name, processed: index, total: planned.length });
      const destination = await target(root, file.name); await fs.mkdir(path.dirname(destination), { recursive: true });
      const tmp = await target(root, file.marker);
      await fs.copyFile(file.source, tmp, fs.constants.COPYFILE_EXCL); await fs.link(tmp, destination);
      await this.options.afterWrite?.(file.name, destination);
+     report('environment', 4.5 + 2 * (index + 1) / Math.max(1, planned.length), '正在安装前置组件…', { file: file.name, processed: index + 1, total: planned.length });
     }
     const directories = ['bepinex', 'bepinex-il2cpp'].includes(profile.id) ? [path.posix.join(profile.base, 'BepInEx/plugins')] : profile.id === 'reframework' ? ['reframework/autorun'] : profile.id === 'ue4ss' ? [path.posix.join(profile.base, 'ue4ss/Mods')] : ['Mods'];
     for (const name of directories) await fs.mkdir(await target(root, name), { recursive: true });
-    for (const file of planned) if (await existing(await target(root, file.name)) !== file.sha256) throw new Error('组件安装后校验失败');
+    for (const [index, file] of planned.entries()) {
+     await checkpoint(); signal.throwIfAborted();
+     report('environment', 6.5 + index / Math.max(1, planned.length), '正在校验已安装的前置组件…', { file: file.name, processed: index, total: planned.length });
+     if (await existing(await target(root, file.name)) !== file.sha256) throw new Error('组件安装后校验失败');
+    }
+    await checkpoint(true); signal.throwIfAborted();
     const committed = journal + '.tmp'; await fs.writeFile(committed, JSON.stringify({ ...record, committed: true })); await fs.rename(committed, journal);
     await this.recover(root, journal, guard);
    } catch (error) { await this.recover(root, journal, guard); throw error; }
@@ -186,6 +233,7 @@ class GameEnvironment {
     if (!this.options.contentPatcher) throw new Error('SMAPI 已自动准备，Content Patcher 官方下载通道暂不可用，请稍后重试');
     await this.permission(context); await this.options.contentPatcher(context);
    }
+   report('environment', 7.5, '前置组件准备完成，正在复核游戏环境…');
    return { ...(await this.status(context.game)), installed: true };
   } finally { await fs.rm(stage, { recursive: true, force: true }); }
  }

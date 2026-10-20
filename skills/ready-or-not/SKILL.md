@@ -5,7 +5,8 @@ description: Develop executable Ready or Not gameplay Mods using UE4SS Lua, game
 
 # Ready or Not authoring
 
-Read `references/implementation.md`, inspect the actual game context and use
+Read `../ue4ss-runtime-safety/SKILL.md` and its runtime contract, then
+`references/implementation.md`, inspect the actual game context and use
 `search_api` to verify the classes/functions needed for this request.
 
 The default deliverable is executable gameplay code. An absent local loader is

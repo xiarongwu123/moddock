@@ -37,7 +37,7 @@ async function fixture(t, overrides = {}) {
  await fs.mkdir(path.join(game.installPath, 'bin'), { recursive: true }); await fs.writeFile(path.join(game.installPath, 'bin/DWrite.dll'), dll);
  await fs.mkdir(path.dirname(save), { recursive: true }); await fs.mkdir(path.join(data, 'Mods')); await fs.writeFile(settings, SETTINGS); await fs.writeFile(save, 'preserve real player progress');
  const account = accountFixture(); account.updateAccount({ membership: { tier: 'pro', expiresAt: null } });
- const service = await createServer({ root: path.join(root, 'app'), port: 0, accounts: account.options, scan: async () => ({ games: [game], roots: [], diagnostics: [] }), studio: { integration: { python: false }, plan: async payload => ({ ...plan, kind: payload.capability.preferredKind }), generate: async payload => payload.kind === 'bg3-follower' ? followerDraft : draft, ...overrides.studio }, installers: { bg3DataPath: data, processes: async () => [], ...overrides.installers } });
+ const service = await createServer({ root: path.join(root, 'app'), port: 0, accounts: account.options, scan: async () => ({ games: [game], roots: [], diagnostics: [] }), studio: { runtimeObservationMs: 1, runtimeAutoObservationMs: 1, runtimePollMs: 1, integration: { python: false }, plan: async payload => ({ ...plan, kind: payload.capability.preferredKind }), generate: async payload => payload.kind === 'bg3-follower' ? followerDraft : draft, ...overrides.studio }, installers: { bg3DataPath: data, processes: async () => [], ...overrides.installers } });
  t.after(async () => { service.studio.cancelOwner('fixture-user'); await service.studio.conversations.settle(); await new Promise(resolve => service.server.close(resolve)); await service.downloads.persist; await fs.rm(root, { recursive: true, force: true }); });
  const login = await loginFixture(service);
  const post = async (route, body = {}) => { const response = await login.fetch(service.url + '/api/' + route, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Moddock-Token': login.state.token }, body: JSON.stringify({ gameId: game.id, ...body }) }); return { status: response.status, body: await response.json() }; };
@@ -126,7 +126,7 @@ test('BG3 runtime reads only the current artifact log in user data, never stale 
  let active, x;
  x = await fixture(t, { installers: { openGame: async () => { const file = path.join(x.data, active.runtime.log); await fs.mkdir(path.dirname(file), { recursive: true }); await fs.writeFile(file, active.runtime.marker); } } });
  const thread = await x.turn('制作跟随者。'); active = (await x.post('studio/read', { id: thread.artifactId })).body;
- const launched = await x.turn('安装并启动游戏', thread.id); assert.equal(launched.status, 'completed', launched.error);
+ const launched = await x.turn('安装并启动游戏', thread.id); assert.equal(launched.status, 'awaiting_runtime', launched.error);
  const report = (await x.post('studio/read', { id: active.id })).body.toolchain;
  assert.equal(report.runtime.status, 'loader_loaded'); assert.ok(report.runtime.runId);
  assert.equal((await diagnoseGame(x.game)).engine.key, 'larian-bg3');

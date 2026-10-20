@@ -7,12 +7,13 @@ const { StudioTools, runTool } = require('./studio-tools.cjs');
 const { writePak } = require('./larian-pak.cjs');
 const { readModule } = require('./bg3-mod.cjs');
 const { checkLua } = require('./studio-lua.cjs');
+const { analyzeUE4SS } = require('./studio-ue4ss-safety.cjs');
 
 const ACTIVE = new Set(['checking', 'building', 'verifying']);
 const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const ADAPTERS = {
  'engine-mod': { name: '按引擎开发', build: '实际源文件与资源修改构建', validation: '引擎入口、静态语法、原文件摘要与加载目录' },
- 'ue4ss-lua': { compiler: 'lua', name: 'UE4SS · Lua 5.4', build: 'Lua 语法编译检查', validation: '脚本语法、目录与现有加载器' },
+ 'ue4ss-lua': { compiler: 'lua', name: 'UE4SS · Lua 5.4', build: 'Lua 语法与已知原生风险检查', validation: '脚本语法、原生参数、回调线程与已启用 Mod 摘要' },
  'reframework-lua': { compiler: 'lua', name: 'REFramework · Lua 5.4', build: 'Lua 语法编译检查', validation: '脚本语法、目录与现有加载器' },
  'bepinex-plugin': { compiler: 'csharp', name: 'BepInEx 5 · Unity Mono', build: 'Roslyn C# 编译', validation: '本机游戏程序集引用与托管 DLL' },
  'bg3-lua': { compiler: 'lua', name: 'BG3 · Script Extender / LSPK v18', build: 'Lua 5.4 编译检查与真实 PAK 打包', validation: 'Lua 语法、LSX 元数据、PAK 索引与打包内容' },
@@ -69,7 +70,7 @@ class StudioToolchain {
   }
   return result;
  }
- async run(owner, game, id, workspace, { signal, current = () => true, onStage = async () => {}, onEvent = async () => {}, authorize } = {}) {
+ async run(owner, game, id, workspace, { signal, current = () => true, onStage = async () => {}, onEvent = async () => {}, authorize, requiredRuntimeChecks = [] } = {}) {
   const check = () => { if (signal?.aborted || !current()) throw new Error('制作任务已取消'); };
   const { item, files } = await this.studio.preview(owner, game, id); check();
   const adapter = ADAPTERS[item.adapterId], taskId = crypto.randomUUID(), directory = path.join(this.directory(owner, id), taskId), work = path.join(directory, 'work');
@@ -86,6 +87,13 @@ class StudioToolchain {
   try {
    await fs.mkdir(work, { recursive: true }); await stage('checking');
    await step('产物完整性', 'passed', `${files.length} 个文件；SHA-256 与 ZIP 条目校验通过`);
+   if (item.runtime?.verification) {
+    const contract = require('./studio-runtime-verification.cjs').contract(item.draft.code);
+    for (const expected of requiredRuntimeChecks) if (!contract.expectations.some(e=>e.id===expected.id)) contract.findings.push({code:'RUNTIME_EXPECTATION_REMOVED',message:`修复版本删除了原功能验收 ${expected.id}；必须保留原需求的验证条件`});
+    contract.passed=!contract.findings.length;
+    report.runtimeContract = contract;
+    await step('功能验收协议', contract.passed ? 'passed' : 'failed', contract.passed ? `${contract.expectations.length} 项状态回读验收；实际效果需本次游戏运行证明` : contract.findings.map(f => `${f.code}${f.line ? ':'+f.line : ''} ${f.message}`).join('\n'));
+   }
    const selected = workspace.types.find(type => type.id === item.adapterId);
    if (!selected?.available) { await step('制作路线', 'blocked', selected?.reason || '当前游戏不支持此制作路线'); return await this.finish(owner, id, report); }
    await step('制作路线', 'passed', `${workspace.diagnostic.engine.name} · ${adapter.name}`);
@@ -122,6 +130,16 @@ class StudioToolchain {
    else if (item.adapterId === 'bg3-follower' && !tools.lua.available) await step('受约束人物配方', 'passed', '仅接受姓名和台词；脚本由已测试的宿主配方生成，不接收模型代码，无需外部编译器。');
    else if (adapter.compiler) await step('编译工具', tools[adapter.compiler].available ? 'passed' : 'blocked', tools[adapter.compiler].version || tools[adapter.compiler].reason);
    await stage('building');
+   if (item.adapterId === 'ue4ss-lua') {
+    report.ue4ssSafety = [];
+    for (const file of files.filter(file => file.name.endsWith('.lua'))) {
+     check();
+     const result = analyzeUE4SS(file.text, { game, installed: workspace.context?.engineEvidence?.installedUE4SS?.mods });
+     report.ue4ssSafety.push({ file: file.name, ...result });
+     await step('UE4SS 原生风险 · ' + file.name, result.passed ? 'passed' : 'failed',
+      result.findings.map(f => `${f.code} ${file.name}:${f.line} [${f.severity}] ${f.message}`).join('\n') || result.coverage);
+    }
+   }
    let compiled;
    if (portableLua) {
     for (const file of files.filter(file => file.name.endsWith('.lua'))) {

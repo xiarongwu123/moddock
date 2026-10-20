@@ -1,4 +1,5 @@
 const featureForRoute = Object.freeze(Object.fromEntries([
+ ...['options','start','resume','pause'].map(action=>[`/api/downloads/bundles/${action}`,'library.manage']),
  ...['scan', 'sources/list', 'sources/detail', 'workshop/catalog', 'workshop/game', 'workshop/list', 'workshop/detail', 'workshop/favorites', 'workshop/favorite', 'workshop/attach', 'nexus/authorize', 'downloads/start', 'downloads/file', 'downloads/reveal',
   'library/import', 'updates/check', 'updates/download', 'installations/inspect', 'installations/plan',
   'installations/discard', 'installations/apply', 'installations/action', 'installations/auto', 'installations/restore'].map(route => [`/api/${route}`, 'library.manage']),

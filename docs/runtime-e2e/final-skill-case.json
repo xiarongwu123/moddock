@@ -1,0 +1,18 @@
+{
+  "conversationId": "7aa987fa-19ab-4652-b7f6-4c3c2744fd35",
+  "artifactId": "3d552d4b-4ba4-49c4-b4b9-f814c55df4a2",
+  "sourceArtifact": "44cb1655-bc16-43b7-8bc4-0f95b03fda83",
+  "sourceCodeSha256": "43a7cce9e43b61e88db01b723fec17e4eee63c6230ab0ba8a4d87f7bfa2044c5",
+  "seedCodeSha256": "43a7cce9e43b61e88db01b723fec17e4eee63c6230ab0ba8a4d87f7bfa2044c5",
+  "codeUnchanged": true,
+  "buildStatus": "passed",
+  "controlledReuse": true,
+  "repairInterfaceHintAdded": false,
+  "game": {
+    "id": "steam-1144200",
+    "appId": "1144200",
+    "name": "Ready or Not",
+    "platform": "steam",
+    "installPath": "F:/steam/steamapps/common/Ready Or Not"
+  }
+}

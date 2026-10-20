@@ -14,8 +14,21 @@ class StudioTasks {
  constructor({ directory, execute, reserve, logger, timeout = 300000, lease = 25000, retention = 86400000 }) {
   Object.assign(this, { directory, execute, reserve, logger, timeout, lease, retention });
   this.jobs = new Map(); this.locks = new Map(); this.runs = new Set();
-  this.ready = fs.mkdir(directory, { recursive: true, mode: 0o700 });
+  this.ready = this.initialize();
   this.sweeper = setInterval(() => this.prune().catch(() => {}), 3600000); this.sweeper.unref();
+ }
+ async initialize() {
+  await fs.mkdir(this.directory, { recursive: true, mode: 0o700 });
+  for (const key of await fs.readdir(this.directory)) {
+   if (!/^[a-f0-9]{64}$/.test(key)) continue;
+   const folder = path.join(this.directory, key);
+   const metadata = JSON.parse(await fs.readFile(path.join(folder, 'task.json'), 'utf8'));
+   const destination = sha(metadata.id);
+   if (key !== destination) {
+    if (key !== sha(metadata.owner + ':' + metadata.id)) throw new Error('Invalid task identity');
+    await fs.rename(folder, path.join(this.directory, destination));
+   }
+  }
  }
  validate(value) {
   if (!value || Object.keys(value).some(key => !['version', 'id', 'after', 'operation'].includes(key)) || value.version !== 1
@@ -25,7 +38,7 @@ class StudioTasks {
  }
  async obtain(owner, action, payload, delivery) {
   await this.ready;
-  const key = sha(owner + ':' + delivery.id), previous = this.locks.get(key) || Promise.resolve();
+  const key = sha(delivery.id), previous = this.locks.get(key) || Promise.resolve();
   const operation = previous.catch(() => {}).then(async () => {
    const hash = sha(JSON.stringify(payload)), folder = path.join(this.directory, key);
    let job = this.jobs.get(key);
@@ -66,7 +79,7 @@ class StudioTasks {
      } catch (error) { release(); throw error; }
     }
    }
-   if (job.metadata.action !== action || job.metadata.hash !== hash) fail(409, 'invalid_request');
+   if (job.metadata.owner !== owner || job.metadata.action !== action || job.metadata.hash !== hash) fail(409, 'invalid_request');
    return job;
   });
   this.locks.set(key, operation);
@@ -98,8 +111,6 @@ class StudioTasks {
  async run(job, payload, release) {
   const { id, owner, action } = job.metadata, timer = setTimeout(() => job.controller.abort(new Error('Creation deadline exceeded')), this.timeout);
   const signal = job.controller.signal;
-  const aborted = new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
-  aborted.catch(() => {});
   const writeLog = diagnostic => {
    job.diagnostic = { ...diagnostic, traceId: id };
    return this.logger?.write({ taskId: id, action, diagnostic: job.diagnostic }) || Promise.resolve();
@@ -107,9 +118,10 @@ class StudioTasks {
   try {
    await this.logger?.write({ taskId: id, action, stage: 'started' });
    signal.throwIfAborted();
-   const result = await Promise.race([this.execute(action, { ...payload, accountId: owner, signal,
+  const result = await this.execute(action, { ...payload, accountId: owner, taskId: id, signal,
     checkpoint: file => this.checkpoint(job, file), onDiagnostic: writeLog,
-    onEvent: event => { if (signal.aborted || job.metadata.status !== 'running') return; try { void this.append(job, { type: 'event', event }); } catch (error) { job.failure = error; job.controller.abort(error); } } }), aborted]);
+    onUsage: usage => this.append(job, { type: 'usage', usage }),
+    onEvent: event => { if (signal.aborted || job.metadata.status !== 'running') return; try { void this.append(job, { type: 'event', event }); } catch (error) { job.failure = error; job.controller.abort(error); } } });
    signal.throwIfAborted();
    if (Buffer.byteLength(JSON.stringify(result)) > 256 * 1024) throw Object.assign(new Error('Invalid creation result size'), { code: 'AI_RESPONSE_FORMAT' });
    release();
@@ -120,7 +132,7 @@ class StudioTasks {
    const failure = job.failure || error;
    const diagnostic = failure.diagnostic || (job.diagnostic?.stage === 'model' ? job.diagnostic : describeError(failure, signal.aborted ? 'worker' : 'creation', id));
    await writeLog(diagnostic).catch(() => {});
-   const code = signal.aborted ? job.cancelled ? 'studio_cancelled' : 'studio_task_interrupted'
+   const code = ['pro_required', 'ai_quota_unconfigured', 'ai_credits_exhausted'].includes(error.code) ? error.code : signal.aborted ? job.cancelled ? 'studio_cancelled' : 'studio_task_interrupted'
     : /HTTP 402/.test(error.message) ? 'ai_credits_exhausted' : /HTTP 429/.test(error.message) ? 'studio_rate_limited'
     : ['AI_RESPONSE_FORMAT', 'AI_ARTIFACT_INVALID'].includes(error.code) ? 'ai_response_invalid' : 'studio_unavailable';
    job.metadata.status = job.cancelled ? 'cancelled' : 'failed';

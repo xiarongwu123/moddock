@@ -13,7 +13,7 @@ async function fixture(options={}){
  const engine=await new Installers(root,downloads,{processes:async()=>[],...options}).open();
  const job=async(entries,target=game)=>{
   const id=crypto.randomUUID(),file=path.join(root,id+'.zip');await fs.writeFile(file,zip(entries));
-  const item={id,gameId:target.id,gameName:target.name,name:'One-click MOD',resourceId:'banana:1',fileId:'1',source:'banana',status:'completed',path:file,filename:'mod.zip',sha256:await hash(file)};
+  const item={id,gameId:target.id,gameName:target.name,name:'One-click MOD',resourceId:'local:fixture',fileId:'1',source:'local',status:'completed',path:file,filename:'mod.zip',sha256:await hash(file)};
   downloads.jobs.push(item);return item;
  };
  return {root,game,downloads,engine,job,close:()=>fs.rm(root,{recursive:true,force:true})};
