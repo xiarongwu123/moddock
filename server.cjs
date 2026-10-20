@@ -38,6 +38,7 @@ async function createServer(options = {}) {
   return accounts.nexusRequest(sessionId, route, init);
  });
  const root = path.resolve(options.root || process.env.MODDOCK_DATA || path.join(__dirname, '.moddock-data')); await fs.mkdir(root, { recursive: true });
+ const aiUsage = new (require('./ai-usage.cjs').AIUsage)(root);
  const configPath = path.join(root, 'settings.json'); let config = { scanPaths: [], mappings: {}, autoImport:true };
  try { config = { ...config, ...JSON.parse(await fs.readFile(configPath, 'utf8')) }; } catch (e) { if (e.code !== 'ENOENT') throw e; }
  const saveConfig = async () => { await fs.writeFile(configPath + '.tmp', JSON.stringify(config, null, 2)); await fs.rename(configPath + '.tmp', configPath); };
@@ -55,7 +56,7 @@ async function createServer(options = {}) {
  const managedStudio = options.studio === undefined ? createMuStudioAI((owner, route, init) => {
   const sessionId = [...sessionOwners].find(([, id]) => id === owner)?.[0];
   return accounts.studioRequest(sessionId, owner, route, init);
- }) : {};
+ }, { onUsage: (owner, task, usage) => aiUsage.record(owner, task, usage) }) : {};
  const studio = new ModStudio(root, { ...managedStudio, ...options.studio, tools: {
   directory: path.join(root, 'toolchain'), fetch: options.gameEnvironment?.fetch || options.bg3Extender?.fetch, ...options.studio?.tools } });
  const lifecycle = new StudioLifecycle(studio, downloads, library, installers);
@@ -258,6 +259,10 @@ async function createServer(options = {}) {
     const sources = profile ? (await connections.get(profile.id)).sources : null;
     if (req.method === 'GET' && url.pathname === '/api/account/me') return send({ account: await accounts.session(sessionId) });
     if (req.method === 'GET' && url.pathname === '/api/account/plans') return send(await accounts.plans(sessionId));
+    if (req.method === 'GET' && url.pathname === '/api/account/ai-usage') {
+     const account = await accounts.session(sessionId);
+     return send({ account, quota: account.aiUsage, local: await aiUsage.view(account.id) });
+    }
     if (req.method === 'GET' && url.pathname === '/api/account/orders') return send(await accounts.orders(sessionId));
     if (req.method === 'GET' && url.pathname.startsWith('/api/account/orders/')) return send(await accounts.order(sessionId, decodeURIComponent(url.pathname.slice('/api/account/orders/'.length))));
     if (req.method === 'GET' && url.pathname === '/api/state') return send({ scan: scanResult, token, games: scanResult.games, sourceGames: onlineGames(), providers, connections: await connections.status(profile.id), nexusSso: sso.status(profile.id), jobs: downloads.view(profile.id), bundles: bundles.view(profile.id), installations: installers.view(onlineGames(),profile.id), studio: studio.status(profile), scanPaths: config.scanPaths, canChooseScanDirectory: typeof options.chooseScanDirectory === 'function', mappings: config.mappings, downloadPath: downloads.root, autoImport:config.autoImport!==false, recipes, nxmStatus: nxmStatus?.owner === profile.id ? nxmStatus : null, nexusAuthorizationWindow:!!options.authorize, nxmProtocol:options.protocolStatus?.()||false });
@@ -326,6 +331,9 @@ async function createServer(options = {}) {
     if (url.pathname.startsWith('/api/studio/')) {
      const permission = await accounts.authorize(sessionId, 'library.manage');
      if (permission.account.id !== profile.id || !studioAccess(permission.account)) throw new AccountError(403, 'pro_required', 'AI Mod 创作工作台为 Pro 高级功能。');
+     if (['/api/studio/conversations/send', '/api/studio/generate'].includes(url.pathname) || url.pathname === '/api/studio/conversations/feedback' && body.status === 'rejected') {
+      require('./ai-policy.cjs').requireAI(await accounts.session(sessionId));
+     }
      const owner = profile.id;
      const current = () => sessionOwners.get(sessionId) === owner;
      if (url.pathname === '/api/studio/games/add') {
@@ -542,13 +550,13 @@ async function createServer(options = {}) {
     }
     return send({ error: '接口不存在' }, 404);
    }
-   const files = { '/': 'index.html', '/favicon.svg': 'favicon.svg', '/favicon.ico': 'favicon.svg', '/app.js': 'app.js', '/download-bundles.js':'download-bundles.js', '/download-bundles.css':'download-bundles.css', '/style.css': 'style.css', '/auth.js': 'auth.js', '/auth.css': 'auth.css', '/splash.svg': 'splash.svg', '/splash-preview.html': 'splash-preview.html', '/splash-preview.css': 'splash-preview.css', '/splash-preview.js': 'splash-preview.js', '/logo-loading.svg': 'logo-loading.svg', '/logo-loading-preview.html': 'logo-loading-preview.html', '/youxia-ai-mascot.png': 'youxia-ai-mascot.png', '/youxia-ai-mascot.svg': 'youxia-ai-mascot.svg', '/mascot-preview.html': 'mascot-preview.html', '/mascot-preview.css': 'mascot-preview.css', '/mascot-preview.js': 'mascot-preview.js', '/fonts/fusion-pixel-12px-proportional-zh_hans.woff2': 'fonts/fusion-pixel-12px-proportional-zh_hans.woff2' }; const name = files[url.pathname] || (/^\/covers\/\d+\.jpg$/.test(url.pathname) ? url.pathname.slice(1) : undefined); if (!name) { res.writeHead(404); return res.end('Not found'); }
+   const files = { '/': 'index.html', '/favicon.svg': 'favicon.svg', '/favicon.ico': 'favicon.svg', '/app.js': 'app.js', '/membership.js':'membership.js', '/membership.css':'membership.css', '/download-bundles.js':'download-bundles.js', '/download-bundles.css':'download-bundles.css', '/style.css': 'style.css', '/auth.js': 'auth.js', '/auth.css': 'auth.css', '/splash.svg': 'splash.svg', '/splash-preview.html': 'splash-preview.html', '/splash-preview.css': 'splash-preview.css', '/splash-preview.js': 'splash-preview.js', '/logo-loading.svg': 'logo-loading.svg', '/logo-loading-preview.html': 'logo-loading-preview.html', '/youxia-ai-mascot.png': 'youxia-ai-mascot.png', '/youxia-ai-mascot.svg': 'youxia-ai-mascot.svg', '/mascot-preview.html': 'mascot-preview.html', '/mascot-preview.css': 'mascot-preview.css', '/mascot-preview.js': 'mascot-preview.js', '/fonts/fusion-pixel-12px-proportional-zh_hans.woff2': 'fonts/fusion-pixel-12px-proportional-zh_hans.woff2' }; const name = files[url.pathname] || (/^\/covers\/\d+\.jpg$/.test(url.pathname) ? url.pathname.slice(1) : undefined); if (!name) { res.writeHead(404); return res.end('Not found'); }
    res.setHeader('Content-Security-Policy', "default-src 'self'; img-src 'self' https://cdn.akamai.steamstatic.com https://shared.akamai.steamstatic.com https://staticdelivery.nexusmods.com https://images.gamebanana.com https://images.steamusercontent.com https://steamuserimages-a.akamaihd.net data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https://api.translate.zvo.cn; frame-ancestors 'none'; base-uri 'none'");
    const content = await fs.readFile(path.join(__dirname, 'public', name));
    res.writeHead(200, { 'Content-Type': name.endsWith('.jpg') ? 'image/jpeg' : name.endsWith('.png') ? 'image/png' : name.endsWith('.woff2') ? 'font/woff2' : name.endsWith('.svg') ? 'image/svg+xml' : name.endsWith('.html') ? 'text/html; charset=utf-8' : name.endsWith('.js') ? 'text/javascript; charset=utf-8' : 'text/css; charset=utf-8' }); res.end(content);
   } catch (e) {
    if (res.destroyed || res.writableEnded) return;
-   if (e instanceof AccountError) {
+   if (e instanceof AccountError || e instanceof require('./ai-policy.cjs').AIEntitlementError) {
     if (e.status === 401 || ['account_disabled', 'disabled', 'user_disabled'].includes(e.code)) releaseOwner(requestOwner);
     if (e.status === 401 || ['account_disabled', 'disabled', 'user_disabled'].includes(e.code)) res.setHeader('Set-Cookie', ['/api', '/api/auth'].map(cookiePath => `moddock-account-${server.address().port}=; HttpOnly; SameSite=Strict; Path=${cookiePath}; Max-Age=0`));
     if (e.retryAfterSeconds) res.setHeader('Retry-After', String(e.retryAfterSeconds));

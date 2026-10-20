@@ -163,6 +163,7 @@ export function createModStudio({ api, render, esc, icon, getGame, getGames, cha
   return `<section class="studio-environment" aria-label="创作提示"><p role="status">${message}</p><button class="btn small" data-studio-action="${environment.status === 'conflict' || !canPrepare ? 'check-environment' : 'environment'}" ${s.busy || active(s.thread?.status) ? 'disabled' : ''}>${!canPrepare || environment.status === 'conflict' ? '重新检查' : '自动准备'}</button></section>` + content;
  }
  function mainPanel(game) {
+  if (!getStatus()?.allowed && window.ModdockMembership) return window.ModdockMembership.marketing();
   if (!getStatus()?.allowed) return `<div class="studio-locked">${mascot('studio-locked-mascot', '游匣 AI 卡通伙伴匣仔')}<span class="studio-pro">PRO</span><h2>游匣 AI</h2><p>我是匣仔，陪你把游戏里的奇思妙想做成 Mod。<br>开通 Pro，和我一起开始创作。</p><button class="btn primary" data-nav="account">查看我的会员</button></div>`;
   const s = game ? state(game.id) : null, t = s?.thread, running = active(t?.status), busy = !!s?.busy, disabled = busy || running;
   const empty = !t && !busy && !s?.saved;

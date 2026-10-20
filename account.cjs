@@ -1,6 +1,7 @@
 const crypto = require('node:crypto');
 const { setTimeout: wait } = require('node:timers/promises');
 const { version } = require('./package.json');
+const { requireAI, quotaView, AIEntitlementError } = require('./ai-policy.cjs');
 
 const DEFAULT_BASE_URL = 'https://mu-api.claude-api.cn/';
 const TERMS_VERSION = '2026-09-26';
@@ -88,7 +89,7 @@ function createAccountClient(options = {}) {
    if (typeof feature.key !== 'string' || !feature.key || typeof feature.enabled !== 'boolean' || typeof feature.allowed !== 'boolean' || !['standard', 'pro'].includes(feature.minimumTier) || !Number.isSafeInteger(feature.version) || feature.version < 0) fail(502, 'invalid_response', 'MU 返回了无效的功能权限。');
    return { key: feature.key, enabled: feature.enabled, minimumTier: feature.minimumTier, allowed: feature.allowed, version: feature.version };
   });
-  return { id: data.id, email: data.email, name: data.email.split('@')[0], mode: 'mu', membership: { tier: data.membership.tier, expiresAt: data.membership.expiresAt ?? null }, features, paymentsEnabled: data.paymentsEnabled === true };
+  return { id: data.id, email: data.email, name: data.email.split('@')[0], mode: 'mu', membership: { tier: data.membership.tier, expiresAt: data.membership.expiresAt ?? null }, features, paymentsEnabled: data.paymentsEnabled === true, aiUsage: quotaView(data.aiUsage, now()) };
  }
  async function clearSaved(owner) {
   if (!tokenStore || (owner && savedOwner !== owner)) return;
@@ -226,6 +227,10 @@ function createAccountClient(options = {}) {
   const state = await withSession(id, async current => {
    if (current.profile.id !== owner) fail(401, 'login_required', '创作账号已变化，请重新开始。');
    if (current.expiresAt <= now() + 30000) await apply(current, await send('auth/refresh', { refreshToken: current.refreshToken }));
+   current.profile = account(await authenticated(current, 'account/me'));
+   let operation; try { operation = JSON.parse(body || '{}').delivery?.operation; } catch {}
+   // Cancellation must remain possible after expiry or quota exhaustion.
+   if (operation !== 'cancel') requireAI(current.profile, now());
    return current;
   });
   const current = () => sessions.get(id) === state && state.profile.id === owner;
@@ -243,12 +248,14 @@ function createAccountClient(options = {}) {
     await withSession(id, async fresh => {
      if (fresh !== state || fresh.profile.id !== owner) fail(401, 'login_required', '创作账号已变化。');
      await apply(fresh, await send('auth/refresh', { refreshToken: fresh.refreshToken }));
+     let operation; try { operation = JSON.parse(body || '{}').delivery?.operation; } catch {}
+     if (operation !== 'cancel') requireAI(fresh.profile, now());
      return true;
     });
     response = await call();
    }
   } catch (error) {
-   if (signal?.aborted || error instanceof AccountError) throw error;
+   if (signal?.aborted || error instanceof AccountError || error instanceof AIEntitlementError) throw error;
    throw Object.assign(new AccountError(503, 'studio_unavailable', '创作连接暂时中断，正在恢复连接。'), { cause: error });
   }
   if (!current() || signal?.aborted) { await response.body?.cancel(); fail(401, 'login_required', '创作已停止，请重新登录后继续。'); }
@@ -257,7 +264,7 @@ function createAccountClient(options = {}) {
    try { data = await response.json(); } catch {}
    const messages = { pro_required: 'AI Mod 创作为 Pro 高级功能。', feature_denied: '当前账号的创作权限已关闭。',
     studio_rate_limited: '创作请求较多，请稍后再试。', studio_not_configured: 'MU 创作服务正在配置中，请稍后重试。',
-    ai_credits_exhausted: '创作服务额度暂不足，请联系维护方。', ai_response_invalid: 'AI 返回的内容未通过校验，请重试。',
+    ai_credits_exhausted: '本期 AI token 额度已用完，请查看会员额度。', ai_quota_unconfigured: 'AI 额度尚未配置，请联系维护方。', ai_response_invalid: 'AI 返回的内容未通过校验，请重试。',
     invalid_request: 'AI 请求参数未通过 MU 校验，请更新客户端；重新登录或等待重试无法修复此参数问题。' };
    fail(response.status, data?.code || 'studio_unavailable', messages[data?.code] || 'MU 创作服务请求失败，请稍后重试。', Number(response.headers.get('retry-after')) || undefined);
   }

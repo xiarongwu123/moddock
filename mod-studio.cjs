@@ -13,9 +13,7 @@ const { selectSkills } = require('./studio-skills.cjs');
 const { removeStudioSamples } = require('./studio-migration.cjs');
 
 function studioAccess(account) {
- const feature = account?.features?.find(item => item.key === 'modding.studio');
- const expires = account?.membership?.expiresAt;
- return account?.membership?.tier === 'pro' && (!expires || Date.parse(expires) > Date.now()) && (!feature || feature.enabled && feature.allowed);
+ return require('./ai-policy.cjs').hasPro(account);
 }
 class ModStudio {
  constructor(root, options = {}) { this.root = path.join(root, 'creations'); this.options = options; this.integration = new UniversalModder(options.integration); this.pending = new Map(); this.queues = new Map(); this.native = new (require('./studio-native-projects.cjs').NativeProjects)(options.tools); this.toolchain = new StudioToolchain(this, options.tools); this.conversations = new StudioConversations(this); this.ready = removeStudioSamples(this.root); this.ready.catch(() => {}); }
