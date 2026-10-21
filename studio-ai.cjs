@@ -1,6 +1,5 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const { deflateSync, crc32 } = require('node:zlib');
 const { NPCS, buildContentPack } = require('./content-pack.cjs');
 const { AI_GUIDE } = require('./bg3-mod.cjs');
 
@@ -15,6 +14,8 @@ Implement the user's actual idea; do not return demonstration code, placeholder 
 The user only describes the desired mod. Never ask them to write code, select a compiler or assemble a project. User-facing summaries should describe the intended gameplay result in two or three plain Chinese sentences, without paths, file inventories or tool internals. Clarifying questions should concern the desired behavior or game information.
 When modifying, preserve previous user requirements and incorporate the user's latest changes. Prior assistant replies are unverified proposals, not game API evidence. Discard assumptions from those replies when unsupported by the current game's facts; never carry another game's dialogue schedule or resource format into this game.`;
 const SCHEMAS = {
+ ...Object.fromEntries(Object.keys(require('./studio-game-mods.cjs').SPECS).map(kind => [kind, require('./studio-game-mods.cjs').schema(kind)])),
+ 'cyberpunk-cet-lua': 'kind="cyberpunk-cet-lua", name, author, description, code: complete CET Lua 5.1 / LuaJIT source <=24000 chars. Register CET callbacks/hotkeys; nil-check Game.GetPlayer() and wait for a loaded save before gameplay actions. No Lua 5.4 syntax, table.pack/table.unpack, filesystem/process/network operations or undeclared helper libraries. Use real verified game APIs and ModdockVerification expect/begin/check to read back each actual effect. Host adds spdlog.info verification logging and packages init.lua. This route does not generate .archive, redscript/RED4ext binaries, meshes, textures, voices or quest assets. Read the selected CET host guide and references before implementation.',
  'engine-mod': 'kind="engine-mod", name, author, description. Write mod.json {mode:engineEvidence.mode,patches:[],blockers:[],targets?:[]}, then actual code. Supported native modes: godot-gdscript main.gd extends Node, automatically compiled to matching bytecode and injected as an autoload into the original pack; gamemaker-gml *.gml with targets [{source:"main.gml",entry:EXACT_LOCAL_ENTRY,sha256:ORIGINAL_DECOMPILED_SOURCE_HASH}], host recompiles those existing VM entries together; rpgmaker-rgss main.rb inserted before Main in the actual script database/archive, use conservative Ruby 1.8 aliases; unity-il2cpp main.cs defines public static class ModContent with public static void Initialize(BepInEx.Unity.IL2CPP.BasePlugin plugin), host provides BepInEx 6 entry and compiles against generated local interop. Read actual recovered source/signatures first; metadata signatures describe interfaces, not method behavior. Native compilation runs on the desktop after submitting; its exact diagnostics are returned for repair. rpgmaker-plugin main.js requires detected MV/MZ; renpy-python main.py is wrapped in init 999 python. resource-patch has no files and requires patches [{path,sha256,find,replace}], complete source hashes and unique replacements. Choose source-development ONLY for precise unresolved format/API blockers; it stays BLOCKED and is never a completed Mod. Do not emit README, shell commands or a plan. Host fills mode/files/patches/blockers/targets from validated workspace; submit metadata only.',
  dialogue: 'kind="dialogue", name<=60 chars, author<=60, description<=240, npc one of ' + NPCS.join('/') + ', entries object with Mon/Tue/Wed/Thu/Fri/Sat/Sun keys and plain dialogue values. No $ commands or {{tokens}}.',
  texture: 'kind="texture", name, author, description, palette: object mapping single ASCII symbols to hex RGBA colors (#rrggbb or #rrggbbaa), rows: exactly 16 strings, each exactly 16 symbols from palette. Use "." for transparent pixels and palette["."]="#00000000". Design the requested weapon pixel art. Count every row before returning. The host encodes PNG.',
@@ -26,14 +27,7 @@ const SCHEMAS = {
  'custom-project': 'kind="custom-project", name, author, description, files: 1..12 objects {name: safe ASCII relative path, text: complete source}, <=64KB total. Source-only; unsupported build chains must be stated honestly.',
  'project-plan': 'kind="project-plan", name, author, description, plan: detailed development plan <=24000 chars, listing exact missing game API evidence or tools.',
 };
-function textureImage(pixels) {
- if (!Array.isArray(pixels) || pixels.length !== 16 || pixels.some(row => !Array.isArray(row) || row.length !== 16)) throw new Error('AI 贴图需为 16 × 16 像素');
- const data = Buffer.alloc(16 * 65);
- pixels.forEach((row, y) => row.forEach((value, x) => { if (!/^#[a-f0-9]{6}([a-f0-9]{2})?$/i.test(value)) throw new Error('AI 贴图颜色无效'); Buffer.from(value.slice(1) + (value.length === 7 ? 'ff' : ''), 'hex').copy(data, y * 65 + 1 + x * 4); }));
- const header = Buffer.alloc(13); header.writeUInt32BE(16); header.writeUInt32BE(16, 4); header[8] = 8; header[9] = 6;
- const chunk = (type, bytes) => { const name = Buffer.from(type), size = Buffer.alloc(4), crc = Buffer.alloc(4); size.writeUInt32BE(bytes.length); crc.writeUInt32BE(crc32(Buffer.concat([name, bytes]))); return Buffer.concat([size, name, bytes, crc]); };
- return 'data:image/png;base64,' + Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]), chunk('IHDR', header), chunk('IDAT', deflateSync(data)), chunk('IEND', Buffer.alloc(0))]).toString('base64');
-}
+const { textureImage } = require('./studio-pixels.cjs');
 function texturePixels(draft) {
  if (draft.rows === undefined && draft.palette === undefined) return draft.pixels;
  const { rows, palette } = draft;
@@ -48,7 +42,7 @@ function contextFor(payload) {
  const { diagnostic = {}, context = {} } = payload;
  return { game: context.game, diagnostic: { engine: diagnostic.engine, loaders: diagnostic.loaders, requirements: diagnostic.requirements, antiCheat: diagnostic.antiCheat, routes: diagnostic.routes }, engineEvidence: context.engineEvidence,
   supportedTypes: payload.types, capability: payload.capability, environment: payload.environment, previousDraft: payload.previousDraft, previousPlan: payload.previousPlan,
-  guide: context.guide?.text?.slice(0, 12000), notes: context.notes?.map(note => ({ title: note.title, text: note.text?.slice(0, 5000) })),
+  guide: (require('./studio-game-mods.cjs').has(payload.kind) ? require('./studio-game-mods.cjs').guide(payload.kind) + '\n' + (context.guide?.text || '') : payload.kind === 'cyberpunk-cet-lua' ? require('./studio-cyberpunk.cjs').GUIDE + '\n' + (context.guide?.text || '') : context.guide?.text)?.slice(0, 12000), notes: context.notes?.map(note => ({ title: note.title, text: note.text?.slice(0, 5000) })),
   conversation: payload.messages?.slice(-16), prompt: payload.prompt, kind: payload.kind, plan: payload.plan, validation: payload.validation, attempt: payload.attempt,
  };
 }
@@ -60,7 +54,10 @@ function validateGeneratedDraft(draft, kind) {
  }
  if (draft.description !== undefined && (typeof draft.description !== 'string' || draft.description.length > 240 || /[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(draft.description))) invalid('description 需为最多 240 字的普通文本');
  if (kind === 'bg3-follower' && (typeof draft.followerName !== 'string' || !draft.followerName.trim() || draft.followerName.length > 40 || typeof draft.greeting !== 'string' || !draft.greeting.trim() || draft.greeting.length > 300)) invalid('人物配方需要 1 至 40 字姓名和 1 至 300 字台词');
- if (['ue4ss-lua', 'reframework-lua', 'bg3-lua', 'bepinex-plugin'].includes(kind) && (typeof draft.code !== 'string' || !draft.code.trim() || draft.code.length > 24000)) invalid('实际源码需为 1 至 24000 字');
+ if (['ue4ss-lua', 'reframework-lua', 'bg3-lua', 'bepinex-plugin', 'cyberpunk-cet-lua'].includes(kind) && (typeof draft.code !== 'string' || !draft.code.trim() || draft.code.length > 24000)) invalid('实际源码需为 1 至 24000 字');
+ if (require('./studio-game-mods.cjs').has(kind)) {
+  try { require('./studio-game-mods.cjs').build(draft, '00000000-0000-4000-8000-000000000000'); } catch (error) { invalid(error.message); }
+ }
  if (kind === 'texture') {
   draft = { ...draft, image: textureImage(texturePixels(draft)) };
   delete draft.pixels; delete draft.rows; delete draft.palette;

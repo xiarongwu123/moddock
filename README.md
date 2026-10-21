@@ -14,9 +14,13 @@ MU 临时网页错误不会清除有效登录；安全的查询可自动重试�
 
 ## Pro AI Mod 创作工作台
 
+Minecraft Java 新增非 Lua 数据包与资源包路线，支持真实 mcfunction、JSON、16×16 PNG 和原生 ZIP；资源包可部署，数据包暂需导出并由用户选择目标世界。支持版本及边界见 [Minecraft 制作说明](docs/minecraft-packs-deployment.md)。
+
+2026-10-22 新增异星工厂、饥荒联机版、Noita、Garry's Mod、僵尸毁灭工程、BeamNG、王国风云 3、潜渊症的限定范围脚本/内容制作路线，接通源文件校验、原生结构导出与安装管理。支持范围、游戏内启用步骤和未完成项见 [最新制作适配核对](docs/studio-capability-audit-2026-10-22.md)，同步发布步骤见 [部署说明](docs/native-game-mods-deployment.md)。代码链路通过测试不代表真实游戏玩法已验收。
+
 主导航“AI 创作”和游戏详情均可进入多游戏对话工作台。选择或拖入游戏并点击“启动引擎”，创作进度仅显示“输入需求 → AI 生成中 → 完成”；生成后可进游戏确认、继续描述修改，满意后存进 Mod 库。制作详情默认折叠。MU 后端的 DeepSeek `deepseek-flash` 根据真实游戏诊断与 universal-modder 指南规划、生成和修复 Mod，客户端自动运行 Lua/C# 编译与文件校验。用户可通过对话安装产物、启动游戏、检查本次加载日志、预览文件或导出。已移除模拟制作模式；旧样例清理后保留用户想法。模型 API Key 只保存在 MU 后端，客户端登录 MU 后凭有效 Pro 权限直接使用，不需要配置模型密钥。Pro 权限和产物按账号隔离。详见 [AI Mod 工作台说明](docs/mod-studio.md)。
 
-自动制作链路已接入环境检查、Lua 5.4 语法编译、Unity Mono / BepInEx C# 编译、内容包验证与构建报告。用户可直接说“重新编译”“预览产物”“导出编译包”“检查本次运行”，无需编辑代码或构建参数。缺工具和游戏依赖时保留工程并报告阻塞；游戏内加载证据与文件验证分别记录。宿主开发环境可用 `npm run studio:setup-tools` 准备项目私有编译工具；打包客户端默认不捆绑 SDK。
+自动制作链路已接入环境检查、Lua 5.4 语法编译、Unity Mono / BepInEx C# 编译、内容包验证与构建报告。赛博朋克 2077 另有 CET Lua 5.1 脚本路线，支持制作、语法解析、打包、安装和独立日志验证；模型、贴图、REDmod 等其他路线仍待适配。用户可直接说“重新编译”“预览产物”“导出编译包”“检查本次运行”，无需编辑代码或构建参数。缺工具和游戏依赖时保留工程并报告阻塞；游戏内加载证据与文件验证分别记录。宿主开发环境可用 `npm run studio:setup-tools` 准备项目私有编译工具；打包客户端默认不捆绑 SDK。完整缺口见 [制作适配核对](docs/studio-capability-audit-2026-10-21.md)，CET 发布见 [部署说明](docs/cyberpunk-cet-deployment.md)。
 
 ## Windows 启动
 

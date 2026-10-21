@@ -18,7 +18,7 @@ export function createModStudio({ api, render, esc, icon, getGame, getGames, cha
  const states = new Map(); let revision = 0, epoch = 0;
  let thoughtRoot, thoughtHost;
  let promptRoot, promptHost;
- const picker = { busy: false, error: '' };
+ const picker = { busy: false, error: '', coverage: null, auditBusy: false, stopAudit: false };
  const state = id => { if (!states.has(id)) states.set(id, { idea: '', drafts: new Map(), threads: [], records: [], thread: null, saved: null, loaded: false, ready: false, busy: '', error: '', timer: null }); return states.get(id); };
  const visible = game => document.querySelector('[data-studio-root]')?.dataset.gameId === game.id;
  const update = () => { revision++; render(); };
@@ -135,11 +135,11 @@ export function createModStudio({ api, render, esc, icon, getGame, getGames, cha
  function result(s, busy) {
   const saved = s.saved;
   if (!saved || creating(s.thread)) return '';
-  const ready = creationReady(s), kept = saved.library && (!['bepinex-plugin', 'bg3-lua', 'bg3-follower', 'engine-mod'].includes(saved.adapterId) || saved.library.buildId === saved.toolchain?.id);
+  const ready = creationReady(s), kept = saved.library && (!['bepinex-plugin', 'bg3-lua', 'bg3-follower', 'engine-mod', 'factorio-lua', 'dst-lua', 'noita-lua', 'gmod-lua', 'zomboid-lua', 'beamng-lua', 'ck3-data', 'barotrauma-content', 'minecraft-datapack', 'minecraft-resourcepack'].includes(saved.adapterId) || saved.library.buildId === saved.toolchain?.id);
   const reporting = s.feedbackArtifactId === saved.id && s.feedbackBuildId === saved.toolchain?.id;
   const accepted = !reporting && saved.feedback?.status === 'accepted' && saved.feedback.buildId === saved.toolchain?.id;
   const feedback = `<section class="studio-user-feedback" aria-label="试玩反馈"><p>进游戏试用后，这个 Mod 能正常使用吗？</p><div class="studio-result-actions"><button class="btn" data-studio-action="feedback-yes" ${busy ? 'disabled' : ''}>能用，效果符合预期</button><button class="btn" data-studio-action="feedback-no" ${busy ? 'disabled' : ''}>不能用 / 效果不对</button></div>${reporting ? `<label for="studio-feedback-problem">遇到了什么问题？</label><textarea id="studio-feedback-problem" data-studio-feedback maxlength="2000" rows="3" placeholder="例如：按 F7 没反应、进入关卡闪退、视角与预期不符" ${busy ? 'disabled' : ''}>${esc(s.feedbackProblem || '')}</textarea><button class="btn primary" data-studio-action="feedback-submit" ${busy ? 'disabled' : ''}>提交问题并继续修改</button><p class="studio-result-hint">会结合当前作品和已有运行记录继续修改，完成后请重新试玩。</p>` : accepted ? '<p class="studio-result-hint">已确认当前版本能用，可以存到 Mod 库。</p>' : ''}</section>`;
-  return `<section class="studio-result studio-completion" aria-label="生成结果"><div class="studio-completion-heading"><span class="studio-completion-icon">${icon(ready ? 'box' : 'info')}</span><div><span class="studio-kicker">${ready ? (saved.adapterId === 'project-plan' ? '开发方案已生成' : (accepted ? '你已确认能用' : '制作完成 · 请试玩确认')) : '还需要处理一些问题'}</span><h3>${esc(saved.draft.name)}</h3></div></div><p>${esc(saved.draft.description || saved.summary)}</p>${ready && saved.installable ? `<div class="studio-result-actions"><button class="btn primary" data-studio-action="try" ${busy ? 'disabled' : ''}>${icon('play')}进游戏试试</button>${accepted ? `<button class="btn" data-studio-action="keep" ${busy || kept ? 'disabled' : ''}>${icon('box')}${kept ? '已存入 Mod 库' : '存到 Mod 库'}</button>` : ''}${kept ? '<button class="text-link" data-studio-action="library">打开 Mod 库</button>' : ''}</div>${feedback}` : `<p class="studio-result-hint">${ready ? '这是你要求的文档或源码，可查看内容或导出。' : '这次制作还没有通过验证，可以继续对话调整。'}</p>`}${s.saved.deployment?.runtime ? `<p class="studio-fineprint">${esc(s.saved.deployment.runtime.detail)}</p>` : ''}<details class="studio-technical" data-help-key="studio:artifact:${saved.id}"><summary>文件与制作详情</summary><div class="studio-result-actions"><button class="btn small" data-studio-action="product" ${busy ? 'disabled' : ''}>查看文件与预览</button><button class="btn small" data-studio-action="export" ${busy ? 'disabled' : ''}>导出 ZIP</button>${saved.toolchain?.bundle ? `<button class="btn small" data-studio-action="export-build" ${busy ? 'disabled' : ''}>导出编译包</button>` : ''}</div>${toolReport(saved.toolchain)}${gameInfo(s)}</details></section>`;
+  return `<section class="studio-result studio-completion" aria-label="生成结果"><div class="studio-completion-heading"><span class="studio-completion-icon">${icon(ready ? 'box' : 'info')}</span><div><span class="studio-kicker">${ready ? (saved.adapterId === 'project-plan' ? '开发方案已生成' : (accepted ? '你已确认能用' : '制作完成 · 请试玩确认')) : '还需要处理一些问题'}</span><h3>${esc(saved.draft.name)}</h3></div></div><p>${esc(saved.draft.description || saved.summary)}</p>${ready && saved.installable ? `<div class="studio-result-actions"><button class="btn primary" data-studio-action="try" ${busy ? 'disabled' : ''}>${icon('play')}${saved.adapterId === 'minecraft-resourcepack' ? '安装资源包' : '进游戏试试'}</button>${accepted ? `<button class="btn" data-studio-action="keep" ${busy || kept ? 'disabled' : ''}>${icon('box')}${kept ? '已存入 Mod 库' : '存到 Mod 库'}</button>` : ''}${kept ? '<button class="text-link" data-studio-action="library">打开 Mod 库</button>' : ''}</div>${feedback}` : `<p class="studio-result-hint">${ready ? (saved.exportOnly ? '数据包已生成，可导出原生 ZIP 后放入你选择的世界 datapacks 目录；尚未验证游戏效果。' : '这是你要求的文档或源码，可查看内容或导出。') : '这次制作还没有通过验证，可以继续对话调整。'}</p>`}${s.saved.deployment?.runtime ? `<p class="studio-fineprint">${esc(s.saved.deployment.runtime.detail)}</p>` : ''}<details class="studio-technical" data-help-key="studio:artifact:${saved.id}"><summary>文件与制作详情</summary><div class="studio-result-actions"><button class="btn small" data-studio-action="product" ${busy ? 'disabled' : ''}>查看文件与预览</button><button class="btn small" data-studio-action="export" ${busy ? 'disabled' : ''}>导出 ZIP</button>${saved.toolchain?.bundle ? `<button class="btn small" data-studio-action="export-build" ${busy ? 'disabled' : ''}>导出编译包</button>` : ''}</div>${toolReport(saved.toolchain)}${gameInfo(s)}</details></section>`;
  }
  function gameInfo(s) {
   const a = s.thread?.analysis;
@@ -165,6 +165,11 @@ export function createModStudio({ api, render, esc, icon, getGame, getGames, cha
   const message = s.busy === 'environment' || s.busy === 'start' ? '正在准备，请稍候…' : environment.status === 'conflict' ? '游戏文件需要检查，处理后就能继续准备。' : canPrepare ? '开始创作前，需要先准备一下。' : '发送想法后，将自动调查这款游戏的实现方式。';
   return `<section class="studio-environment" aria-label="创作提示"><p role="status">${message}</p><button class="btn small" data-studio-action="${environment.status === 'conflict' || !canPrepare ? 'check-environment' : 'environment'}" ${s.busy || active(s.thread?.status) ? 'disabled' : ''}>${!canPrepare || environment.status === 'conflict' ? '重新检查' : '自动准备'}</button></section>` + content;
  }
+ function coveragePanel() {
+  const report = picker.coverage;
+  const labels = { 'authoring-route': '有专用制作入口', 'engine-investigation': '需调查引擎实现', 'missing-adapter': '缺少适配', blocked: '存在联网或保护限制', 'diagnostic-failed': '读取失败' };
+  return `<details class="studio-technical" data-help-key="studio:coverage"><summary>查看本机游戏适配情况</summary><p>逐款检查本机文件与制作入口。构建、安装和游戏效果仍需分别验证。</p><button class="btn small" data-studio-action="${picker.auditBusy ? 'coverage-stop' : 'coverage'}">${picker.auditBusy ? '停止检查' : '检查本机游戏'}</button>${report ? `<p role="status">已检查 ${report.items.length} / ${report.total} 款</p><ul>${Object.entries(report.counts).map(([status, count]) => `<li>${esc(labels[status] || status)}：${count}</li>`).join('')}</ul><ul>${report.items.map(item => `<li>${esc(item.name || item.gameId)}：${esc(labels[item.status] || item.status)}${item.error ? ' · ' + esc(item.error) : ''}</li>`).join('')}</ul>` : ''}${picker.auditError ? `<p role="alert">${esc(picker.auditError)}</p>` : ''}</details>`;
+ }
  function mainPanel(game) {
   if (!getStatus()?.allowed && window.ModdockMembership) return window.ModdockMembership.marketing();
   if (!getStatus()?.allowed) return `<div class="studio-locked">${mascot('studio-locked-mascot', '游匣 AI 卡通伙伴匣仔')}<span class="studio-pro">PRO</span><h2>游匣 AI</h2><p>我是匣仔，陪你把游戏里的奇思妙想做成 Mod。<br>开通 Pro，和我一起开始创作。</p><button class="btn primary" data-nav="account">查看我的会员</button></div>`;
@@ -174,6 +179,7 @@ export function createModStudio({ api, render, esc, icon, getGame, getGames, cha
   const header = s?.ready ? `<button class="studio-selected-game" data-studio-action="choose-game" aria-label="更换游戏，当前：${esc(game.name)}" ${disabled ? 'disabled' : ''}>${icon('gamepad')}<span>${esc(game.name)}</span>${icon('chevron')}</button>${controls}` : '<div class="studio-brand-title"><h2>游匣 <span>AI</span></h2><span class="studio-pro">PRO</span></div>';
   return `<div class="mod-studio studio-chat studio-simple" data-studio-root data-game-id="${esc(game?.id || '')}">
    <header class="studio-heading">${header}</header>
+   ${!s?.ready ? coveragePanel() : ''}
    ${!s?.ready ? selection(game) : `<div class="studio-chat-layout">
     <section class="studio-conversation ${empty ? 'is-empty' : ''}" aria-label="创作对话">
      <div class="studio-chat-scroll" data-studio-scroll data-chat-id="${t?.id || 'new'}" aria-live="polite" aria-busy="${running}">${s.busy === 'load' ? '<p class="studio-loading">正在读取创作记录…</p>' : conversation(s)}${result(s, disabled)}</div>
@@ -201,6 +207,25 @@ export function createModStudio({ api, render, esc, icon, getGame, getGames, cha
   finally { if (same(ticket)) { picker.busy = false; update(); } }
  }
  async function request(action) {
+  if (action === 'coverage-stop') { picker.stopAudit = true; return; }
+  if (action === 'coverage') {
+   if (picker.auditBusy || !getStatus()?.allowed) return;
+   const ticket = epoch;
+   picker.auditBusy = true; picker.stopAudit = false; picker.auditError = ''; picker.coverage = { items: [], counts: {}, total: getGames().length }; update();
+   try {
+    let offset = 0;
+    do {
+     const batch = await api('studio/coverage', { offset });
+     if (!same(ticket)) return;
+     picker.coverage.total = batch.total;
+     picker.coverage.items.push(...batch.items);
+     for (const [status, count] of Object.entries(batch.counts)) picker.coverage.counts[status] = (picker.coverage.counts[status] || 0) + count;
+     offset = batch.nextOffset; update();
+    } while (offset !== null && !picker.stopAudit);
+   } catch (error) { if (same(ticket)) picker.auditError = error.message; }
+   finally { if (same(ticket)) { picker.auditBusy = false; update(); } }
+   return;
+  }
   if (action === 'add-game') return importGame();
   const game = getGame(); if (!game || !getStatus()?.allowed) return;
   const s = state(game.id), ticket = epoch;
@@ -230,7 +255,7 @@ export function createModStudio({ api, render, esc, icon, getGame, getGames, cha
    if (action === 'choose-game') s.ready = false;
    if (action === 'new') { s.drafts.set(s.thread?.id || 'new', s.idea); s.thread = null; s.saved = null; s.idea = ''; s.drafts.delete('new'); s.activityStartedAt = null; s.activityEndedAt = null; clearTimeout(s.timer); }
    if (action === 'send' || action === 'resume' || action === 'try') {
-    const thread = await api('studio/conversations/send', { gameId: game.id, id: s.thread?.id, artifactId: s.saved?.id, mode: 'ai', ...(action === 'resume' ? { resume: true } : { message: action === 'try' ? s.saved?.deployment?.modId ? '启动游戏并检查日志' : '安装并启动游戏' : s.idea }) });
+    const thread = await api('studio/conversations/send', { gameId: game.id, id: s.thread?.id, artifactId: s.saved?.id, mode: 'ai', ...(action === 'resume' ? { resume: true } : { message: action === 'try' ? s.saved?.adapterId === 'minecraft-resourcepack' ? '安装产物' : s.saved?.deployment?.modId ? '启动游戏并检查日志' : '安装并启动游戏' : s.idea }) });
     if (!same(ticket)) return; remember(s, thread); if (action === 'send') { s.idea = ''; s.drafts.delete(thread.id); s.drafts.delete('new'); }
    }
    if (action === 'keep' && s.saved) { await api('studio/library', { gameId: game.id, id: s.saved.id }); if (!same(ticket)) return; s.saved = await api('studio/read', { gameId: game.id, id: s.saved.id }); if (!same(ticket)) return; await refresh(); }
@@ -326,7 +351,7 @@ export function createModStudio({ api, render, esc, icon, getGame, getGames, cha
    try { const selectedPath = window.moddockDesktop.gamePath(file); if (!selectedPath) throw new Error('无法读取此游戏的位置'); await importGame(selectedPath); }
    catch (error) { picker.error = error.message; update(); }
   },
-  reset() { epoch++; for (const s of states.values()) clearTimeout(s.timer); states.clear(); clearThought(); clearPrompt(); picker.busy = false; picker.error = ''; revision++; },
+  reset() { epoch++; for (const s of states.values()) clearTimeout(s.timer); states.clear(); clearThought(); clearPrompt(); picker.busy = false; picker.error = ''; picker.auditBusy = false; picker.coverage = null; picker.auditError = ''; revision++; },
  };
  return ui;
 }

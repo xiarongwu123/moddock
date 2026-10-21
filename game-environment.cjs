@@ -51,6 +51,16 @@ class GameEnvironment {
   return { report, root, profile };
  }
  async status(game) {
+  const gameModKind = require('./studio-game-mods.cjs').forGame(game);
+  if (gameModKind) {
+   const mods = require('./studio-game-mods.cjs'); let ready = false, detail = mods.SPECS[gameModKind].scope;
+   try { await mods.installRoot(game, { modKind: gameModKind }, this.installers.options || {}); ready = true; } catch (error) { detail = error.message; }
+   return { applicable: true, supported: true, adapter: gameModKind, name: mods.SPECS[gameModKind].game, ready, runtimeConfirmed: false, coverage: 'adapter', canPrepare: false, status: ready ? 'ready' : 'missing', message: ready ? '已接通专用制作与文件部署；需在游戏内启用并实测。' : '可制作和导出；安装条件：' + detail };
+  }
+  if (require('./studio-cyberpunk.cjs').isCyberpunk(game)) {
+   const report = await diagnoseGame(game), ready = report.loaderFiles.CET?.length === 1;
+   return { applicable: true, supported: (this.options.platform || process.platform) === 'win32', adapter: 'cyberpunk-cet-lua', name: 'Cyber Engine Tweaks', engine: report.engine, ready, runtimeConfirmed: false, coverage: 'adapter', canPrepare: false, status: ready ? 'ready' : 'missing', message: ready ? '已检测到 CET；游戏版本匹配与实际加载待运行确认。' : 'CET Lua 脚本可制作和导出；安装前需要匹配游戏版本的 Cyber Engine Tweaks。' };
+  }
   if (isBG3(game)) return { ...(await this.bg3.status(game)), adapter: 'bg3', name: 'BG3 Script Extender', coverage: 'adapter', canPrepare: true };
   const { report, profile } = await this.describe(game);
   const supported = (this.options.platform || process.platform) === 'win32';

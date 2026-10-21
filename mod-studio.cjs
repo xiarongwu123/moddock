@@ -22,8 +22,14 @@ class ModStudio {
  async workspace(game) {
   const diagnostic = await this.integration.diagnose(game, await diagnoseGame(game));
   const context = await this.integration.context(game, diagnostic);
+  if (require('./studio-cyberpunk.cjs').isCyberpunk(game)) context.guide.text = (require('./studio-cyberpunk.cjs').GUIDE + '\n' + context.guide.text).slice(0, 12000);
   context.engineEvidence = await require('./studio-engines.cjs').collectEngineEvidence(game, diagnostic);
   context.engineEvidence = await this.native.snapshot(game, context.engineEvidence);
+  const gameModKind = require('./studio-game-mods.cjs').forGame(game);
+  if (gameModKind) {
+   context.guide.text = (require('./studio-game-mods.cjs').guide(gameModKind) + '\n' + context.guide.text).slice(0, 12000);
+   context.engineEvidence = await require('./studio-game-mods.cjs').evidence(game, context.engineEvidence);
+  }
   if (diagnostic.engine.key === 'unreal') {
    const safety = require('./studio-ue4ss-safety.cjs');
    context.engineEvidence.installedUE4SS = await safety.installedUE4SS(game, diagnostic);
@@ -34,7 +40,7 @@ class ModStudio {
    const contract=skill.split('## Mandatory executable acceptance contract')[1]?.split('\n## ')[0] || '';
    context.guide.text=('REFramework host runtime verification contract:\n'+contract+'\n'+context.guide.text).slice(0,12000);
   }
-  return { diagnostic, context, skills: selectSkills(game, diagnostic), types: this.toolchain.catalog(recipesFor(game, diagnostic)) };
+  return { diagnostic, context, coverage: require('./studio-coverage.cjs').assessment(game, diagnostic), skills: selectSkills(game, diagnostic), types: this.toolchain.catalog(recipesFor(game, diagnostic)) };
  }
  async prepareNative(game, context) {
   const diagnostic = await diagnoseGame(game);
@@ -43,7 +49,12 @@ class ModStudio {
   await this.native.prepare(game, evidence, { ...context, diagnostic });
  }
  async ruleFor(game, item, savedRule, owner) {
-  if (owner && item.artifactId && ['ue4ss-lua', 'reframework-lua'].includes(item.adapterId) && !item.draft?.code) {
+  if (owner && item.artifactId && require('./studio-game-mods.cjs').has(item.adapterId)) {
+   const saved = (await this.deploymentArchive(owner, game, item.artifactId)).item;
+   if (saved.buildId !== item.buildId) throw new Error('此创作已有更新构建，请重新确认并存入当前版本');
+   item = saved;
+  }
+  if (owner && item.artifactId && ['ue4ss-lua', 'reframework-lua', 'cyberpunk-cet-lua'].includes(item.adapterId) && !item.draft?.code) {
    item = (await this.deploymentArchive(owner, game, item.artifactId)).item;
   }
   if (item.adapterId === 'engine-mod' && item.compiled && !item.toolchain?.deployment && item.artifactId && owner) {
@@ -88,7 +99,9 @@ class ModStudio {
   if (item.id !== id) throw new Error('创作记录不匹配');
   if (!item.adapterId) Object.assign(item, { adapterId: item.draft.kind, output: '内容包', installable: ['dialogue','texture'].includes(item.draft.kind) });
   item.toolchain = await this.toolchain.latest(owner, id);
+  item.exportOnly = !!require('./studio-game-mods.cjs').SPECS[item.adapterId]?.exportOnly;
   if (['bepinex-plugin', 'bg3-lua', 'bg3-follower', 'engine-mod'].includes(item.adapterId) && item.toolchain?.status === 'passed' && item.toolchain.bundle) item.installable = true;
+  if (require('./studio-game-mods.cjs').has(item.adapterId) && item.toolchain?.status === 'passed' && item.toolchain.bundle) item.installable = !require('./studio-game-mods.cjs').SPECS[item.adapterId].exportOnly;
   if (item.toolchain && item.toolchain.status !== 'passed') item.installable = false;
   try { item.deployment = await smallJson(path.join(this.recordPath(owner, id), 'deployment.json')); } catch (error) { if (error.code !== 'ENOENT') throw error; }
   try { item.library = await smallJson(path.join(this.recordPath(owner, id), 'library.json')); } catch (error) { if (error.code !== 'ENOENT') throw error; }
@@ -141,7 +154,7 @@ class ModStudio {
  async deploymentArchive(owner, game, id) {
   const archive = await this.archive(owner, game, id), item = archive.item;
   if (item.toolchain?.status !== 'passed') throw new Error('请先完成编译与文件验证，再安装产物。' + (item.toolchain?.checks.filter(check => ['blocked','failed'].includes(check.status)).map(check => check.detail).join('；') || ''));
-  if (!['bepinex-plugin', 'bg3-lua', 'bg3-follower', 'engine-mod'].includes(item.adapterId)) return archive;
+  if (!['bepinex-plugin', 'bg3-lua', 'bg3-follower', 'engine-mod'].includes(item.adapterId) && !require('./studio-game-mods.cjs').has(item.adapterId)) return archive;
   const bundle = await this.toolchain.bundle(owner, game, id, item.toolchain.id), bytes = Buffer.from(bundle.base64, 'base64');
   return { item: { ...item, compiled: true, buildId: item.toolchain.id, ...(item.toolchain.bg3Module ? { bg3Module: item.toolchain.bg3Module } : {}), sha256: crypto.createHash('sha256').update(bytes).digest('hex') }, bytes };
  }

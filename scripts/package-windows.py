@@ -28,7 +28,11 @@ for name in ['game-diagnostics.cjs', 'mod-studio.cjs', 'content-pack.cjs', 'univ
     shutil.copy2(project / name, app / name)
 for name in ['studio-agent.cjs', 'studio-api.cjs', 'studio-events.cjs', 'studio-skills.cjs', 'studio-lua.cjs', 'bg3-controls.cjs', 'studio-control-host.cjs', 'bg3-extender.cjs', 'game-components.cjs', 'game-environment.cjs', 'studio-compiler-setup.cjs']:
     shutil.copy2(project / name, app / name)
-for name in ['ai-policy.cjs', 'ai-usage.cjs', 'ai-install.cjs', 'archive-format.cjs', 'author-install.cjs', 'install-instructions.cjs', 'replacement-evidence.cjs', 'download-transfer.cjs', 'download-bundles.cjs', 'studio-game-process.cjs', 'studio-runtime-cycle.cjs', 'studio-runtime-verification.cjs', 'studio-ue4ss-safety.cjs', 'studio-engines.cjs', 'studio-errors.cjs', 'studio-intent.cjs', 'studio-game-api.cjs', 'studio-native-tools.cjs', 'studio-native-projects.cjs', 'studio-native-patch.cjs', 'studio-godot.cjs', 'studio-rgss.cjs', 'studio-ruby.cjs', 'studio-il2cpp.cjs']:
+shutil.copy2(project / 'studio-game-mods.cjs', app / 'studio-game-mods.cjs')
+shutil.copy2(project / 'studio-coverage.cjs', app / 'studio-coverage.cjs')
+shutil.copy2(project / 'studio-minecraft.cjs', app / 'studio-minecraft.cjs')
+shutil.copy2(project / 'studio-pixels.cjs', app / 'studio-pixels.cjs')
+for name in ['fomod.cjs', 'game-updates.cjs', 'studio-user-feedback.cjs', 'studio-cyberpunk.cjs', 'ai-policy.cjs', 'ai-usage.cjs', 'ai-install.cjs', 'archive-format.cjs', 'author-install.cjs', 'install-instructions.cjs', 'replacement-evidence.cjs', 'download-transfer.cjs', 'download-bundles.cjs', 'studio-game-process.cjs', 'studio-runtime-cycle.cjs', 'studio-runtime-verification.cjs', 'studio-ue4ss-safety.cjs', 'studio-engines.cjs', 'studio-errors.cjs', 'studio-intent.cjs', 'studio-game-api.cjs', 'studio-native-tools.cjs', 'studio-native-projects.cjs', 'studio-native-patch.cjs', 'studio-godot.cjs', 'studio-rgss.cjs', 'studio-ruby.cjs', 'studio-il2cpp.cjs']:
     shutil.copy2(project / name, app / name)
 (app / 'scripts').mkdir()
 shutil.copy2(project / 'scripts/build-ui.cjs', app / 'scripts/build-ui.cjs')

@@ -11,7 +11,7 @@ const { StudioTasks } = require('./studio-tasks.cjs');
 const { AILedger } = require('./ai-ledger.cjs');
 
 const actions = new Set(['plan', 'generate', 'repair']);
-const kinds = new Set(['dialogue', 'texture', 'ue4ss-lua', 'reframework-lua', 'bepinex-plugin', 'bg3-lua', 'bg3-follower', 'engine-mod', 'custom-project', 'project-plan']);
+const kinds = new Set(['dialogue', 'texture', 'ue4ss-lua', 'reframework-lua', 'bepinex-plugin', 'bg3-lua', 'bg3-follower', 'engine-mod', 'custom-project', 'project-plan', 'cyberpunk-cet-lua', ...Object.keys(require('../studio-game-mods.cjs').SPECS)]);
 const fields = new Set(['harness', 'prompt', 'kind', 'plan', 'previousPlan', 'previousDraft', 'validation', 'attempt', 'types', 'capability', 'messages', 'diagnostic', 'environment', 'context', 'agentStep', 'toolHistory']);
 function validate(action, value) {
  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !fields.has(key))) throw new Error('Invalid creation context');

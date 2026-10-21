@@ -41,7 +41,12 @@ async function diagnoseGame(game) {
  else if (find(/\.deps\.json$/).length) set('dotnet', '.NET / XNA / MonoGame', find(/\.deps\.json$/).slice(0, 3));
  else if (find(/(^|\/)data\/(skyrim|fallout4)\.esm$/).length) set('bethesda', 'Bethesda Creation Engine', find(/\.esm$/).slice(0, 2));
  if (engine.key === 'unknown') engine = await require('./studio-engines.cjs').embeddedGodot(root, files) || engine;
+ if (engine.key === 'unknown' && (/minecraft|我的世界/i.test(game.name || path.basename(root)) || find(/^versions\/[^/]+\/[^/]+\.json$/).length)) {
+  const versions = await require('./studio-minecraft.cjs').evidence(root);
+  if (versions.length) engine = { key: 'minecraft-java', name: 'Minecraft Java', confidence: '版本清单与 JAR 容器匹配', evidence: versions.map(doc => doc.path) };
+ }
  if (isBG3(game)) set('larian-bg3', 'Larian · Baldur’s Gate 3', find(/(^|\/)(bg3(?:_dx11)?\.exe|gustav(?:dev)?\.pak)$/).slice(0, 3));
+ if (require('./studio-cyberpunk.cjs').isCyberpunk(game)) set('redengine', 'REDengine · Cyberpunk 2077', find(/^bin\/x64\/cyberpunk2077\.exe$/));
  if (find(/(^|\/)re_chunk_\d+\.pak$/).length || require('./game-components.cjs').reGames[String(game.appId)]) set('re-engine', 'Capcom · RE Engine', find(/re_chunk_\d+\.pak$/).slice(0, 3));
  const antiCheat = [
   ['EasyAntiCheat', /easyanticheat|start_protected_game\.exe$/], ['BattlEye', /battleye|beservice/],
@@ -65,6 +70,8 @@ async function diagnoseGame(game) {
  const reDirectories = [...directories].filter(([name]) => /(^|\/)reframework\/autorun$/.test(name));
  if (reDirectories.length && !loaders.includes('REFramework')) loaders.push('REFramework');
  loaderFiles.REFramework = reDirectories.map(([, name]) => name);
+ loaderFiles.CET = find(/^bin\/x64\/plugins\/cyber_engine_tweaks\.asi$/).map(file => files.get(file));
+ if (loaderFiles.CET.length) loaders.push('Cyber Engine Tweaks');
  loaderFiles.BG3SE = isBG3(game) ? find(/(^|\/)bin\/dwrite\.dll$/).map(file => files.get(file)) : [];
  if (loaderFiles.BG3SE.length) loaders.push('BG3 Script Extender');
  const requirements = stardew ? [

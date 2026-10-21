@@ -64,6 +64,7 @@ class StudioLifecycle {
    const verified = await this.installers.action(game, existing.id, 'verify');
    if (verified.verification.status !== 'files_ok') throw new Error(verified.verification.message);
    const deployment = { ...item.deployment, status: 'installed', modId: existing.id, jobId: job.id, buildId: item.buildId, sha256: item.sha256, message: '此版本已安装并启用，托管文件校验通过。' };
+   if (item.adapterId === 'minecraft-resourcepack') deployment.message = '资源包已部署，文件校验通过。请从自己的启动器打开对应 Minecraft 版本，在资源包菜单启用；游戏效果尚未验证。';
    await this.persist(owner, artifactId, deployment); return deployment;
   }
   const predecessors = this.predecessors(owner, game, item);
@@ -77,6 +78,7 @@ class StudioLifecycle {
    await this.permission(context, 'library.manage');
    const mod = await this.installers.apply(game, plan.id, item.adapterId === 'engine-mod' && plan.files.every(file => !file.originalHash || rule.baseHashes?.[file.destination] === file.originalHash));
    const deployment = { status: 'installed', modId: mod.id, jobId: job.id, buildId: item.buildId, sha256: item.sha256, message: previous ? '当前版本已安装并启用，已替换此对话的上一版本；文件校验通过。' : '产物已安装并启用，文件校验通过。可以继续说“启动游戏并检查日志”。' };
+   if (item.adapterId === 'minecraft-resourcepack') deployment.message = '资源包已部署，文件校验通过。请从自己的启动器打开对应 Minecraft 版本，在资源包菜单启用；游戏效果尚未验证。';
    await this.persist(owner, artifactId, deployment); return deployment;
   } catch (error) {
    if (removed && !this.installers.state.mods.some(mod => mod.jobId === job.id && mod.gameId === game.id)) {
@@ -110,7 +112,9 @@ class StudioLifecycle {
   return record;
  }
  async logRelative(game, artifact) {
+  if (require('./studio-game-mods.cjs').has(artifact.adapterId)) return artifact.runtime?.log || null;
   if (['bg3-lua', 'bg3-follower'].includes(artifact.adapterId)) return artifact.runtime?.log || null;
+  if (artifact.adapterId === 'cyberpunk-cet-lua') return artifact.runtime?.log || null;
   const { diagnostic } = await this.studio.workspace(game), files = diagnostic.loaderFiles;
   if (artifact.runtime?.loader === 'UE4SS' && files.UE4SS?.length === 1) return path.posix.join(path.posix.dirname(files.UE4SS[0]), 'UE4SS.log');
   if (artifact.runtime?.loader === 'BepInEx' && files.BepInEx?.length === 1) return path.posix.join(path.posix.dirname(path.posix.dirname(files.BepInEx[0])), 'LogOutput.log');
@@ -126,7 +130,7 @@ class StudioLifecycle {
   await this.studio.options.ensureEnvironment?.(context);
   const verified = await this.installers.action(game, mod.id, 'verify');
   if (verified.verification.status !== 'files_ok') throw new Error(verified.verification.message);
-  const logRoot = ['bg3-lua', 'bg3-follower'].includes(item.adapterId) ? mod.root : game.installPath;
+  const logRoot = ['bg3-lua', 'bg3-follower'].includes(item.adapterId) || item.runtime?.gameModRoot ? mod.root : game.installPath;
   const relative = await this.logRelative(game, item), log = await readLog(logRoot, relative);
   await this.permission(context, 'game.launch');
   const run = await this.installers.launch(game);
@@ -135,13 +139,14 @@ class StudioLifecycle {
   await this.persist(owner, artifactId, deployment); return deployment;
  }
  async runtime({ owner, game, artifact }) {
-  const job = this.jobFor(owner, game, artifact, ['bepinex-plugin', 'bg3-lua', 'bg3-follower', 'engine-mod'].includes(artifact.adapterId) ? artifact.toolchain?.id : undefined);
+  const job = this.jobFor(owner, game, artifact, ['bepinex-plugin', 'bg3-lua', 'bg3-follower', 'engine-mod'].includes(artifact.adapterId) || require('./studio-game-mods.cjs').has(artifact.adapterId) ? artifact.toolchain?.id : undefined);
   const mod = job && this.installers.state.mods.find(mod => mod.gameId === game.id && mod.jobId === job.id && mod.status === 'enabled');
   if (!mod) return { status: 'not_installed', detail: '当前产物尚未安装并启用，没有对应的游戏运行证据。' };
+  if (require('./studio-game-mods.cjs').has(artifact.adapterId) && !artifact.runtime?.log) return { status: 'unsupported', detail: '此游戏路线尚无可自动归属到当前作品的运行日志；请在游戏中启用并验证效果，再反馈当前版本是否可用。' };
   const deployment = artifact.deployment;
   const run = deployment?.runId && this.installers.state.runs.find(run => run.id === deployment.runId && run.gameId === game.id && run.managed?.some(entry => entry.id === mod.id));
   if (!run) return { status: 'not_run', detail: '当前产物尚无对应启动记录，请说“启动游戏并检查日志”。' };
-  const compiled=['bepinex-plugin','bg3-lua','bg3-follower','engine-mod'].includes(artifact.adapterId);
+  const compiled=['bepinex-plugin','bg3-lua','bg3-follower','engine-mod'].includes(artifact.adapterId) || require('./studio-game-mods.cjs').has(artifact.adapterId);
   const expectedSha=compiled?artifact.toolchain?.bundle?.sha256:artifact.sha256,expectedBuild=compiled?artifact.toolchain?.id:artifact.buildId;
   if(deployment.sha256!==expectedSha || deployment.buildId && deployment.buildId!==expectedBuild) return {status:'stale_run',detail:'运行记录对应旧构建，必须重新启动后验证当前版本。'};
   const latest=this.installers.state.runs.find(r=>r.gameId===game.id);
@@ -154,7 +159,7 @@ class StudioLifecycle {
    const loaded = verification?.runId === run.id && ['loader_loaded','loader_with_errors'].includes(verification.status);
    runtime = { status: loaded ? verification.status : checked.status === 'log_error' ? 'log_error' : 'unconfirmed', detail: loaded ? verification.message : checked.message };
   } else {
-   const log = await readLog(['bg3-lua', 'bg3-follower'].includes(artifact.adapterId) ? mod.root : game.installPath, deployment.logRelative), text = freshText(log, deployment.baseline, run.started);
+   const log = await readLog(['bg3-lua', 'bg3-follower'].includes(artifact.adapterId) || artifact.runtime?.gameModRoot ? mod.root : game.installPath, deployment.logRelative), text = freshText(log, deployment.baseline, run.started);
    const errors = text.split('\n').filter(line => /\b(ERROR|FATAL)\b|failed to load|could not be loaded/i.test(line));
    const loaded = !!artifact.runtime?.marker && text.split('\n').some(line => line.includes(artifact.runtime.marker) && !/\b(ERROR|FATAL)\b/i.test(line));
    runtime = { status: loaded ? errors.length ? 'loader_with_errors' : 'loader_loaded' : errors.length ? 'log_error' : 'unconfirmed',
@@ -196,7 +201,7 @@ class StudioLifecycle {
    const artifactId=job?.studio?.artifactId || job?.resourceId?.replace(/^studio:/,'');
    if(!job || !artifactId) continue;
    const artifact=await this.studio.read(owner,artifactId);
-   const relative=await this.logRelative(game,artifact), log=await readLog(['bg3-lua','bg3-follower'].includes(artifact.adapterId)?mod.root:game.installPath,relative);
+   const relative=await this.logRelative(game,artifact), log=await readLog(['bg3-lua','bg3-follower'].includes(artifact.adapterId)||artifact.runtime?.gameModRoot?mod.root:game.installPath,relative);
    captured.push({mod,artifact,relative,baseline:log?{hash:log.hash,size:log.size,fileId:log.fileId}:null});
   }
   return captured;

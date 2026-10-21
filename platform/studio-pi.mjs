@@ -51,7 +51,7 @@ export async function invokePi({ apiKey, instruction, system, payload, context, 
  };
  let turns = 0, delegates = 0;
  const maxTurns = payload.kind ? 36 : 14;
- const authoring = authoringTools.luaKinds.has(payload.kind) || payload.kind === 'engine-mod' ? await authoringTools.createAuthoringWorkspace({ kind: payload.kind, signal, evidence: context.engineEvidence, checkpoint: payload.checkpoint, previousDraft: payload.previousDraft }) : null;
+  const authoring = authoringTools.luaKinds.has(payload.kind) || payload.kind === 'engine-mod' || authoringTools.dataKinds.has(payload.kind) ? await authoringTools.createAuthoringWorkspace({ kind: payload.kind, signal, evidence: context.engineEvidence, checkpoint: payload.checkpoint, previousDraft: payload.previousDraft }) : null;
  async function run(profile, prompt, depth = 0) {
   const runId = crypto.randomUUID();
   const role = await fs.readFile(path.join(root, 'agents', depth ? 'studio-specialist.md' : 'studio-creator.md'), 'utf8');
@@ -110,7 +110,7 @@ export async function invokePi({ apiKey, instruction, system, payload, context, 
   ];
   if (payload.kind) customTools.push(tool('search_api', '查询游戏接口', 'Search verified game and UE4SS signatures. Use focused queries (100 characters maximum). A creator may make eight searches; a reviewer four. Static source is sufficient to implement guarded code; live game acceptance is deferred.', Type.Object({ query: str(100) }), async args => {
    if (++lookups > (depth ? 4 : 8)) throw new Error(depth ? '已达到本次复核查询上限，请依据已读取资料提交 findings 和 missingEvidence。' : '已达到本次接口查询上限。请依据已读取的 SDK 和加载框架资料实现代码、编译并提交；实机验证由宿主另行完成。');
-   const result = selection.agent.id === 'bg3' ? await agentTools.apiSearch(args.query) : gameApi.isReadyOrNot(context.game) || context.diagnostic?.engine?.key === 'unreal' ? await gameApi.search(context.game, args.query) : engines.searchEvidence(context.engineEvidence, args.query);
+   const result = selection.agent.id === 'bg3' ? await agentTools.apiSearch(args.query) : selection.agent.id === 'cyberpunk2077' || gameApi.isReadyOrNot(context.game) || context.diagnostic?.engine?.key === 'unreal' ? await gameApi.search(context.game, args.query) : engines.searchEvidence(context.engineEvidence, args.query);
    if (context.diagnostic?.engine?.key === 'unreal') result.matches.push(...engines.searchEvidence(context.engineEvidence, args.query).matches);
    searched ||= result.matches.length > 0; return result;
   }));
@@ -122,7 +122,7 @@ export async function invokePi({ apiKey, instruction, system, payload, context, 
    tool('write_project_file', '编写制作文件', payload.kind === 'engine-mod' ? 'Write real engine project files. Write mod.json {mode,patches:[],blockers:[]} plus complete main.js (RPG Maker), main.py (RenPy), or actual source files for source-development. resource-patch uses mod.json patches only. Changes invalidate validation.' : 'Write the complete single-file implementation to main.lua in this isolated project. Changes invalidate the previous compilation.', Type.Object({ path: str(160), text: str(24000) }), args => authoring.write(args.path, args.text)),
    tool('read_project_file', '读取制作文件', 'Read a source file previously written in this isolated project.', Type.Object({ path: str(160) }), args => authoring.read(args.path)),
    tool('list_project_files', '查看制作文件', 'List the actual project files, sizes and hashes.', empty, () => authoring.list()),
-   tool('validate_project', '编译制作文件', 'Validate actual project files without executing game code. Lua uses Lua 5.4; engine projects use syntax parsers and evidence checks. A blocked loading/toolchain check is not a completed Mod. Read diagnostics and repair errors before submitting.', empty, () => authoring.validate()),
+    tool('validate_project', '编译制作文件', 'Validate actual project files without executing game code. CET uses a Lua 5.1 parser; other Lua routes use Lua 5.4. Engine projects use syntax parsers and evidence checks. A blocked loading/toolchain check is not a completed Mod. Read diagnostics and repair errors before submitting.', empty, () => authoring.validate()),
   );
   if (!depth && payload.kind) customTools.push(tool('run_agent', '调用游戏专项 Agent', 'Ask the selected specialist Pi agent to review a specific API or implementation issue. It uses its own bounded Pi session and the same enabled skills. No recursive delegation.', Type.Object({ task: str(2000) }), async args => {
    if (++delegates > 2) throw new Error('专项 Agent 调用已达到本次上限');

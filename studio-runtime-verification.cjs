@@ -45,7 +45,7 @@ function contract(source) {
  return {version:1,expectations,findings,passed:!findings.length};
 }
 
-function bootstrap(marker, source, printer='print') {
+function bootstrap(marker, source, printer='print', returnModule=false) {
  // This host adapter emits primitives only. It never reads UObjects or adds native calls.
  return `local ModdockVerification = (function()
  local seq, pending = 0, {}
@@ -69,9 +69,10 @@ function bootstrap(marker, source, printer='print') {
  function api.fail(id,reason) pending[id]=nil; emit('error',id,reason,'','') end
  function api.guard(id,fn)
   return function(...)
-   local results=table.pack(pcall(fn,...))
+   local function pack(...) return {n=select('#',...),...} end
+   local results=pack(pcall(fn,...))
    if not results[1] then api.fail(id,results[2]); return end
-   return table.unpack(results,2,results.n)
+   return (table.unpack or unpack)(results,2,results.n)
   end
  end
  return api
@@ -79,9 +80,10 @@ end)()
 local function moddock_initialize()
 ${source}
 end
-local ok,err=pcall(moddock_initialize)
-if not ok then ModdockVerification.fail('initialize',err); error(err) end
+local ok,result=pcall(moddock_initialize)
+if not ok then ModdockVerification.fail('initialize',result); error(result) end
 ${printer}(${JSON.stringify(marker)})
+${returnModule ? 'return result' : ''}
 `;
 }
 

@@ -33,7 +33,7 @@ class UniversalModder {
   try {
    const { stdout } = await run(runtime.executable, [...runtime.prefix, bridge, 'scan', game.installPath, game.searchName || game.name], { timeout: 20000, maxBuffer: 1024 * 1024, windowsHide: true, env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' } });
    const report = JSON.parse(stdout);
-   const preferLocal = ['native','unknown'].includes(report.engine.key) && local.engine.key !== 'unknown' || ['rpgmaker-mv', 'rpgmaker-mz', 'rpgmaker-rgss', 'renpy', 'gamemaker', 'godot', 'unity-mono', 'unity-il2cpp'].includes(local.engine.key);
+   const preferLocal = ['native','unknown'].includes(report.engine.key) && local.engine.key !== 'unknown' || ['redengine', 'rpgmaker-mv', 'rpgmaker-mz', 'rpgmaker-rgss', 'renpy', 'gamemaker', 'godot', 'unity-mono', 'unity-il2cpp'].includes(local.engine.key);
    return { ...local, engine: preferLocal ? local.engine : { key: report.engine.key, name: report.engine.label, confidence: 'universal-modder 文件特征匹配', evidence: report.engine.evidence },
     loaders: [...new Set([...local.loaders, ...report.mod_loaders_installed])], antiCheat: [...new Set([...local.antiCheat, ...report.anti_cheat])],
     onlineOnly: !!report.online_only, filesIndexed: report.files_indexed, truncated: report.index_truncated,

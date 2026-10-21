@@ -80,8 +80,13 @@ const presets = {
  '1091500': { mode: 'archive', destination: 'archive/pc/mod', executable: 'bin/x64/Cyberpunk2077.exe', requires: ['bin/x64/Cyberpunk2077.exe'] }
 };
 function profile(input) {
- if (!input || !['copy','smapi','archive','pak','bepinex','bethesda','bg3','native'].includes(input.mode)) throw new Error('请设置该游戏的安装规则');
+ if (!input || !['copy','smapi','archive','pak','bepinex','bethesda','bg3','native','game-mod'].includes(input.mode)) throw new Error('请设置该游戏的安装规则');
  const p = { mode: input.mode, root: relative(input.root || '', true), sourcePrefix: relative(input.sourcePrefix || '', true), destination: relative(input.destination || '', true), executable: relative(input.executable || '', true), arguments: input.arguments || [], requires: [], log: relative(input.log || '', true), marker: String(input.marker || '').trim() };
+ if (p.mode === 'game-mod') {
+  const mods = require('./studio-game-mods.cjs');
+  if (!mods.has(input.modKind) || !/^moddock_[a-f0-9]{32}$/.test(input.modId || '') || input.fileMappings || input.root || input.executable || (input.requires || []).length) throw new Error('原生游戏 Mod 安装约束无效');
+  p.modKind = input.modKind; p.modId = input.modId; p.sourcePrefix = mods.exportPrefix(p.modKind, p.modId); p.destination = mods.destination(p.modKind, p.modId);
+ }
  if(input.fileMappings!==undefined){
   if(p.mode!=='copy'||p.root||p.sourcePrefix||p.destination||!Array.isArray(input.fileMappings)||!input.fileMappings.length||input.fileMappings.length>2000)throw new Error('AI 文件映射规则无效');
   p.fileMappings=input.fileMappings.map(row=>({source:relative(row.source),destination:relative(row.destination)}));
@@ -149,6 +154,7 @@ class Installers {
  async setProfile(game,input) { return this.exclusive(async()=>{const p=profile(input); await this.gameRoot(game,p); this.state.profiles[game.id]=p; await this.save(); return this.getProfile(game);}); }
  async gameRoot(game,p) {
   if(!game.installPath)throw new Error('游戏安装路径缺失'); const root=await fs.realpath(game.installPath);
+  if (p.mode === 'game-mod') return require('./studio-game-mods.cjs').installRoot(game, p, this.options);
   if (p.mode === 'bg3') {
    if (!isBG3(game) || p.bg3GameRoot && p.bg3GameRoot !== root) throw new Error('BG3 游戏安装路径已变化');
    p.bg3GameRoot = root;
@@ -160,7 +166,16 @@ class Installers {
   }
   if(!p.root)return root; const sub=await target(root,p.root); if(!(await fs.stat(sub)).isDirectory())throw new Error('游戏根目录不是文件夹');return sub;
  }
- async guard(root,p) { const rows=await (this.options.processes || processes)(); const executable=p.executable && path.basename(p.executable).toLowerCase();for(const r of rows){if(r.pid===process.pid)continue;let real=r.path; if(real&&path.isAbsolute(real))try{real=await fs.realpath(real);}catch{try{real=path.join(await fs.realpath(path.dirname(real)),path.basename(real));}catch{}}if((real&&key(real).startsWith(key((p.mode==='bg3'?p.bg3GameRoot:root)+path.sep)))||(p.mode==='bg3'&&/^(?:bg3(?:_dx11)?\.exe|baldur.?s gate 3)$/i.test(String(r.name)))||(executable&&String(r.name).toLowerCase()===executable))throw new Error('请先退出游戏及加载器，再修改 Mod 文件');} }
+ async guard(root,p) {
+  const rows=await (this.options.processes || processes)(), executable=p.executable && path.basename(p.executable).toLowerCase();
+  const guarded=p.mode==='bg3'?p.bg3GameRoot:p.mode==='game-mod'?p.modGameRoot:root;
+  const nativeNames=p.mode==='game-mod'?require('./studio-game-mods.cjs').SPECS[p.modKind].executables.map(name=>path.posix.basename(name).toLowerCase()):[];
+  for(const r of rows){
+   if(r.pid===process.pid)continue;let real=r.path;
+   if(real&&path.isAbsolute(real))try{real=await fs.realpath(real);}catch{try{real=path.join(await fs.realpath(path.dirname(real)),path.basename(real));}catch{}}
+   if((real&&key(real).startsWith(key(guarded+path.sep)))||(p.mode==='bg3'&&/^(?:bg3(?:_dx11)?\.exe|baldur.?s gate 3)$/i.test(String(r.name)))||nativeNames.includes(String(r.name).toLowerCase())||(executable&&String(r.name).toLowerCase()===executable))throw new Error('请先退出游戏及加载器，再修改 Mod 文件');
+  }
+ }
  async prerequisites(root,p) {
   for(const rel of p.requires)if(!await fileHash(await target(root,rel)))throw new Error('缺少前置文件：'+rel);
   if (p.mode === 'bg3') {
@@ -342,6 +357,10 @@ class Installers {
      files=content;warnings.push('插件部署不等于启用：需在游戏或相应加载器中确认插件启用与排序。');
     }
     files=files.map(f=>({...f,destination:[p.destination,p.sourcePrefix?f.source.slice(p.sourcePrefix.length+1):p.mode==='bethesda'?f.source.replace(/^Data\//i,''):f.source].filter(Boolean).join('/')}));warnings.push(automaticRule?.installationRule?.origin==='author'?'按作者安装说明与包结构自动生成目录映射，覆盖文件自动备份。':'按你为该游戏配置的规则部署。软件不会执行压缩包内的安装脚本；须核对作者目录、依赖及版本要求。');
+   }
+   if (p.mode === 'game-mod') {
+    if (files.some(file => !require('./studio-game-mods.cjs').allowedDestination(p, file.destination))) throw new Error('原生游戏 Mod 文件超出当前作品的专用目录');
+    warnings.push('文件部署后，仍需在游戏 Mod 菜单或启动器播放集中启用；部署不代表游戏内生效。');
    }
    const names=new Set();for(const f of files){f.destination=relative(f.destination);if(automaticRule&&userFile(f.destination))throw new Error('自动安装不会写入存档或用户文件目录');if(names.has(key(f.destination)))throw new Error('安装目标重复：'+f.destination);names.add(key(f.destination));
     const dest=await target(root,f.destination),owner=this.fileOwner(dest);if(owner)throw new Error('与已托管 Mod 冲突：'+owner.name+' / '+f.destination);

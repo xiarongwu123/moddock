@@ -32,6 +32,7 @@ async function verify() {
 
 const isReadyOrNot = game => game?.appId ? String(game.appId) === '1144200' : /^(?:ready\s*or\s*not|严阵以待)(?:\s*\[TEST\])?$/i.test(game?.searchName || game?.name || '');
 async function search(game, query) {
+ if (require('./studio-cyberpunk.cjs').isCyberpunk(game || {})) return require('./studio-cyberpunk.cjs').searchCET(query);
  if (typeof query !== 'string' || query.length > 100 || !query.trim() || /[\r\n\0]/.test(query)) throw new Error('接口查询需为单行文本');
  if (isReadyOrNot(game)) await verify();
  const index = isReadyOrNot(game) ? JSON.parse(await fs.readFile(path.join(__dirname, 'vendor/ready-or-not-api/api.json'), 'utf8')) : { entries: [], source: docs };

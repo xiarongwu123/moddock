@@ -21,6 +21,7 @@ async function resolveStudioGame(selected, games = []) {
  if (stat.isFile() && !await nativeFile(real)) throw new Error('请选择游戏原生启动文件，不能使用脚本、快捷方式或安装包');
  const root = stat.isDirectory() ? real : path.dirname(real);
  let executable = stat.isFile() ? path.basename(real) : null;
+ let minecraft = false;
  if (!executable) {
   const directory = root.endsWith('.app') ? path.join(root, 'Contents/MacOS') : root;
   const entries = await fs.readdir(directory, { withFileTypes: true });
@@ -29,11 +30,13 @@ async function resolveStudioGame(selected, games = []) {
   for (const entry of entries.filter(entry => entry.isFile())) if (await nativeFile(path.join(directory, entry.name))) candidates.push(path.relative(root, path.join(directory, entry.name)).split(path.sep).join('/'));
   if (!candidates.length) {
    const diagnostic = await require('./game-diagnostics.cjs').diagnoseGame({ installPath: root });
-   if (!require('./studio-engines.cjs').familyFor(diagnostic.engine.key)) throw new Error('没有找到游戏启动文件或可识别的游戏引擎项目，请选择具体游戏文件夹');
+   minecraft = diagnostic.engine.key === 'minecraft-java';
+   if (!minecraft && !require('./studio-engines.cjs').familyFor(diagnostic.engine.key)) throw new Error('没有找到游戏启动文件或可识别的游戏引擎项目，请选择具体游戏文件夹');
   }
   if (candidates.length === 1) executable = candidates[0];
  }
- return { id: 'local-' + crypto.createHash('sha256').update(pathKey(root)).digest('hex').slice(0, 20), name: path.basename(root).replace(/\.app$/i, ''),
+ if (!minecraft && (await require('./studio-minecraft.cjs').evidence(root)).length) minecraft = true;
+ return { id: 'local-' + crypto.createHash('sha256').update(pathKey(root)).digest('hex').slice(0, 20), name: minecraft ? 'Minecraft Java' : path.basename(root).replace(/\.app$/i, ''),
   platform: '本地', installPath: root, ...(executable ? { executable } : {}), real: true };
 }
 function mergeStudioGames(result, localGames = []) {

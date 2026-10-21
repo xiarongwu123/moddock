@@ -3,8 +3,12 @@ const { buildContentPack } = require('./content-pack.cjs');
 const { isStardew } = require('./game-diagnostics.cjs');
 const { isBG3, buildBG3 } = require('./bg3-mod.cjs');
 const { validateControls } = require('./bg3-controls.cjs');
+const { CET, isCyberpunk, checkCET } = require('./studio-cyberpunk.cjs');
+const gameMods = require('./studio-game-mods.cjs');
 
 const definitions = [
+ ...Object.entries(gameMods.SPECS).map(([id, spec]) => ({ id, name: spec.game + (spec.lua ? ' · 原生 Lua Mod' : ' · 内容 Mod'), category: spec.game, description: spec.scope, output: spec.lua ? '原生脚本 Mod' : '游戏内容 Mod', installable: false })),
+ { id: 'cyberpunk-cet-lua', name: '赛博朋克 2077 · CET 脚本', category: '赛博朋克 2077', description: '生成 CET Lua 玩法脚本，校验 Lua 5.1 语法并打包；安装需匹配游戏版本的 Cyber Engine Tweaks。', output: 'CET 脚本 Mod', installable: true },
  { id: 'project-plan', name: '开发方案', category: '通用', description: '结合引擎指南与社区经验，整理任意游戏的 Mod 创作计划。', output: '方案工程', installable: false },
  { id: 'custom-project', name: '自定义 Mod 工程', category: '通用', description: '自由组织脚本、代码和配置文件，适用于更多游戏与创作方向。', output: '源码工程', installable: false },
  { id: 'engine-mod', name: '按引擎开发 Mod', category: '通用引擎', description: '根据本机代码和资源调查、编写实现、构建并校验；无需命中特定游戏名单。', output: '引擎 Mod 工程', installable: false },
@@ -21,13 +25,15 @@ function recipesFor(game, report) {
  return definitions.map(type => {
   let available = false, reason = '';
   if (['project-plan', 'custom-project'].includes(type.id)) available = true;
+  else if (gameMods.has(type.id)) { available = gameMods.matches(type.id, game); reason = '仅支持 ' + gameMods.SPECS[type.id].game + ' 的专用 Mod 路线。'; }
+  else if (type.id === 'cyberpunk-cet-lua') { available = isCyberpunk(game); reason = '仅支持赛博朋克 2077 的 CET Lua 脚本；模型、贴图和任务资产需要其他制作工具。'; }
   else if (type.id === 'engine-mod') { available = !!require('./studio-engines.cjs').familyFor(report.engine.key); reason = '需识别 Unity、Unreal、Godot、RPG Maker、Ren\'Py 或 GameMaker 引擎。'; }
   else if (['dialogue','texture'].includes(type.id)) { available = isStardew(game); reason = '需要星露谷物语的 Content Patcher 适配。'; }
   else if (type.id === 'bepinex-plugin') { available = report.engine.key === 'unity-mono'; reason = '仅支持已识别的 Unity Mono；IL2CPP 需要不同工程。'; }
   else if (['bg3-lua', 'bg3-follower'].includes(type.id)) { available = isBG3(game); reason = '仅支持博德之门 3 的 Script Extender 脚本包。'; }
   else if (type.id === 'ue4ss-lua') { available = report.engine.key === 'unreal'; reason = '需要 Unreal Engine；安装时需检测到唯一 UE4SS.dll。'; }
   else if (type.id === 'reframework-lua') { available = report.engine.key === 're-engine' || report.loaders.includes('REFramework'); reason = '需要 RE Engine 或已检测到 REFramework autorun 目录。'; }
-  if (protectedGame && (type.installable || ['bg3-lua', 'bg3-follower'].includes(type.id))) { available = false; reason = '当前游戏存在反作弊或联网专用特征，暂不开放安装适配。'; }
+  if (protectedGame && (type.installable || gameMods.has(type.id) || ['bg3-lua', 'bg3-follower'].includes(type.id))) { available = false; reason = '当前游戏存在反作弊或联网专用特征，暂不开放安装适配。'; }
   return { ...type, available, reason: available ? '' : reason };
  });
 }
@@ -43,7 +49,10 @@ function buildStudioProject(game, input, id, report, context) {
  const manifest = { Name: name, Author: author, Version: '1.0.0', UniqueID: uniqueId };
  let files = [], content, summary, runtime;
  const textFile = (name, text) => ({ name, data: Buffer.from(text) });
- if (['bg3-lua', 'bg3-follower'].includes(input.kind)) {
+ if (gameMods.has(input.kind)) {
+  const built = gameMods.build({ ...input, name, author, description }, id);
+  Object.assign(draft, built.draft); Object.assign(manifest, built.manifest); ({ content, runtime, summary } = built); files.push(...built.files);
+ } else if (['bg3-lua', 'bg3-follower'].includes(input.kind)) {
   if (input.kind === 'bg3-follower') {
    draft.followerName = requiredText(input.followerName, '人物姓名', 40); draft.greeting = requiredText(input.greeting, '人物台词', 300);
    if ([draft.followerName, draft.greeting].some(value => !value.isWellFormed() || /[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(value))) throw new Error('人物文本包含无效字符');
@@ -82,6 +91,15 @@ function buildStudioProject(game, input, id, report, context) {
   });
   content = { status: 'source-only', files: draft.files };
   summary = `${game.name} · 自定义工程 · ${draft.files.length} 个文件`;
+ } else if (input.kind === 'cyberpunk-cet-lua') {
+  draft.code = requiredText(input.code, 'CET Lua 脚本', 24000);
+  const syntax = checkCET(draft.code); if (!syntax.passed) throw new Error(syntax.detail);
+  const verifier = require('./studio-runtime-verification.cjs');
+  runtime = { loader: 'CET', marker: `Moddock:${uniqueId}:loaded`, log: `${CET}/mods/${uniqueId}/${uniqueId}.log`, verification: verifier.contract(draft.code) };
+  const wrapped = verifier.bootstrap(runtime.marker, draft.code, 'spdlog.info');
+  content = { language: 'Lua 5.1 / LuaJIT', loader: 'CET', code: wrapped };
+  summary = `${game.name} · CET Lua 脚本`;
+  files.push(textFile('mod/init.lua', wrapped));
  } else if (input.kind === 'ue4ss-lua' || input.kind === 'reframework-lua') {
   draft.code = requiredText(input.code, 'Lua 脚本', 24000);
   runtime = { loader: input.kind === 'ue4ss-lua' ? 'UE4SS' : 'REFramework', marker: `Moddock:${uniqueId}:loaded` };
@@ -115,12 +133,20 @@ function buildStudioProject(game, input, id, report, context) {
  files.push(textFile('project.json', JSON.stringify(projectInfo, null, 2)));
  files.push(textFile('REFERENCES.md', `# Development references\n\nUpstream: ${context.toolkit.repository}\nCommit: ${context.toolkit.commit}\nGuide: ${context.guide.path}\n\n${context.notes.map(note => `- ${note.title} (${note.status})`).join('\n')}\n\nCommunity reports are evidence to review, not compatibility guarantees.\n`));
  const instructions = input.kind === 'bepinex-plugin' ? 'Source project only. Install the .NET SDK and BepInEx 5 for this exact Unity Mono game.\nBuild src/ModdockPlugin.csproj with GamePath and ManagedPath pointing to your own local references.\nReview the compiled DLL before deploying it to BepInEx/plugins. Game references are not redistributed.\nA target frame rate does not override VSync or guarantee a performance increase.\n' : input.kind === 'engine-mod' ? 'Actual engine Mod implementation. The desktop host prepares matching tools, builds and verifies the installable Mod, and installs it with backups.\nUse the compiled ZIP for installation; this source archive contains the build inputs. Game files and locally generated game interfaces are not redistributed.\nCompilation and packaging do not establish in-game behavior; check the actual game after installation.\n' : input.kind === 'project-plan' ? 'Planning document only. No game files are installed.\n' : input.kind === 'custom-project' ? 'Source project only. Review the source, choose the game-specific toolchain, build and validate before deploying.\nNo files from this project are installed or executed by Moddock.\n' : 'Review every Lua statement before installing. Moddock does not execute the script itself.\nRequires an existing compatible loader. Verify loading and behavior in the actual game.\n';
- files.push(textFile('README.md', `${name}\n${description}\nAuthor: ${author}\n\n${instructions}`));
+ const gameInstructions = gameMods.has(input.kind) ? `${gameMods.SPECS[input.kind].scope}\n\nExport the compiled ZIP for the native game layout. Installation uses only this artifact's namespace. Enable the Mod in the game's menu or launcher when required. Structural validation is not gameplay proof.\nReference: ${gameMods.SPECS[input.kind].docs}\n` : instructions;
+ files.push(textFile('README.md', `${name}\n${description}\nAuthor: ${author}\n\n${gameInstructions}`));
  return { draft, manifest, content, runtime, summary, files, adapterId: recipe.id, output: recipe.output, installable: recipe.installable };
 }
 function projectRule(item, report) {
+ if (gameMods.SPECS[item.adapterId]?.exportOnly) throw new Error('数据包已生成；需要用户明确选择目标世界，请先导出原生 ZIP，不会自动写入存档。');
  if (!item.installable) throw new Error('这份产物是开发方案或待编译工程，请导出；尚无可安装的 Mod 文件。');
  if (report.antiCheat.length || report.onlineOnly) throw new Error('当前游戏只开放开发方案，不能部署脚本。');
+ if (gameMods.has(item.adapterId)) return gameMods.rule(item);
+ if (item.adapterId === 'cyberpunk-cet-lua') {
+  const entries = report.loaderFiles.CET || [];
+  if (entries.length !== 1 || entries[0].toLowerCase() !== 'bin/x64/plugins/cyber_engine_tweaks.asi') throw new Error('未检测到标准位置的 Cyber Engine Tweaks；请安装匹配游戏版本的 CET 后重试安装。已生成的脚本可保留或导出。');
+  return { mode: 'copy', sourcePrefix: 'mod', destination: `${CET}/mods/${item.manifest.UniqueID}`, requires: [entries[0], 'bin/x64/Cyberpunk2077.exe'] };
+ }
  if (item.adapterId === 'engine-mod' && item.compiled && item.toolchain?.deployment) return { mode: item.toolchain.deployment.nativeManifestSha256 ? 'native' : 'copy', sourcePrefix: item.toolchain.deployment.nativeManifestSha256 ? '' : 'deploy', destination: '', requires: [], ...item.toolchain.deployment };
  if (['bg3-lua', 'bg3-follower'].includes(item.adapterId) && item.compiled) return { mode: 'bg3', sourcePrefix: 'Mods', destination: 'Mods', requires: [], bg3Module: item.bg3Module };
  if (item.adapterId === 'ue4ss-lua') {

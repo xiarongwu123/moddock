@@ -12,6 +12,8 @@ const { analyzeUE4SS } = require('./studio-ue4ss-safety.cjs');
 const ACTIVE = new Set(['checking', 'building', 'verifying']);
 const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const ADAPTERS = {
+ ...Object.fromEntries(Object.entries(require('./studio-game-mods.cjs').SPECS).map(([kind, spec]) => [kind, { name: spec.game + ' · 专用 Mod', build: spec.lua ? 'Lua ' + spec.lua + ' 静态语法校验与真实脚本打包' : '内容结构与语法校验、清单生成和真实文件打包', validation: spec.scope }])),
+ 'cyberpunk-cet-lua': { name: 'Cyberpunk 2077 · CET / Lua 5.1', build: 'Lua 5.1 语法解析与 CET 脚本打包', validation: 'Lua 5.1 入口、功能回读协议与 CET 依赖；不执行游戏代码' },
  'engine-mod': { name: '按引擎开发', build: '实际源文件与资源修改构建', validation: '引擎入口、静态语法、原文件摘要与加载目录' },
  'ue4ss-lua': { compiler: 'lua', name: 'UE4SS · Lua 5.4', build: 'Lua 语法与已知原生风险检查', validation: '脚本语法、原生参数、回调线程与已启用 Mod 摘要' },
  'reframework-lua': { compiler: 'lua', name: 'REFramework · Lua 5.4', build: 'Lua 语法编译检查', validation: '脚本语法、目录与现有加载器' },
@@ -128,6 +130,10 @@ class StudioToolchain {
     await step('游戏依赖', missing.length ? 'blocked' : 'passed', missing.length ? '缺少 ' + missing.map(entry => entry.name).join(' / ') : '已检测到 SMAPI 与 Content Patcher；实际加载仍需游戏验证');
    } else if (['bg3-lua', 'bg3-follower'].includes(item.adapterId)) {
     await step('安装方式', 'passed', '生成 LSPK v18 包；安装时校验 BG3 Script Extender，并合并 Public 加载顺序。');
+   } else if (item.adapterId === 'cyberpunk-cet-lua') {
+    const found = workspace.diagnostic.loaderFiles.CET || [];
+    report.installation = { ready: found.length === 1, dependency: 'Cyber Engine Tweaks', detail: found.length === 1 ? '已检测到 CET；版本匹配和加载状态仍需游戏运行确认。' : '安装前需要匹配游戏版本的 CET；当前可生成并导出脚本包。' };
+    await step('游戏加载器', found.length === 1 ? 'passed' : 'pending', report.installation.detail);
    } else if (adapter.compiler === 'lua') {
     const key = item.adapterId === 'ue4ss-lua' ? 'UE4SS' : 'REFramework';
     const found = workspace.diagnostic.loaderFiles[key] || [];
@@ -150,7 +156,21 @@ class StudioToolchain {
     }
    }
    let compiled;
-   if (portableLua) {
+   if (require('./studio-game-mods.cjs').has(item.adapterId)) {
+    const version = require('./studio-game-mods.cjs').targetCompatibility(item, workspace);
+    await step('游戏版本证据', version.status, version.detail);
+    const checked = require('./studio-game-mods.cjs').validateBuilt(item.adapterId, files);
+    if (!checked.length) throw new Error('专用 Mod 缺少实际产物文件');
+    for (const result of checked) await step('游戏 Mod · ' + result.path, result.passed ? 'passed' : 'failed', result.detail);
+    report.installation = { ready: null, detail: require('./studio-game-mods.cjs').SPECS[item.adapterId].exportOnly ? '可导出游戏原生 ZIP；数据包需要用户明确选择目标世界，当前不自动写入存档。' : '安装时自动核对原生入口和专用目录；部分游戏还需在游戏内或启动器中启用 Mod。' };
+   } else if (item.adapterId === 'cyberpunk-cet-lua') {
+    const scripts = files.filter(file => file.name.endsWith('.lua'));
+    if (scripts.length !== 1 || scripts[0].name !== 'mod/init.lua') throw new Error('CET 产物必须包含唯一的 mod/init.lua 入口');
+    for (const file of scripts) {
+     const result = require('./studio-cyberpunk.cjs').checkCET(file.text);
+     await step('CET Lua 5.1 语法 · ' + file.name, result.passed ? 'passed' : 'failed', result.detail);
+    }
+   } else if (portableLua) {
     for (const file of files.filter(file => file.name.endsWith('.lua'))) {
      check(); const result = await checkLua(file.text);
      await step('Lua 语法 · ' + file.name, result.passed ? 'passed' : 'failed', result.detail);
@@ -202,9 +222,10 @@ class StudioToolchain {
     report.bundle = { sha256: hash(bytes), size: bytes.length, filename: item.draft.name + '-compiled.zip' };
     report.outputs.push({ name: 'plugins/' + name, size: compiled.length, sha256: hash(compiled) });
    }
-   if (['ue4ss-lua', 'reframework-lua'].includes(item.adapterId) && !report.checks.some(entry => ['failed', 'blocked'].includes(entry.status))) {
-    const sources = files.filter(file => file.name.startsWith('mod/')).map(file => ({ name: file.name, data: Buffer.from(file.text || '') }));
-    const bytes = zipContent([...sources, { name: 'BUILD.json', data: Buffer.from(JSON.stringify({ gameId: game.id, adapter: item.adapterId, sourceSha256: item.sha256, runtimeVerified: false, installation: report.installation }, null, 2)) }]);
+   if ((['ue4ss-lua', 'reframework-lua', 'cyberpunk-cet-lua'].includes(item.adapterId) || require('./studio-game-mods.cjs').has(item.adapterId)) && !report.checks.some(entry => ['failed', 'blocked'].includes(entry.status))) {
+    const native = require('./studio-game-mods.cjs').has(item.adapterId);
+    const sources = native ? require('./studio-game-mods.cjs').exportFiles(item, files) : files.filter(file => file.name.startsWith('mod/')).map(file => ({ name: file.name, data: Buffer.from(file.text || '') }));
+    const bytes = zipContent(native ? sources : [...sources, { name: 'BUILD.json', data: Buffer.from(JSON.stringify({ gameId: game.id, adapter: item.adapterId, sourceSha256: item.sha256, runtimeVerified: false, installation: report.installation }, null, 2)) }]);
     await fs.writeFile(path.join(directory, 'compiled.zip'), bytes, { flag: 'wx' });
     report.bundle = { sha256: hash(bytes), size: bytes.length, filename: item.draft.name + '-mod.zip' };
     report.outputs.push(...sources.map(file => ({ name: file.name, size: file.data.length, sha256: hash(file.data) })));

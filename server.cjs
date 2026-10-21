@@ -340,6 +340,8 @@ async function createServer(options = {}) {
      }
      const owner = profile.id;
      const current = () => sessionOwners.get(sessionId) === owner;
+     if (url.pathname === '/api/studio/catalog') return send(require('./studio-coverage.cjs').page(body));
+     if (url.pathname === '/api/studio/coverage') return send(await require('./studio-coverage.cjs').audit(scanResult.games, { offset: body.offset, limit: body.limit }));
      if (url.pathname === '/api/studio/games/add') {
       if (!options.chooseStudioGame) throw new Error('请在桌面端选择或拖入本机游戏');
       const selected = body.path || await options.chooseStudioGame();
@@ -349,7 +351,7 @@ async function createServer(options = {}) {
       const freshPermission = await accounts.authorize(sessionId, 'configuration.edit');
       if (!current() || freshPermission.account.id !== owner || !studioAccess(freshPermission.account)) throw new Error('账号或 Pro 权限已变化，操作已停止');
       if (!scanResult.games.some(game => game.id === added.id)) {
-       if ((config.localGames || []).length >= 50) throw new Error('最多添加 50 个本机游戏');
+       if ((config.localGames || []).length >= require('./studio-coverage.cjs').MAX_LOCAL_GAMES) throw new Error('本机游戏目录已达到 10000 款上限');
        const previous = config.localGames; config.localGames = [...(previous || []), added];
        try { await saveConfig(); } catch (error) { config.localGames = previous; throw error; }
        scanResult = mergeStudioGames(scanResult, [added]);
@@ -387,7 +389,7 @@ async function createServer(options = {}) {
      if (url.pathname === '/api/studio/export' || url.pathname === '/api/studio/prepare') {
       if (url.pathname === '/api/studio/export') {
        const { item, bytes } = await studio.archive(owner, target, body.id);
-       const compiled = ['bg3-lua', 'bg3-follower', 'engine-mod'].includes(item.adapterId);
+       const compiled = ['bg3-lua', 'bg3-follower', 'engine-mod'].includes(item.adapterId) || require('./studio-game-mods.cjs').has(item.adapterId);
        const buildId = body.buildId || (compiled && !body.source && item.toolchain?.status === 'passed' ? item.toolchain.id : null);
        if (['bg3-lua', 'bg3-follower'].includes(item.adapterId) && !body.source && !body.buildId && !item.toolchain?.bundle) throw new Error('尚未生成可导出的 BG3 Mod 包，请先完成编译与打包');
        return send(buildId ? await studio.toolchain.bundle(owner, target, item.id, buildId) : { filename: item.draft.name + '.zip', base64: bytes.toString('base64') });
