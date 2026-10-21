@@ -99,6 +99,7 @@ class StudioLifecycle {
   await this.permission(context, 'library.manage');
   const { item, bytes } = await this.studio.deploymentArchive(owner, game, artifactId);
   if (!item.installable) throw new Error('这份产物还不能作为可用 Mod 保存，请先完成制作');
+  if (!require('./studio-user-feedback.cjs').confirmed(item)) throw new Error('请先在创作页面确认这个版本能正常使用，再存到 Mod 库');
   const job = await this.downloads.importCreation(game, item, bytes, owner);
   await this.library.import(game, job.id);
   await this.permission(context, 'library.manage');

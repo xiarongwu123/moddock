@@ -76,8 +76,16 @@ async function createNexusService({ root, sources, authorizer, accessToken, fetc
    if (req.method === 'GET' && match[2]) {
     if (job.status !== 'completed') return send({ error: 'File not ready' }, 409);
     const file = await downloads.completedFile(job.id), stat = await fs.stat(file.file);
-    res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': stat.size, 'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(file.name)}` });
-    const stream = createReadStream(file.file); readers.set(job.id, (readers.get(job.id) || 0) + 1); stream.on('error', () => res.destroy()); res.on('close', () => { readers.set(job.id, Math.max(0, (readers.get(job.id) || 1) - 1)); stream.destroy(); }); stream.pipe(res); return;
+     const etag = `"${job.sha256}"`, headers = { 'Content-Type': 'application/octet-stream', 'Accept-Ranges': 'bytes', ETag: etag, 'Cache-Control': 'private, no-transform', 'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(file.name)}` };
+     let start = 0, end = stat.size - 1, status = 200;
+     if (req.headers.range && (!req.headers['if-range'] || req.headers['if-range'] === etag)) {
+      const range = /^bytes=(\d+)-(\d*)$/.exec(req.headers.range);
+      start = range ? Number(range[1]) : NaN; end = range?.[2] ? Math.min(Number(range[2]), end) : end;
+      if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start > end || start >= stat.size) { res.writeHead(416, { ...headers, 'Content-Range': `bytes */${stat.size}`, 'Content-Length': 0 }); res.end(); return; }
+      status = 206; headers['Content-Range'] = `bytes ${start}-${end}/${stat.size}`;
+     }
+     res.writeHead(status, { ...headers, 'Content-Length': end - start + 1 });
+     const stream = createReadStream(file.file, { start, end }); readers.set(job.id, (readers.get(job.id) || 0) + 1); stream.on('error', () => res.destroy()); res.on('close', () => { readers.set(job.id, Math.max(0, (readers.get(job.id) || 1) - 1)); stream.destroy(); }); stream.pipe(res); return;
    }
    return send({ error: 'Method not allowed' }, 405);
   } catch { if (!res.headersSent) send({ error: '下载服务请求失败，请稍后重试' }, 400); else res.destroy(); }

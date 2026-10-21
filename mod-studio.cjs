@@ -89,6 +89,7 @@ class ModStudio {
   if (item.toolchain && item.toolchain.status !== 'passed') item.installable = false;
   try { item.deployment = await smallJson(path.join(this.recordPath(owner, id), 'deployment.json')); } catch (error) { if (error.code !== 'ENOENT') throw error; }
   try { item.library = await smallJson(path.join(this.recordPath(owner, id), 'library.json')); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  try { item.feedback = await smallJson(path.join(this.recordPath(owner, id), 'feedback.json')); } catch (error) { if (error.code !== 'ENOENT') throw error; }
   return item;
  }
  async save(owner, game, input, current = () => true, lineage) {

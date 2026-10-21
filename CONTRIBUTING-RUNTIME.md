@@ -17,7 +17,12 @@ Install the pinned dependencies with `npm install --ignore-scripts`, then run:
 node --test test-runtime-repair.cjs test-runtime-safety.cjs test-creation-save.cjs
 ```
 
-These 61 regressions are separate from real online AI and game acceptance.
+These regressions are separate from real online AI and game acceptance.
+For the archived crash-script cases, set MODDOCK_CRASH_FIXTURE_ROOT to the folder
+containing their backup/ and fixed/ subfolders (locally F:/youxia/qa/ron-crash-fix-20261019).
+After editing public/mod-studio.js, run node scripts/update-studio-bundle.cjs.
+It updates only the shipped studio factory with its existing React bindings and
+refuses an unfamiliar bundle. It does not rebuild the incomplete legacy UI tree.
 See RUNTIME-VERIFICATION.md for the real test results and their limitations.
 Selected runtime evidence is in docs/runtime-e2e; full diagnostic artifacts
 remain in the local F:/youxia/qa/live-ai-runtime-e2e folder. Account sessions,

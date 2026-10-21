@@ -10,10 +10,12 @@ module.exports = {
   'nexus-games.json',
   'nexus-app.json',
   'public/**/*',
+  'vendor/archive-tools/**/*',
   'scripts/build-ui.cjs',
   'README.md',
  ],
  asar: true,
+ asarUnpack: ['vendor/archive-tools/**/*'],
  npmRebuild: false,
  win: {
   target: [{ target: 'nsis', arch: ['x64'] }],

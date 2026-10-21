@@ -30,11 +30,15 @@ const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQ
     if (this.canvas.matches?.('.auth-brand-fuzzy') && args.length === 9) window.fuzzyOffsets.push(args[5]);
     return drawImage.apply(this, args);
    };
-   const animate = Element.prototype.animate;
-   Element.prototype.animate = function (frames, options) {
-    if (this.id === 'auth-panel') window.authStepAnimations.push({ frames, duration: options.duration, inputs: this.querySelectorAll('input:not([type="checkbox"])').length });
-    return animate.call(this, frames, options);
-   };
+   // Form steps use CSS transitions driven by transition-hook.
+   new MutationObserver(records => {
+    for (const record of records) {
+     const panel = record.target;
+     if (panel.id !== 'auth-panel' || record.attributeName !== 'data-stage') continue;
+     if (panel.dataset.stage !== 'leave') continue;
+     window.authStepAnimations.push({ stage: panel.dataset.stage, direction: panel.style.getPropertyValue('--step-direction'), inputs: panel.querySelectorAll('input:not([type="checkbox"])').length, duration: getComputedStyle(panel).transitionDuration });
+    }
+   }).observe(document, { subtree: true, attributes: true, attributeFilter: ['data-stage'] });
    const replaceState = history.replaceState;
    history.replaceState = function (...args) {
     window.authRouteChanges.push(args[2]);
@@ -234,20 +238,16 @@ const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQ
   assert.equal(await page.locator('.auth-swap').getAttribute('data-active'), 'false', 'Partial code must not register');
   await page.getByLabel('邮箱验证码', { exact: true }).press('0');
   await page.locator('.auth-swap[data-active="true"][data-transitioning="false"]').waitFor();
-  await page.getByRole('button', { name: '暂时跳过', exact: true }).click();
+  await page.locator('.source-onboarding-footer').getByRole('button', { name: /^(暂时跳过|开始使用)$/ }).click();
   assert.equal(new URL(page.url()).hash, '#home');
   assert.match(await page.locator('.profile-text').innerText(), /register/);
   const animations = await page.evaluate(() => window.authStepAnimations);
-  assert.equal(animations.length, 14, 'Seven step changes should each have one exit and one entrance');
-  for (let index = 0; index < animations.length; index += 2) {
-   const outgoing = animations[index], incoming = animations[index + 1];
-   assert.equal(outgoing.duration, 110); assert.equal(incoming.duration, 220);
-   assert.equal(outgoing.inputs, 1); assert.equal(incoming.inputs, 1);
-   assert.equal(outgoing.frames[1].opacity, 0); assert.equal(incoming.frames[0].opacity, 0);
-   assert.equal(incoming.frames[1].opacity, 1);
-   assert.ok(outgoing.frames[1].transform === 'translateX(-14px)' && incoming.frames[0].transform === 'translateX(14px)' || outgoing.frames[1].transform === 'translateX(14px)' && incoming.frames[0].transform === 'translateX(-14px)');
+  assert.equal(animations.length, 7, 'Seven step changes should each leave through the CSS transition');
+  for (const animation of animations) {
+   assert.equal(animation.inputs, 1);
+   assert.ok(animation.duration.split(',').every(value => parseFloat(value) === 0.16));
   }
-  assert.equal(animations[2].frames[1].transform, 'translateX(14px)', 'Back should reverse the slide direction');
+  assert.equal(animations[1].direction, '-1', 'Back should reverse the slide direction');
   assert.equal(await page.evaluate(() => window.cameraRequests), 0);
   const resizeAlphas = await page.evaluate(() => window.resizeAlphas);
   assert.ok(resizeAlphas.every(alpha => alpha > 0), `Resizing must repaint before presentation: ${resizeAlphas}`);
@@ -380,20 +380,20 @@ const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQ
    await page.getByLabel('账号菜单', { exact: true }).click();
    await page.getByRole('button', { name: '打开个人中心', exact: true }).click();
    await page.getByRole('dialog', { name: '个人中心', exact: true }).waitFor();
-   await page.locator('.user-center-info[aria-busy="false"]').waitFor();
+   await page.locator('.user-center-overlay .visually-hidden[aria-busy="false"]').waitFor({ state: 'attached' });
   };
   await openProfile();
-  await page.locator('.user-center dd').filter({ hasText: 'player@example.com' }).waitFor();
-  await page.getByText('标准账号', { exact: true }).waitFor();
-  assert.equal(await page.locator('.user-center input').count(), 0, 'Profile cards contain no password form');
+  await page.locator('.user-center-overlay dd').filter({ hasText: 'player@example.com' }).waitFor({ state: 'attached' });
+  await page.getByText('标准账号', { exact: true }).waitFor({ state: 'attached' });
+  assert.equal(await page.locator('.user-center-overlay input').count(), 0, 'Profile cards contain no password form');
   await page.waitForTimeout(900);
   const accountPolls = stateRequests;
   await page.waitForTimeout(1600);
   assert.equal(stateRequests, accountPolls, 'Profile dialogs must pause business polling');
   await page.getByRole('button', { name: '关闭个人中心', exact: true }).press('Tab');
-  assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('aria-label')), '关闭个人中心');
+  assert.equal(await page.evaluate(() => document.querySelector('.user-center-overlay').contains(document.activeElement)), true, 'Tab focus must remain inside the profile dialog');
   await page.getByRole('button', { name: '关闭个人中心', exact: true }).press('Escape');
-  await page.locator('.user-center-dialog').waitFor({ state: 'detached' });
+  await page.locator('.user-center-overlay').waitFor({ state: 'detached' });
   assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('aria-label')), '账号菜单');
   const businessPolls = stateRequests;
   await page.waitForTimeout(1600);
@@ -401,22 +401,24 @@ const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQ
   const futureExpiry = new Date(Date.now() + 86400000).toISOString();
   account.updateAccount({ membership: { tier: 'pro', expiresAt: futureExpiry } });
   await openProfile();
-  await page.getByText('MU Pro 会员', { exact: true }).waitFor();
+  await page.getByText('MU Pro 会员', { exact: true }).waitFor({ state: 'attached' });
+  assert.equal(await page.locator('.user-center-overlay.is-pro').count(), 1);
   await page.screenshot({ path: path.resolve('output/playwright/user-center-pro.png') });
   await page.getByRole('button', { name: '关闭个人中心', exact: true }).click();
+  await page.locator('.user-center-overlay').waitFor({ state: 'detached' });
   account.updateAccount({ membership: { tier: 'standard', expiresAt: '2020-01-01T00:00:00Z' } });
   await openProfile();
-  await page.getByText('Pro 会员已到期', { exact: true }).waitFor();
-  await page.getByText('标准账号', { exact: true }).waitFor();
+  await page.getByText('Pro 会员已到期', { exact: true }).waitFor({ state: 'attached' });
+  assert.equal(await page.locator('.user-center-overlay.is-pro').count(), 0);
   await page.mouse.click(8, 8);
-  await page.locator('.user-center-dialog').waitFor({ state: 'detached' });
+  await page.locator('.user-center-overlay').waitFor({ state: 'detached' });
   assert.equal(account.calls.filter(call => call.route.endsWith('/account/password')).length, 0);
   await page.getByLabel('账号菜单', { exact: true }).click();
   await page.getByRole('banner').getByRole('button', { name: '退出登录', exact: true }).click();
   await page.locator('.auth-swap[data-active="false"][data-transitioning="false"]').waitFor();
   assert.equal((await page.request.get(service.url + '/api/state')).status(), 401);
   assert.ok(account.calls.at(-1).route.endsWith('/auth/logout'));
-  assert.equal(await page.locator('.user-center').count(), 0);
+  assert.equal(await page.locator('.user-center-overlay').count(), 0);
   assert.deepEqual(errors, []);
   console.log('Auth UI passed: layout/motion/registration/recovery; profile dialogs, account info and Pro/expired membership, polling pause/resume, focus trapping/restoration, Escape/outside dismissal and logout.');
  } finally {

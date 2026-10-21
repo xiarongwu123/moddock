@@ -6,13 +6,21 @@ const os = require('node:os');
 const crypto = require('node:crypto');
 const app = process.env.MODDOCK_TEST_ROOT || __dirname;
 const {analyzeUE4SS,installedUE4SS,agentGuide} = require(path.join(app,'studio-ue4ss-safety.cjs'));
+
+test('effective FOV reflected lookup must use the camera manager owner',()=>{
+ const wrong=analyzeUE4SS('local reader="/Script/Engine.PlayerController:GetFOVAngle"');
+ assert.ok(wrong.findings.some(f=>f.code==='UE4SS_FOV_OWNER'));
+ const correct=analyzeUE4SS('local reader="/Script/Engine.PlayerCameraManager:GetFOVAngle"');
+ assert.ok(!correct.findings.some(f=>f.code==='UE4SS_FOV_OWNER'));
+});
 const {ModStudio} = require(path.join(app,'mod-studio.cjs'));
 const {creationPayload} = require(path.join(app,'studio-mu-client.cjs'));
 const ron={appId:'1144200'};
 const analysis=(code,game=ron)=>analyzeUE4SS(code,{game});
 const codes=result=>result.findings.filter(f=>f.severity==='error').map(f=>f.code);
-const fixedRoot=path.resolve(__dirname,'../ron-crash-fix-20261019/fixed');
-const backupRoot=path.resolve(__dirname,'../ron-crash-fix-20261019/backup');
+const fixtureRoot=process.env.MODDOCK_CRASH_FIXTURE_ROOT || path.resolve(__dirname,'../ron-crash-fix-20261019');
+const fixedRoot=path.join(fixtureRoot,'fixed');
+const backupRoot=path.join(fixtureRoot,'backup');
 const names=['Moddock35338a1c62b44ec1823465829a3f2af0','Moddock3e8a018b81c645c992a3d66c1a0d9329','Moddock40f14048ffb944d79bda6199930d4b6b'];
 test('all three real failing scripts are rejected; repaired scripts pass known-risk analysis',async()=>{
  for(const name of names) {

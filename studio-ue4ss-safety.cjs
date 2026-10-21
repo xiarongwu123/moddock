@@ -97,6 +97,8 @@ function analyzeUE4SS(source, {game = {}, installed = []} = {}) {
    && some(fn,n=>n.type==='CallExpression' && name(n.base)==='table.unpack');
  }
  function scan(node) {
+  if(node.type==='StringLiteral' && literal(node)==='/Script/Engine.PlayerController:GetFOVAngle')
+   add('UE4SS_FOV_OWNER',node,'GetFOVAngle 属于 PlayerCameraManager；从活的本地 PlayerController.PlayerCameraManager 核对并读取有效视野，不要查询 PlayerController:GetFOVAngle。');
   if(node.type==='CallExpression') {
    const m=method(node.base), required=arity.get(m) ?? (ron ? ronArity.get(m) : undefined);
    if(required!==undefined && node.base.indexer===':' && !node.arguments.some(a=>a.type==='VarargLiteral') && node.arguments.length!==required)

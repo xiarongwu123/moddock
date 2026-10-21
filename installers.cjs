@@ -15,6 +15,7 @@ const {canUseAI}=require('./ai-install.cjs');
 const {classifyFiles,validateExclusions,uniqueMatches,replacementRule}=require('./replacement-evidence.cjs');
 const {instructionTexts}=require('./author-install.cjs');
 const {archiveFormat,formatError,extract7z}=require('./archive-format.cjs');
+const fomod=require('./fomod.cjs');
 const { isBG3, moduleInfo, readModule, editLoadOrder, isEnabled } = require('./bg3-mod.cjs');
 const { LIMITS, assertSize, checkArchiveEntry } = require('./archive-limits.cjs');
 const { InstallationProgress } = require('./installation-progress.cjs');
@@ -47,7 +48,7 @@ async function json(file, limit = 1024 ** 2) { const st = await fs.stat(file); i
 async function atomic(file, value) { await fs.mkdir(path.dirname(file), { recursive: true }); const tmp = file + '.tmp'; await fs.writeFile(tmp, JSON.stringify(value, null, 2)); await fs.rename(tmp, file); }
 async function extract(file, dir, progress = noop) {
  const format=await archiveFormat(file);
- if(format==='7z')return extract7z(file,dir,progress,{relative,target});
+ if(['7z','rar'].includes(format))return extract7z(file,dir,progress,{relative,target});
  if(format!=='zip')throw formatError(format);
  await fs.mkdir(dir, { recursive: true }); const files = []; const names = new Set(); let bytes = 0, count = 0;
  let zip;
@@ -195,9 +196,12 @@ class Installers {
   const dir=path.join(this.root,'inspect',crypto.randomUUID());
   try{
    const format=await archiveFormat(f.file);
-   if(['zip','7z'].includes(format)){
+   if(['zip','7z','rar'].includes(format)){
     const entries=await extract(f.file,dir,(done,total,file)=>report('inspect',15+13*done/Math.max(1,total),'正在解析安装包…',{file,processed:Math.floor(done),total})),files=entries.map(f=>({path:f.source,size:f.size}));
-    if(readInstructions){const docs=entries.filter(f=>documentation(f.source)&&(/\.(txt|md)$/i.test(f.source)||!path.posix.basename(f.source).includes('.'))&&f.size<=256*1024).slice(0,4);files.instructions=(await Promise.all(docs.map(f=>fs.readFile(path.join(dir,f.source),'utf8')))).join('\n');}return files;
+    if(readInstructions){const docs=entries.filter(f=>documentation(f.source)&&(/\.(txt|md)$/i.test(f.source)||!path.posix.basename(f.source).includes('.'))&&f.size<=256*1024).slice(0,4);files.instructions=(await Promise.all(docs.map(f=>fs.readFile(path.join(dir,f.source),'utf8')))).join('\n');
+     const configs=entries.filter(f=>/(^|\/)fomod\/ModuleConfig\.xml$/i.test(f.source));if(configs.length>1)throw new Error('包内有多个 FOMOD 配置，无法确认安装入口');
+     if(configs.length){if(configs[0].size>1024*1024)throw new Error('FOMOD XML 体积超限');const bytes=await fs.readFile(path.join(dir,configs[0].source));files.fomod={path:configs[0].source,xml:bytes.toString(bytes[0]===255&&bytes[1]===254?'utf16le':'utf8').replace(/^\uFEFF/,'')};}
+    }return files;
    }
    if(format==='unknown'&&/\.(archive|pak|utoc|ucas)$/i.test(f.name))return [{path:relative(f.name),size:total}];
    throw formatError(format);
@@ -205,6 +209,7 @@ class Installers {
  });}
  async installAuto(game,jobId,context={},report=noop) {
   const files=await this.inspect(game,jobId,true,report);context={...context,readmeInstructions:files.instructions||''};
+  if(files.fomod)return this.fomodResult(game,jobId,files,context,report);
   const texts=instructionTexts(context),classified=classifyFiles(files.filter(f=>!documentation(f.path)),texts);
   const excluded=new Set(classified.excludedFiles.map(row=>row.source));
   report('matching',28,'正在分析作者安装说明、包结构和前置要求…');
@@ -222,6 +227,36 @@ class Installers {
   const plan=await this.prepare(game,jobId,rule,report);
   try{await context.beforeApply?.();return await this.apply(game,plan.id,true,report,context.checkCurrent);}catch(error){await this.discard(plan.id).catch(()=>{});throw error;}
  }
+ async fomodResult(game,jobId,files,context={},report=noop){
+  const model=fomod.parse(files.fomod.xml,files.fomod.path,relative);
+  // Bethesda's FOMOD destination is Data. Other games must pass their existing
+  // author/game layout rules after the selected virtual tree is built.
+  const bethesda={'72850':'TESV.exe','489830':'SkyrimSE.exe','611670':'SkyrimVR.exe','377160':'Fallout4.exe','611660':'Fallout4VR.exe','22300':'Fallout3.exe','22370':'Fallout3.exe','22380':'FalloutNV.exe','22330':'Oblivion.exe','1716740':'Starfield.exe'};
+  const executable=bethesda[String(game.appId)],base=executable?'Data':'';
+  const root=await fs.realpath(game.installPath),states=Object.create(null),dependencyHashes={};
+  if(executable&&!await fileHash(await target(root,executable)))throw new Error('无法确认 FOMOD 对应的游戏目录');
+  for(const node of Array.from(model.root.getElementsByTagName('fileDependency'))){
+   const name=relative(node.getAttribute('file')),rel=[base,name].filter(Boolean).join('/'),file=await target(root,rel);
+   let present=false;try{present=(await fs.lstat(file)).isFile();}catch(error){if(error.code!=='ENOENT')throw error;}
+   states[name.toLowerCase()]=!present?'Missing':/\.(esp|esm|esl)$/i.test(name)?'Unknown':'Active';
+   dependencyHashes[rel]=await fileHash(file);
+  }
+  const result=fomod.evaluate(model,context.fomodSelection,states,!!context.fomodFinalize),{installNodes,...wizard}=result;
+  if(!context.fomodFinalize)return {kind:'fomod',gameId:game.id,jobId,wizard};
+  const rows=fomod.mappings(model,result,files);let mappings,requires=executable?[executable]:[];
+  if(base)mappings=rows.map(row=>({...row,destination:base+'/'+row.destination}));
+  else{
+   const virtual=rows.map(row=>({path:row.destination,size:files.find(f=>f.path===row.source).size}));
+   const rule=await detectRule(game,virtual,context);assertRequirements(context,rule,this.state.mods.filter(m=>m.gameId===game.id));
+   if(!['copy','pak','archive','bepinex'].includes(rule.mode)||rule.fileMappings)throw new Error('此游戏的 FOMOD 目标需要专用加载器适配');
+   requires=(rule.requires||[]).map(rel=>[rule.root,rel].filter(Boolean).join('/'));
+   mappings=rows.map(row=>({...row,destination:[rule.root,rule.destination,['pak','archive'].includes(rule.mode)?path.posix.basename(row.destination):rule.sourcePrefix?row.destination.slice(rule.sourcePrefix.length+1):row.destination].filter(Boolean).join('/')}));
+  }
+  const rule={mode:'copy',fileMappings:mappings,requires,installationRule:{id:'fomod',name:'FOMOD 作者选项安装',origin:'fomod',sources:context.url?[context.url]:[],configPath:model.configPath,configSha256:model.sha256,selection:context.fomodSelection,selectedIds:result.selectedIds,notes:['已按 ModuleConfig.xml 和所选选项生成文件方案。',...(rows.some(r=>/\.(esp|esm|esl)$/i.test(r.destination))?['插件文件部署后，仍须在游戏或加载器中启用插件并确认加载顺序。']:[])]}};
+  rule.baseHashes=dependencyHashes;
+  assertRequirements(context,rule,this.state.mods.filter(m=>m.gameId===game.id));
+  await context.beforeApply?.();return {kind:'fomod-plan',plan:await this.prepare(game,jobId,rule,report)};
+ }
  async prepare(game,jobId,automaticRule,report=noop) { return this.exclusive(async()=>{
   report('extracting',32,'正在检查安装路径和游戏状态…');
   for(const [id,p] of this.plans)if(Date.now()-p.created>15*60000){await fs.rm(p.stage,{recursive:true,force:true});this.plans.delete(id);} if(this.plans.size>=10)throw new Error('待安装方案过多，请完成或关闭旧方案');
@@ -234,12 +269,12 @@ class Installers {
   const id=crypto.randomUUID(),stage=path.join(this.root,'plans',id);await fs.mkdir(stage,{recursive:true});
   try{
    const format=await archiveFormat(downloaded.file);
-   let files; if(['zip','7z'].includes(format))files=await extract(downloaded.file,stage,(done,total,file)=>report('extracting',40+15*done/Math.max(1,total),'正在解压安装文件…',{file,processed:Math.floor(done),total}));
+   let files; if(['zip','7z','rar'].includes(format))files=await extract(downloaded.file,stage,(done,total,file)=>report('extracting',40+15*done/Math.max(1,total),'正在解压安装文件…',{file,processed:Math.floor(done),total}));
    else if(/\.(archive|pak|utoc|ucas)$/i.test(downloaded.name)){const source=relative(downloaded.name);await copyProgress(downloaded.file,path.join(stage,source),ratio=>report('extracting',40+15*ratio,'正在准备安装文件…',{file:source}));files=[{source,sha256:job.sha256,size:downloadSize}];}
    else throw formatError(format);
    report('checking',55,'正在检查前置、冲突和目标文件…');
    const archiveFiles=files.map(f=>({path:f.source,size:f.size}));let units=[]; const warnings=[];
-   if(automaticRule)files=files.filter(f=>!documentation(f.source));
+   if(automaticRule&&automaticRule.installationRule?.origin!=='fomod')files=files.filter(f=>!documentation(f.source));
    if(p.excludedFiles?.length){
     if(!automaticRule?.installationRule)throw new Error('备份排除必须来自已校验的自动安装方案');
     const texts=(automaticRule.installationRule.exclusionInstructions||automaticRule.installationRule.instructions||[]).map(row=>({source:row.source,text:row.excerpt}));
@@ -250,15 +285,22 @@ class Installers {
    if(p.sourcePrefix){files=files.filter(f=>f.source.startsWith(p.sourcePrefix+'/'));if(!files.length)throw new Error('压缩包中不存在配置的内部目录：'+p.sourcePrefix);}
    if(p.fileMappings){
     const origin=automaticRule?.installationRule?.origin;
-    if(!['pi-agent','local-files'].includes(origin))throw new Error('逐文件自动映射必须来自已校验的安装方案');
+    if(!['pi-agent','local-files','fomod'].includes(origin))throw new Error('逐文件自动映射必须来自已校验的安装方案');
+    if(origin==='fomod'){
+     const config=files.find(f=>f.source===automaticRule.installationRule.configPath);if(!config)throw new Error('FOMOD 配置已变化');
+     const bytes=await fs.readFile(path.join(stage,config.source)),xml=bytes.toString(bytes[0]===255&&bytes[1]===254?'utf16le':'utf8').replace(/^\uFEFF/,'');
+     if(crypto.createHash('sha256').update(xml).digest('hex')!==automaticRule.installationRule.configSha256)throw new Error('FOMOD 配置校验失败');
+     const chosen=new Set(p.fileMappings.map(row=>row.source));files=files.filter(f=>chosen.has(f.source));
+     warnings.push(...automaticRule.installationRule.notes);
+    }
     const mappings=new Map(p.fileMappings.map(row=>[row.source,row.destination]));
-    if(mappings.size!==p.fileMappings.length||mappings.size!==files.length||files.some(f=>!mappings.has(f.source)))throw new Error('AI 安装方案与复核后的实际包结构不一致');
+    if((origin!=='fomod'&&mappings.size!==p.fileMappings.length)||mappings.size!==files.length||files.some(f=>!mappings.has(f.source)))throw new Error('自动安装方案与复核后的实际包结构不一致');
     if(origin==='local-files'){
      const matches=await uniqueMatches(game,files.map(f=>({path:f.source,size:f.size})));
      if(matches.some(row=>!row.destination||mappings.get(row.source)!==row.destination||!p.baseHashes?.[row.destination]))throw new Error('本机唯一文件匹配依据已变化，请重新分析安装方案');
     }
-    files=files.map(f=>({...f,destination:mappings.get(f.source)}));
-    warnings.push(origin==='local-files'?'已通过本机唯一同名文件和完整相对目录核对替换位置；覆盖前备份当前文件，可停用或卸载恢复。':'pi agent 已按作者说明生成逐文件方案；所有目标将检查冲突、自动备份并记录，可停用或卸载恢复。');
+    files=origin==='fomod'?p.fileMappings.map(row=>({...files.find(f=>f.source===row.source),destination:row.destination})):files.map(f=>({...f,destination:mappings.get(f.source)}));
+    if(origin!=='fomod')warnings.push(origin==='local-files'?'已通过本机唯一同名文件和完整相对目录核对替换位置；覆盖前备份当前文件，可停用或卸载恢复。':'pi agent 已按作者说明生成逐文件方案；所有目标将检查冲突、自动备份并记录，可停用或卸载恢复。');
    }else if(p.mode==='native'){
     files=await require('./studio-native-patch.cjs').materializeNativePatch(root,stage,p,target);
     warnings.push('按原文件 SHA-256 重建原生资源；安装前备份，可停用或卸载还原。');

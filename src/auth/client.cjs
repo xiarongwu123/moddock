@@ -38,7 +38,8 @@ function createAuthClient(request = fetch, now = Date.now) {
   },
   async sendCode({ email, password, termsAccepted, purpose = 'register' }) {
    const result = await call('code', { email, password, termsAccepted, purpose });
-   return { id: now(), expiresAt: now() + result.expiresInSeconds * 1000, resendAt: now() + result.retryAfterSeconds * 1000, message: result.message };
+   const issuedAt = now();
+   return { id: issuedAt, expiresAt: issuedAt + result.expiresInSeconds * 1000, resendAt: issuedAt + result.retryAfterSeconds * 1000, message: result.message };
   },
   async register({ email, password, code, termsAccepted, remember = false }) {
    const terms = await this.config();

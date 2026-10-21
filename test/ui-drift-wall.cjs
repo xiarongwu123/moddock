@@ -92,7 +92,7 @@ const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQ
   await page.locator('#auth-panel[data-transitioning="false"]').waitFor();
   await page.getByLabel('邮箱验证码', { exact: true }).fill('246810');
   await page.locator('.auth-swap[data-active="true"][data-transitioning="false"]').waitFor();
-  await page.getByRole('button', { name: '暂时跳过', exact: true }).click();
+  await page.locator('.source-onboarding-footer').getByRole('button', { name: /^(暂时跳过|开始使用)$/ }).click();
   await page.getByRole('heading', { name: '我的游戏', exact: true }).waitFor();
   await page.getByLabel('账号菜单', { exact: true }).click();
   await page.getByRole('banner').getByRole('button', { name: '退出登录', exact: true }).click();

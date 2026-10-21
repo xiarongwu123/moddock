@@ -17,15 +17,15 @@ async function archiveFormat(file){
  if(/^\s*(?:<!doctype\s+html|<html|<head|<body)/i.test(head.subarray(0,size).toString('utf8').replace(/^\uFEFF/,'')))return 'html';
  return 'unknown';
 }
-function formatError(format){return new Error(format==='html'?'下载内容实际是网页，没有取得模组安装包，请重新获取下载':format==='rar'?'文件内容实际是 RAR，当前需要对应解包适配；改成 .zip 后缀无法转换格式':format==='gzip'?'文件内容实际是 gzip，当前需要对应解包适配':'文件内容不是可识别的 ZIP 或 7z 压缩包，可能下载不完整或来源返回了其他内容');}
-function binary(){return path.join(__dirname.replace(/app\.asar(?=[\\/]|$)/,'app.asar.unpacked'),'vendor','archive-tools','7za.exe');}
+function formatError(format){return new Error(format==='html'?'下载内容实际是网页，没有取得模组安装包，请重新获取下载':format==='gzip'?'文件内容实际是 gzip，当前需要对应解包适配':'文件内容不是可识别的 ZIP、7z 或 RAR 压缩包，可能下载不完整或来源返回了其他内容');}
+function binary(){return path.join(__dirname.replace(/app\.asar(?=[\\/]|$)/,'app.asar.unpacked'),'vendor','archive-tools','7z.exe');}
 function parseListing(output,archiveBytes,validate){
  const entries=[],seen=new Set();let expanded=0;
  for(const block of output.replace(/\r/g,'').trim().split(/\n\n+/)){
   if(!block.trim())continue;const row={};
-  for(const line of block.split('\n')){const i=line.indexOf(' = ');if(i<1)throw new Error('7z 文件清单包含无法识别的字段');const k=line.slice(0,i);if(Object.hasOwn(row,k))throw new Error('7z 文件清单存在重复字段');row[k]=line.slice(i+3);}
+  for(const line of block.split('\n')){const match=line.match(/^(.+?) =(?: (.*))?$/);if(!match)throw new Error('7z 文件清单包含无法识别的字段');const k=match[1];if(Object.hasOwn(row,k))throw new Error('7z 文件清单存在重复字段');row[k]=match[2]||'';}
   if(!Object.hasOwn(row,'Path'))throw new Error('7z 文件清单缺少路径');
-  if(row.Encrypted==='+'||row['Symbolic Link']||row['Hard Link']||row['Alternate Stream']==='+'||/\b(?:l[rwx-]{9}|[BCPLS])\b/.test(row.Attributes||''))throw new Error('7z 包含加密、链接或特殊文件，不能自动解压');
+  if(row.Encrypted==='+'||row['Symbolic Link']||row['Hard Link']||row['Copy Link']||row['Reparse Point']||row['Alternate Stream']==='+'||/\b(?:l[rwx-]{9}|[BCPLS])\b/.test(row.Attributes||''))throw new Error('7z 包含加密、链接或特殊文件，不能自动解压');
   const directory=row.Folder==='+'||/^D(?:\s|$)/.test(row.Attributes||'');
   const source=validate(row.Path.replace(/\\/g,'/').replace(/\/$/,'')),key=source.normalize('NFC').toLowerCase();
   if(seen.has(key))throw new Error('压缩包存在重名文件：'+source);seen.add(key);
@@ -42,17 +42,18 @@ function parseListing(output,archiveBytes,validate){
  return entries;
 }
 async function extract7z(file,dir,progress,{relative,target}){
+ const format=await archiveFormat(file);if(!['7z','rar'].includes(format))throw formatError(format);
  if(process.platform!=='win32')throw new Error('7z 解压组件当前提供 Windows 版本');
  const exe=binary();await fs.access(exe).catch(()=>{throw new Error('缺少随应用提供的 7z 解压组件，请更新客户端');});
  const archiveBytes=(await fs.stat(file)).size;assertSize(archiveBytes,LIMITS.downloadBytes,'安装包体积',file);
  let stdout;
- try{({stdout}=await promisify(execFile)(exe,['l','-t7z','-slt','-ba','-sccUTF-8','-pModdockNoEncryptedArchives','--',file],{windowsHide:true,timeout:120000,maxBuffer:64*1024**2}));}
+ try{({stdout}=await promisify(execFile)(exe,['l',...(format==='7z'?['-t7z']:[]),'-slt','-ba','-sccUTF-8','-pModdockNoEncryptedArchives','--',file],{windowsHide:true,timeout:120000,maxBuffer:64*1024**2}));}
  catch{throw new Error('7z 压缩包无法读取，可能不完整、已损坏或使用了密码加密');}
  const entries=parseListing(stdout,archiveBytes,relative),files=[];await fs.mkdir(dir,{recursive:true});
  for(let i=0;i<entries.length;i++){
   const entry=entries[i];if(entry.directory){progress(i+1,entries.length,entry.source);continue;}
   const out=await target(dir,entry.source);await fs.mkdir(path.dirname(out),{recursive:true});
-  const child=spawn(exe,['x','-t7z','-so','-y','-bd','-bso0','-bse2','-bsp0','-spd','-ssc','-pModdockNoEncryptedArchives','--',file,entry.raw],{windowsHide:true,stdio:['ignore','pipe','pipe'],timeout:300000});
+  const child=spawn(exe,['x',...(format==='7z'?['-t7z']:[]),'-so','-y','-bd','-bso0','-bse2','-bsp0','-spd','-ssc','-pModdockNoEncryptedArchives','--',file,entry.raw],{windowsHide:true,stdio:['ignore','pipe','pipe'],timeout:300000});
   let bytes=0,crc=0,stderr=0;const hash=crypto.createHash('sha256');child.stderr.on('data',chunk=>{stderr+=chunk.length;if(stderr>65536)child.kill();});
   const completion=new Promise((resolve,reject)=>{child.once('error',reject);child.once('close',code=>code===0?resolve():reject(new Error('7z 文件解压或 CRC 校验失败：'+entry.source)));});
   const meter=new Transform({transform(chunk,encoding,done){bytes+=chunk.length;if(bytes>entry.size)return done(new Error('7z 实际解压大小超出清单：'+entry.source));crc=crc32(chunk,crc);hash.update(chunk);progress(i+(entry.size?bytes/entry.size:1),entries.length,entry.source);done(null,chunk);}});
