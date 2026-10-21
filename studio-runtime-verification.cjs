@@ -9,6 +9,12 @@ function contract(source) {
  const literal = n => n?.type === 'StringLiteral' ? n.value ?? n.raw.slice(1,-1) : null;
  function visit(n) {
   if (!n || typeof n !== 'object') return;
+  if(n.type==='CallStatement') {
+   const call=n.expression, target=call?.base;
+   const direct=target?.type==='MemberExpression' && target.base?.name==='ModdockVerification' && target.identifier?.name==='guard';
+   const wrapped=target?.name==='pcall' && call.arguments?.[0]?.type==='MemberExpression' && call.arguments[0].base?.name==='ModdockVerification' && call.arguments[0].identifier?.name==='guard';
+   if(direct || wrapped) findings.push({code:'RUNTIME_GUARD_UNUSED',line:n.loc?.start.line,message:'guard(id, fn) 返回包装函数，不执行 fn；不得丢弃返回值。把返回函数注册/传给调度器，或显式调用 guard(id, fn)(...)。'});
+  }
   if(['LocalStatement','AssignmentStatement'].includes(n.type)) {
    for(const [i,v] of (n.variables || []).entries()) {
     if(v.name==='ModdockVerification' || v.type==='MemberExpression' && v.base?.name==='ModdockVerification') findings.push({code:'RUNTIME_HOST_API',message:'不得覆盖宿主运行验收接口'});

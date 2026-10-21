@@ -95,6 +95,7 @@ class Downloads {
     if (verificationRequired) this.verifications.set(j.id, { client, jobId: state.verification }); else this.verifications.delete(j.id);
     if (message && (j.message !== message || !!j.verificationRequired !== verificationRequired)) { j.message = message; j.verificationRequired = verificationRequired; await this.save(); }
    } }); j.version=file.version||'';
+   if (j.source === 'banana') Object.assign(j, { sourceUpdated: file.sourceUpdated || null, sourceVersion: file.sourceVersion || '', sourceFileUpdated: file.updated || null, sourceFileMd5: file.md5 || null });
    if (ctrl.signal.aborted) throw new Error('cancelled');
    assertSize(file.size, LIMITS.downloadBytes, '下载文件体积', file.name || j.name);
    await this.beforeDownload?.(file);

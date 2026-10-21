@@ -20,6 +20,9 @@ class InstallationProgress {
   };
   try {
    const result = await work(report);
+   if(result?.kind==='fomod'||result?.kind==='fomod-plan'){
+    Object.assign(task,{status:'waiting_selection',phase:'options',message:result.kind==='fomod'?'请选择作者提供的安装选项':'安装方案已生成，等待确认',updatedAt:Date.now()});return result;
+   }
    Object.assign(task, { status: 'completed', phase: 'completed', percent: 100,
     message: 'MOD 安装完成，文件已校验，原始文件已备份。', file: '', processed: 0, total: 0, updatedAt: Date.now() });
    return result;

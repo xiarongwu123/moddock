@@ -62,6 +62,16 @@ test('MU email code and registration send purpose, consent version and entered c
  assert.deepEqual(x.upstream.calls.at(-1).body, { email: input.email, password: input.password, code: '246810', termsVersion: TERMS_VERSION, deviceName: `MODDOCK ${version} (${process.platform})` });
  assert.equal(x.upstream.calls.filter(call => call.route.includes('verify')).length, 0);
 });
+
+test('email code expiry and resend deadlines share one clock sample', async () => {
+ let ticks = 1000;
+ const client = createAuthClient(async route => Response.json(route.endsWith('/config') ? { token: 'fixture' } : { expiresInSeconds: 600, retryAfterSeconds: 60 }), () => ticks++);
+ const challenge = await client.sendCode({ email: 'clock@example.com' });
+ assert.equal(challenge.id, 1000);
+ assert.equal(challenge.expiresAt, 601000);
+ assert.equal(challenge.resendAt, 61000);
+ assert.equal(ticks, 1001);
+});
 test('local auth rejects missing token, cross-origin posts, missing consent and invalid inputs before calling MU', async t => {
  const x = await fixture(t);
  const body = { email: 'player@example.com', password: '12345678' };

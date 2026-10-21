@@ -38,6 +38,7 @@ function externalAllowed(value) {
 }
 function text(value) { return String(value || '').replace(/<[^>]*>/g, '').replace(/\[(?:\/?[a-z]+)(?:=[^\]]*)?\]/gi, '').replace(/\s+/g, ' ').trim().slice(0, 50000); }
 function normalize(value) { return String(value || '').replace(/[™®©]/g, '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, ''); }
+function sourceDate(value) { const time = Number(value) * 1000; return time > 0 && Number.isFinite(time) && time <= 8640000000000000 ? new Date(time).toISOString() : null; }
 function bananaGameRecords(raw) {
   if (raw?._sErrorCode) {
     const code = String(raw._sErrorCode).replace(/[^a-z0-9_]/gi, '').slice(0, 80) || 'API_ERROR';
@@ -181,7 +182,8 @@ class Sources {
       const gameId = await this.bananaGame(game);
       if (!gameId || String(raw._aGame?._idRow) !== String(gameId)) throw new Error('此 Mod 不属于当前游戏');
       if (raw._bIsWithheld || raw._bIsTrashed || raw._bIsPrivate) throw new Error('该资源目前不对外开放');
-      return { description: text(raw._sText || raw._sDescription), requirements: [], notice:'香蕉网公开直链文件可直接下载，不需要 Nexus 或 Steam API Key。', files: (raw._aFiles || []).filter(f => !f._bIsArchived).map(f => ({ id: String(f._idRow), name: text(f._sFile), size: Number(f._nFilesize), version: '', ...fileAccess(f._sDownloadUrl,'banana'), _url: f._sDownloadUrl, md5: /^[a-f0-9]{32}$/i.test(f._sMd5Checksum || '') ? f._sMd5Checksum : null })) };
+      if (!Array.isArray(raw._aFiles)) throw new Error('GameBanana 文件列表返回异常，请稍后重试');
+      return { version: text(raw._sVersion), updated: sourceDate(raw._tsDateUpdated || raw._tsDateModified), description: text(raw._sText || raw._sDescription), requirements: [], notice:'香蕉网公开直链文件可直接下载，不需要 Nexus 或 Steam API Key。', files: raw._aFiles.filter(f => !f._bIsArchived).map(f => ({ id: String(f._idRow), name: text(f._sFile), size: Number(f._nFilesize), version: text(f._sVersion), updated: sourceDate(f._tsDateAdded), description: text(f._sDescription), ...fileAccess(f._sDownloadUrl,'banana'), _url: f._sDownloadUrl, md5: /^[a-f0-9]{32}$/i.test(f._sMd5Checksum || '') ? f._sMd5Checksum : null })) };
     }
     if (r.source === 'nexus') {
       if (r.domain !== await this.nexusGame(game)) throw new Error('此 Mod 不属于当前游戏');
@@ -213,6 +215,7 @@ class Sources {
     }
     const detail = await this.detail(game, id); const file = detail.files.find(f => f.id === String(fileId));
     if (!file) throw new Error('该文件已下架或不属于此 Mod');
+    if (managedResource.source === 'banana') { file.sourceUpdated = detail.updated; file.sourceVersion = detail.version; }
     if (!file.available) throw Object.assign(new Error(file.downloadReason || detail.notice || '该来源尚未开放直接下载'),{code:file.downloadCode});
     const resource = this.resource(game, id);
     if (resource.source === 'nexus') {

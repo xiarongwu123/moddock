@@ -84,7 +84,9 @@ class DownloadBundles{
      await this.options.authorize(b.owner,runtime.sessionId);
      if(!current())throw Error('账号已切换，组合安装已停止');
      b.message='正在安装 '+(b.files.indexOf(f)+1)+'/'+b.files.length+'：'+f.name;await this.save();
-     const mod=await this.options.install(f.jobId,b.owner,runtime.sessionId,current);f.modId=mod.id;f.installed=true;await this.save();
+     const mod=await this.options.install(f.jobId,b.owner,runtime.sessionId,current);
+     if(mod?.kind==='fomod')throw Error('此文件需要选择 FOMOD 安装选项，请在下载列表点击“一键安装”，完成后继续组合。');
+     f.modId=mod.id;f.installed=true;await this.save();
     }
     if(current()){b.status='completed';b.message='组合安装完成，全部文件已校验；游戏内效果仍需确认。';}
    }catch(error){if(current()){if(error.message==='正在处理安装任务，请稍后'){b.status='waiting_install';b.message='等待当前文件检查或安装任务完成后继续。';}else{b.status='install_failed';b.error=String(error.message||error);b.message='组合安装已暂停，已成功的项目保留；当前失败文件由安装器回滚。';}}}

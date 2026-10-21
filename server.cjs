@@ -8,6 +8,7 @@ const { Sources, sourceGames, providers } = require('./sources.cjs');
 const { Downloads } = require('./downloads.cjs');
 const { Installers } = require('./installers.cjs');
 const {ModLibrary}=require('./library.cjs');
+const { GameUpdates } = require('./game-updates.cjs');
 const {parseNxm,authorizationPage}=require('./nxm.cjs');
 const {recipes}=require('./adapters.cjs');
 const { ensureUi } = require('./scripts/build-ui.cjs');
@@ -42,7 +43,8 @@ async function createServer(options = {}) {
  const configPath = path.join(root, 'settings.json'); let config = { scanPaths: [], mappings: {}, autoImport:true };
  try { config = { ...config, ...JSON.parse(await fs.readFile(configPath, 'utf8')) }; } catch (e) { if (e.code !== 'ENOENT') throw e; }
  const saveConfig = async () => { await fs.writeFile(configPath + '.tmp', JSON.stringify(config, null, 2)); await fs.rename(configPath + '.tmp', configPath); };
- const doScan = async paths => mergeStudioGames(await (options.scan || scan)(paths), config.localGames); let scanResult = await doScan(config.scanPaths);
+ const gameUpdates = await new GameUpdates(root).open();
+ const doScan = async paths => { const result = mergeStudioGames(await (options.scan || scan)(paths), config.localGames); await gameUpdates.observe(result.games); return result; }; let scanResult = await doScan(config.scanPaths);
  let choosingScanDirectory = false;
  const token = crypto.randomBytes(32).toString('hex'); const sources = new Sources({ ...sourceOptions, nexusPlatform: sourceOptions.nexusPlatform || sourceOptions.nexusPlatformFactory?.(null) }); const downloads = await new Downloads(root, sources, options.downloads).open();
  const connections = new SourceConnections(accounts.config.legalUrls.terms, sourceOptions, options.sourceKeyStore);
@@ -179,7 +181,7 @@ async function createServer(options = {}) {
   if (permission.account.id !== owner || connections.entries.get(owner)?.sources !== client || job.status !== 'authorization_required') return;
   await authorizeFile(owner, sessionId, client, downloadGame(job.gameId), job.resourceId, job.fileId, job);
  };
- async function installJob(job,profile,sessionId,operationId,extraCurrent=()=>true){
+ async function installJob(job,profile,sessionId,operationId,extraCurrent=()=>true,fomodOptions={}){
   if(!extraCurrent()||sessionOwners.get(sessionId)!==profile.id)throw new Error('账号已变化，安装已停止');
   const sources=(await connections.get(profile.id)).sources;
   const ensureEnvironment=(target,report)=>gameEnvironment.ensure({game:target,owner:profile.id,report,
@@ -215,6 +217,8 @@ async function createServer(options = {}) {
       if(!current()||permission.account.id!==profile.id)throw new Error('账号已切换，安装已停止');
      };
      context.beforeApply=authorizeInstall;
+     context.fomodSelection=fomodOptions.selection;
+     context.fomodFinalize=fomodOptions.finalize===true;
      context.checkCurrent=()=>{if(!current())throw new Error('账号已切换，安装已停止');};
      context.resolveWithAI=async(files,details,failure)=>{
       const authorize=async()=>{await authorizeInstall();const fresh=await accounts.session(sessionId);if(!studioAccess(fresh))throw new AccountError(403,'pro_required','AI 自动安装使用工程现有 pi agent，需要有效的 Pro AI 权限。');};
@@ -265,7 +269,7 @@ async function createServer(options = {}) {
     }
     if (req.method === 'GET' && url.pathname === '/api/account/orders') return send(await accounts.orders(sessionId));
     if (req.method === 'GET' && url.pathname.startsWith('/api/account/orders/')) return send(await accounts.order(sessionId, decodeURIComponent(url.pathname.slice('/api/account/orders/'.length))));
-    if (req.method === 'GET' && url.pathname === '/api/state') return send({ scan: scanResult, token, games: scanResult.games, sourceGames: onlineGames(), providers, connections: await connections.status(profile.id), nexusSso: sso.status(profile.id), jobs: downloads.view(profile.id), bundles: bundles.view(profile.id), installations: installers.view(onlineGames(),profile.id), studio: studio.status(profile), scanPaths: config.scanPaths, canChooseScanDirectory: typeof options.chooseScanDirectory === 'function', mappings: config.mappings, downloadPath: downloads.root, autoImport:config.autoImport!==false, recipes, nxmStatus: nxmStatus?.owner === profile.id ? nxmStatus : null, nexusAuthorizationWindow:!!options.authorize, nxmProtocol:options.protocolStatus?.()||false });
+    if (req.method === 'GET' && url.pathname === '/api/state') return send({ gameUpdates: gameUpdates.view(scanResult.games, installers.view(onlineGames(),profile.id).mods), scan: scanResult, token, games: scanResult.games, sourceGames: onlineGames(), providers, connections: await connections.status(profile.id), nexusSso: sso.status(profile.id), jobs: downloads.view(profile.id), bundles: bundles.view(profile.id), installations: installers.view(onlineGames(),profile.id), studio: studio.status(profile), scanPaths: config.scanPaths, canChooseScanDirectory: typeof options.chooseScanDirectory === 'function', mappings: config.mappings, downloadPath: downloads.root, autoImport:config.autoImport!==false, recipes, nxmStatus: nxmStatus?.owner === profile.id ? nxmStatus : null, nexusAuthorizationWindow:!!options.authorize, nxmProtocol:options.protocolStatus?.()||false });
     if (req.method !== 'POST' || req.headers['x-moddock-token'] !== token) return send({ error: '请求未授权' }, 403);
     if (req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) return send({ error: '请求来源无效' }, 403);
     const bodyLimit = ['/api/studio/save', '/api/studio/generate'].includes(url.pathname) ? 128 * 1024 : 16384;
@@ -357,6 +361,7 @@ async function createServer(options = {}) {
      if (url.pathname === '/api/studio/prepare-environment') return send(await ensureEnvironment(target));
      if (url.pathname === '/api/studio/conversations/list') return send({ items: await studio.conversations.list(owner, target) });
      if (url.pathname === '/api/studio/conversations/read') return send(await studio.conversations.read(owner, target, body.id));
+     if (url.pathname === '/api/studio/conversations/feedback') return send(await studio.conversations.feedback(owner, target, body, current, authorize));
      if (url.pathname === '/api/studio/conversations/logs') return send(await studio.conversations.diagnostics(owner, target, body.id));
      const authorize = async feature => {
       const permission = await accounts.authorize(sessionId, feature);
@@ -457,7 +462,7 @@ async function createServer(options = {}) {
     if (url.pathname === '/api/installations/auto') {
      const job=downloads.jobs.find(j=>j.id===body.jobId&&j.status==='completed');
      if(!job)throw new Error('请选择已经下载完成的 MOD');
-     return send(await installJob(job,profile,sessionId,body.operationId));
+     return send(await installJob(job,profile,sessionId,body.operationId,()=>true,{selection:body.fomodSelection,finalize:body.fomodFinalize}));
     }
     if (url.pathname === '/api/installations/restore') return send(await installers.restoreNative(game()));
     if (url.pathname === '/api/installations/plan') {
@@ -550,7 +555,7 @@ async function createServer(options = {}) {
     }
     return send({ error: '接口不存在' }, 404);
    }
-   const files = { '/': 'index.html', '/favicon.svg': 'favicon.svg', '/favicon.ico': 'favicon.svg', '/app.js': 'app.js', '/membership.js':'membership.js', '/membership.css':'membership.css', '/download-bundles.js':'download-bundles.js', '/download-bundles.css':'download-bundles.css', '/style.css': 'style.css', '/auth.js': 'auth.js', '/auth.css': 'auth.css', '/splash.svg': 'splash.svg', '/splash-preview.html': 'splash-preview.html', '/splash-preview.css': 'splash-preview.css', '/splash-preview.js': 'splash-preview.js', '/logo-loading.svg': 'logo-loading.svg', '/logo-loading-preview.html': 'logo-loading-preview.html', '/youxia-ai-mascot.png': 'youxia-ai-mascot.png', '/youxia-ai-mascot.svg': 'youxia-ai-mascot.svg', '/mascot-preview.html': 'mascot-preview.html', '/mascot-preview.css': 'mascot-preview.css', '/mascot-preview.js': 'mascot-preview.js', '/fonts/fusion-pixel-12px-proportional-zh_hans.woff2': 'fonts/fusion-pixel-12px-proportional-zh_hans.woff2' }; const name = files[url.pathname] || (/^\/covers\/\d+\.jpg$/.test(url.pathname) ? url.pathname.slice(1) : undefined); if (!name) { res.writeHead(404); return res.end('Not found'); }
+   const files = { '/': 'index.html', '/favicon.svg': 'favicon.svg', '/favicon.ico': 'favicon.svg', '/app.js': 'app.js', '/membership.js':'membership.js', '/membership.css':'membership.css', '/download-bundles.js':'download-bundles.js', '/download-bundles.css':'download-bundles.css', '/style.css': 'style.css', '/auth.js': 'auth.js', '/auth.css': 'auth.css', '/splash.svg': 'splash.svg', '/splash-preview.html': 'splash-preview.html', '/splash-preview.css': 'splash-preview.css', '/splash-preview.js': 'splash-preview.js', '/logo-loading.svg': 'logo-loading.svg', '/logo-loading-preview.html': 'logo-loading-preview.html', '/youxia-ai-mascot.png': 'youxia-ai-mascot.png', '/youxia-ai-mascot.svg': 'youxia-ai-mascot.svg', '/mascot-preview.html': 'mascot-preview.html', '/mascot-preview.css': 'mascot-preview.css', '/mascot-preview.js': 'mascot-preview.js', '/fonts/fusion-pixel-12px-proportional-zh_hans.woff2': 'fonts/fusion-pixel-12px-proportional-zh_hans.woff2' }; const name = (url.pathname === '/fomod.css' ? 'fomod.css' : files[url.pathname]) || (/^\/covers\/\d+\.jpg$/.test(url.pathname) ? url.pathname.slice(1) : undefined); if (!name) { res.writeHead(404); return res.end('Not found'); }
    res.setHeader('Content-Security-Policy', "default-src 'self'; img-src 'self' https://cdn.akamai.steamstatic.com https://shared.akamai.steamstatic.com https://staticdelivery.nexusmods.com https://images.gamebanana.com https://images.steamusercontent.com https://steamuserimages-a.akamaihd.net data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https://api.translate.zvo.cn; frame-ancestors 'none'; base-uri 'none'");
    const content = await fs.readFile(path.join(__dirname, 'public', name));
    res.writeHead(200, { 'Content-Type': name.endsWith('.jpg') ? 'image/jpeg' : name.endsWith('.png') ? 'image/png' : name.endsWith('.woff2') ? 'font/woff2' : name.endsWith('.svg') ? 'image/svg+xml' : name.endsWith('.html') ? 'text/html; charset=utf-8' : name.endsWith('.js') ? 'text/javascript; charset=utf-8' : 'text/css; charset=utf-8' }); res.end(content);

@@ -236,6 +236,11 @@ body:has([data-studio-root]) .home-backdrop { opacity: 0; }
 .studio-completion > .studio-result-actions .btn { border-radius: 9px; padding: 12px 18px; font-size: 12px; }
 .studio-completion > .studio-result-actions .btn:not(.primary) { background: transparent; border-color: #ffffff1c; color: #b9c3b5; }
 .studio-completion > .studio-result-hint { font-size: 11px; color: #83917c; margin: 14px 0 0; }
+.studio-user-feedback { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--studio-border); }
+.studio-user-feedback p { color: #abb5a6; font-size: 13px; line-height: 1.8; }
+.studio-user-feedback label { display: block; margin: 18px 0 8px; color: #dfe8d9; }
+.studio-user-feedback textarea { display: block; box-sizing: border-box; width: 100%; margin-bottom: 12px; padding: 12px; resize: vertical; border: 1px solid #ffffff26; border-radius: 9px; background: #181d1b; color: #dfe8d9; font: inherit; }
+.studio-user-feedback textarea:focus-visible { outline: 2px solid #b9dc82; outline-offset: 2px; }
 .studio-completion > .studio-technical { margin: 24px 0 0; padding-top: 16px; }
 .studio-completion .studio-game-info { border-top: 1px solid var(--studio-border); margin-top: 14px; padding-top: 14px; }
 .studio-help { color: #929c91; font-size: 11px; margin-top: 19px; }

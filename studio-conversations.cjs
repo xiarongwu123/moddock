@@ -119,9 +119,25 @@ class StudioConversations {
   }
   return items.sort((a, b) => b.updated.localeCompare(a.updated));
  }
+ async feedback(owner, game, input, current, authorize) {
+  if (input.status === 'rejected') {
+   const problem = String(input.problem || '').trim();
+   if (!problem || problem.length > 2000) throw new Error('请描述遇到的问题，最多 2000 字');
+   return this.send(owner, game, {id:input.id, artifactId:input.artifactId, userFeedback:input, message:'试玩反馈：' + problem + '\n请在当前作品上修复上述问题，保留原有功能，完成后让我重新试玩确认。'}, current, authorize);
+  }
+  const previous = this.queues.get(owner) || Promise.resolve();
+  const operation = previous.catch(()=>{}).then(async()=>{
+   if (this.studio.pending.has(owner)) throw new Error('作品正在更新，请完成后再反馈');
+   const thread = input.id ? await this.read(owner, game, input.id) : null;
+   if (thread && thread.artifactId !== input.artifactId) throw new Error('作品已更新，请刷新后确认当前版本');
+   return require('./studio-user-feedback.cjs').recordFeedback(this.studio,owner,game,input,current);
+  });
+  this.queues.set(owner,operation);
+  try { return await operation; } finally { if(this.queues.get(owner)===operation)this.queues.delete(owner); }
+ }
  async send(owner, game, input, current, authorize) {
   await this.studio.ready;
-  const message = input.resume ? null : text(input.message, '创作想法', 2000);
+  const message = input.resume ? null : text(input.message, '创作想法', input.userFeedback ? 2400 : 2000);
   if (input.resume && !input.id) throw new Error('请选择要继续的创作');
   const previous = this.queues.get(owner) || Promise.resolve();
   const operation = previous.catch(() => {}).then(async () => {
@@ -148,11 +164,15 @@ class StudioConversations {
    }
    if (input.mode && input.mode !== 'ai') throw new Error('仅支持真实 AI 创作');
    item.mode = 'ai';
+   if (input.userFeedback) {
+    if (input.userFeedback.status !== 'rejected' || input.userFeedback.artifactId !== item.artifactId) throw new Error('无效的试玩反馈');
+    item.userFeedback = await require('./studio-user-feedback.cjs').recordFeedback(this.studio,owner,game,input.userFeedback,current);
+   } else if (!input.resume && !input.runtimeAuto) item.userFeedback = null;
    if (message && !input.runtimeAuto) this.message(item, 'user', message);
    item.runtimeAuto=input.runtimeAuto===true;
    // Resume runtime recovery from its saved evidence, including a service-quota
    // interruption. A null resume message must not start a new paid generation.
-   item.command = input.resume ? item.runtimeRecovery && item.artifactId ? 'runtime' : item.command || null : commandFor(message); item.action = null;
+   item.command = input.userFeedback ? null : input.resume ? item.runtimeRecovery && item.artifactId ? 'runtime' : item.command || null : commandFor(message); item.action = null;
    item.status = 'analyzing'; item.error = ''; item.diagnostic = null; item.activeTask = null;
    if (!item.command) { item.plan = null; item.analysis = null; item.toolchain = null; item.planningAttempts = []; item.capability = null; item.toolCalls = []; item.harness = null; item.runtimeRecovery = null; item.runtimeVerification = null; }
    if (item.command === 'build') item.toolchain = null;
@@ -273,7 +293,8 @@ class StudioConversations {
    item.capability.creativeDefaultsDelegated = /你自己|你决定|你定|你来定|随便|都可以|自行决定|自行设计|choose (?:the )?details yourself|you decide/i.test(prompt || '');
    const previousArtifact = item.artifactId ? await this.studio.read(owner, item.artifactId).catch(() => null) : null; check();
    const payload = { accountId: owner, gameId: game.id, conversationId: item.id, messages: history, prompt,
-    context: workspace.context, diagnostic, types, capability: item.capability, environment: await this.studio.toolchain.environment(controller.signal), previousDraft: previousArtifact?.draft || null, signal: controller.signal, onEvent, onTask };
+    context: workspace.context, diagnostic, types, capability: item.capability, environment: await this.studio.toolchain.environment(controller.signal), previousDraft: previousArtifact?.draft || null,
+    ...(item.userFeedback ? {userFeedback:item.userFeedback, validation:{userFeedback:item.userFeedback,runtime:previousArtifact?.deployment?.runtime || null}} : {}), signal: controller.signal, onEvent, onTask };
    let plan, correction;
    for (let attempt = 1; attempt <= 3; attempt++) {
     check(); let candidate;

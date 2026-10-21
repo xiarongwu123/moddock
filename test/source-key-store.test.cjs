@@ -19,7 +19,8 @@ test('source keys are encrypted, owner scoped, atomically replaced and restored 
  await store.write('service-a\nuser-a', keys);
  const [name] = await fs.readdir(root), bytes = await fs.readFile(path.join(root, name));
  for (const value of [...Object.values(keys), 'user-a', 'service-a']) assert.equal(bytes.includes(Buffer.from(value)), false);
- assert.equal((await fs.stat(path.join(root, name))).mode & 0o777, 0o600);
+ // Windows reports DOS attributes through stat.mode; POSIX permission bits are not supported.
+ if (process.platform !== 'win32') assert.equal((await fs.stat(path.join(root, name))).mode & 0o777, 0o600);
  const reopened = createSourceKeyStore(root, encryption);
  assert.deepEqual(await reopened.read('service-a\nuser-a'), keys);
  assert.deepEqual(await reopened.read('service-a\nuser-b'), {});

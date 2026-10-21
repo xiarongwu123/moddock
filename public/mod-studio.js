@@ -9,7 +9,7 @@ const creating = thread => active(thread?.status) && !thread.command;
 const creationReady = s => !!s.saved && s.saved.toolchain?.status === 'passed' && (!s.thread || ['completed','awaiting_runtime','awaiting_exit'].includes(s.thread.status) || !!s.thread.command);
 const suggestions = ['我想增加一个有独特能力的新装备，并设计获取方式', '我想调整游戏里的一个机制，让探索更有趣', '我想做一个符合游戏世界观的新角色或剧情'];
 const suggestionLabels = ['加一件新装备', '调整游戏机制', '创作角色与剧情'];
-const runActions = new Set(['send', 'resume', 'try']);
+const runActions = new Set(['send', 'resume', 'try', 'feedback-submit']);
 const activityNames = { build_native_mod: '编译并打包游戏 Mod', prepare_native_tools: '准备游戏制作工具', extract_game_code: '读取游戏玩法接口', generate_interop: '生成游戏接口', inspect_game: '检查游戏环境', list_game_files: '调查游戏资源', read_game_file: '读取玩法代码', search_api: '核对实现方式', read_runtime: '查看运行反馈', check_draft: '检查制作文件', read: '查阅制作资料', read_reference: '查阅游戏资料', run_agent: '分析实现方案', write_project_file: '编写制作文件', read_project_file: '读取制作文件', list_project_files: '查看制作文件', validate_project: '编译与修正', submit_result: '整理创作结果' };
 const runKey = thread => thread && `${thread.id}:${thread.messages.filter(message => message.role === 'user').at(-1)?.id || thread.created}`;
 const mascot = (className = '', alt = '', mode = className === 'studio-message-avatar' ? 'quiet' : 'idle') => `<img class="studio-mascot ${className}" src="/youxia-ai-mascot.svg#${mode}" alt="${alt}" width="96" height="96">`;
@@ -136,7 +136,10 @@ export function createModStudio({ api, render, esc, icon, getGame, getGames, cha
   const saved = s.saved;
   if (!saved || creating(s.thread)) return '';
   const ready = creationReady(s), kept = saved.library && (!['bepinex-plugin', 'bg3-lua', 'bg3-follower', 'engine-mod'].includes(saved.adapterId) || saved.library.buildId === saved.toolchain?.id);
-  return `<section class="studio-result studio-completion" aria-label="生成结果"><div class="studio-completion-heading"><span class="studio-completion-icon">${icon(ready ? 'box' : 'info')}</span><div><span class="studio-kicker">${ready ? (saved.adapterId === 'project-plan' ? '开发方案已生成' : '制作完成 · 待游戏内确认') : '还需要处理一些问题'}</span><h3>${esc(saved.draft.name)}</h3></div></div><p>${esc(saved.draft.description || saved.summary)}</p>${ready && saved.installable ? `<div class="studio-result-actions"><button class="btn primary" data-studio-action="try" ${busy ? 'disabled' : ''}>${icon('play')}进游戏试试</button><button class="btn" data-studio-action="keep" ${busy || kept ? 'disabled' : ''}>${icon('box')}${kept ? '已存入 Mod 库' : '存入 Mod 库'}</button>${kept ? '<button class="text-link" data-studio-action="library">打开 Mod 库</button>' : ''}</div><p class="studio-result-hint">试玩后，告诉我效果怎么样，我们可以继续调整。</p>` : `<p class="studio-result-hint">${ready ? '这是你要求的文档或源码，可查看内容或导出。' : '这次制作还没有通过验证，可以继续对话调整。'}</p>`}${s.saved.deployment?.runtime ? `<p class="studio-fineprint">${esc(s.saved.deployment.runtime.detail)}</p>` : ''}<details class="studio-technical" data-help-key="studio:artifact:${saved.id}"><summary>文件与制作详情</summary><div class="studio-result-actions"><button class="btn small" data-studio-action="product" ${busy ? 'disabled' : ''}>查看文件与预览</button><button class="btn small" data-studio-action="export" ${busy ? 'disabled' : ''}>导出 ZIP</button>${saved.toolchain?.bundle ? `<button class="btn small" data-studio-action="export-build" ${busy ? 'disabled' : ''}>导出编译包</button>` : ''}</div>${toolReport(saved.toolchain)}${gameInfo(s)}</details></section>`;
+  const reporting = s.feedbackArtifactId === saved.id && s.feedbackBuildId === saved.toolchain?.id;
+  const accepted = !reporting && saved.feedback?.status === 'accepted' && saved.feedback.buildId === saved.toolchain?.id;
+  const feedback = `<section class="studio-user-feedback" aria-label="试玩反馈"><p>进游戏试用后，这个 Mod 能正常使用吗？</p><div class="studio-result-actions"><button class="btn" data-studio-action="feedback-yes" ${busy ? 'disabled' : ''}>能用，效果符合预期</button><button class="btn" data-studio-action="feedback-no" ${busy ? 'disabled' : ''}>不能用 / 效果不对</button></div>${reporting ? `<label for="studio-feedback-problem">遇到了什么问题？</label><textarea id="studio-feedback-problem" data-studio-feedback maxlength="2000" rows="3" placeholder="例如：按 F7 没反应、进入关卡闪退、视角与预期不符" ${busy ? 'disabled' : ''}>${esc(s.feedbackProblem || '')}</textarea><button class="btn primary" data-studio-action="feedback-submit" ${busy ? 'disabled' : ''}>提交问题并继续修改</button><p class="studio-result-hint">会结合当前作品和已有运行记录继续修改，完成后请重新试玩。</p>` : accepted ? '<p class="studio-result-hint">已确认当前版本能用，可以存到 Mod 库。</p>' : ''}</section>`;
+  return `<section class="studio-result studio-completion" aria-label="生成结果"><div class="studio-completion-heading"><span class="studio-completion-icon">${icon(ready ? 'box' : 'info')}</span><div><span class="studio-kicker">${ready ? (saved.adapterId === 'project-plan' ? '开发方案已生成' : (accepted ? '你已确认能用' : '制作完成 · 请试玩确认')) : '还需要处理一些问题'}</span><h3>${esc(saved.draft.name)}</h3></div></div><p>${esc(saved.draft.description || saved.summary)}</p>${ready && saved.installable ? `<div class="studio-result-actions"><button class="btn primary" data-studio-action="try" ${busy ? 'disabled' : ''}>${icon('play')}进游戏试试</button>${accepted ? `<button class="btn" data-studio-action="keep" ${busy || kept ? 'disabled' : ''}>${icon('box')}${kept ? '已存入 Mod 库' : '存到 Mod 库'}</button>` : ''}${kept ? '<button class="text-link" data-studio-action="library">打开 Mod 库</button>' : ''}</div>${feedback}` : `<p class="studio-result-hint">${ready ? '这是你要求的文档或源码，可查看内容或导出。' : '这次制作还没有通过验证，可以继续对话调整。'}</p>`}${s.saved.deployment?.runtime ? `<p class="studio-fineprint">${esc(s.saved.deployment.runtime.detail)}</p>` : ''}<details class="studio-technical" data-help-key="studio:artifact:${saved.id}"><summary>文件与制作详情</summary><div class="studio-result-actions"><button class="btn small" data-studio-action="product" ${busy ? 'disabled' : ''}>查看文件与预览</button><button class="btn small" data-studio-action="export" ${busy ? 'disabled' : ''}>导出 ZIP</button>${saved.toolchain?.bundle ? `<button class="btn small" data-studio-action="export-build" ${busy ? 'disabled' : ''}>导出编译包</button>` : ''}</div>${toolReport(saved.toolchain)}${gameInfo(s)}</details></section>`;
  }
  function gameInfo(s) {
   const a = s.thread?.analysis;
@@ -207,9 +210,18 @@ export function createModStudio({ api, render, esc, icon, getGame, getGames, cha
   if (active(s.thread?.status) && action !== 'export-logs') return;
   if (action === 'library') { await openLibrary?.(game); return; }
   if (action === 'send' && !s.idea.trim()) return;
+  if (action === 'feedback-no') { s.feedbackArtifactId = s.saved?.id; s.feedbackBuildId = s.saved?.toolchain?.id; s.feedbackProblem = ''; update(); return; }
+  if (action === 'feedback-submit' && !s.feedbackProblem?.trim()) { s.error = '请先描述遇到的问题'; update(); return; }
   if (runActions.has(action)) { s.activityStartedAt = Date.now(); s.activityEndedAt = null; }
   s.busy = action; s.error = ''; update();
   try {
+   if (action === 'feedback-yes' || action === 'feedback-submit') {
+    const rejected = action === 'feedback-submit';
+    const response = await api('studio/conversations/feedback', {gameId:game.id,id:s.thread?.id,artifactId:s.saved?.id,buildId:s.saved?.toolchain?.id,status:rejected?'rejected':'accepted',problem:rejected?s.feedbackProblem:''});
+    if (!same(ticket)) return;
+    if (rejected) { remember(s,response); s.saved = null; s.feedbackProblem = ''; }
+    else { s.saved = await api('studio/read',{gameId:game.id,id:s.saved.id}); s.feedbackArtifactId = null; }
+   }
    if (action === 'start' || action === 'environment' || action === 'check-environment') {
     const environment = await api(action === 'check-environment' || action === 'environment' && s.environment?.ready ? 'studio/environment' : 'studio/prepare-environment', { gameId: game.id });
     if (!same(ticket)) return; s.environment = environment;
@@ -281,6 +293,7 @@ export function createModStudio({ api, render, esc, icon, getGame, getGames, cha
    return true;
   },
   input(element) {
+   if (element.hasAttribute('data-studio-feedback')) { const game = getGame(); if (game) state(game.id).feedbackProblem = element.value; return; }
    if (!element.hasAttribute('data-studio-idea')) return; const game = getGame(); if (!game) return; const s = state(game.id); s.idea = element.value;
    const button = document.querySelector('[data-studio-form] button[type="submit"]'); if (button) button.disabled = !s.idea.trim() || !!s.busy;
   },

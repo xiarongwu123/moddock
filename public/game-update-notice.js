@@ -1,0 +1,4 @@
+export const checkingUpdates = new Set();
+export function gameUpdateNotice(data, esc, gameId) {
+ return (data.gameUpdates || []).filter(item => !gameId || item.gameId === gameId).map(item => `<section class="notice game-update-notice" role="status"><div><strong>${esc(item.gameName)} 已更新，Mod / 加载器可能失效</strong><p>Steam 构建 ${esc(item.from)} → ${esc(item.to)}。这是兼容性提醒，尚未确认失效。</p>${item.mods.length ? `<p>需核对的 Mod：${item.mods.map(mod => esc(mod.name) + (mod.status === 'disabled' ? '（已停用）' : '')).join('、')}</p>` : ''}${item.loaders.length ? `<p>需核对的加载器：${item.loaders.map(esc).join('、')}。请核对官方兼容说明与版本。</p>` : ''}${item.diagnosticError ? '<p>加载器检测未完成，请在启动前检查游戏环境。</p>' : ''}<button class="btn small" data-check-updates="${esc(item.gameId)}" ${checkingUpdates.has(item.gameId) ? 'disabled' : ''}>${checkingUpdates.has(item.gameId) ? '检查中…' : '检查 Mod 更新'}</button><p>支持 Nexus 与 GameBanana；更新下载后仍需核对兼容性。加载器不会自动替换。</p></div></section>`).join('');
+}

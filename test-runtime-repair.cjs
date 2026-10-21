@@ -30,6 +30,34 @@ test('host wrapper runs in real Lua VM; emits observations instead of trusting s
   assert.equal(result.status,'behavior_failed');assert.ok(result.evidence.some(e=>e.actual==='41'));
  }finally{lua.global.close();}
 });
+
+test('discarded guard wrappers in hotkey and dispatched callbacks are build errors',()=>{
+ const unused=good.replace("RegisterKeyBind(Key.END,ModdockVerification.guard('effect',applied))",`RegisterKeyBind(Key.END,function()
+ ModdockVerification.guard('effect',function()
+  ExecuteInGameThread(function() ModdockVerification.guard('effect',applied) end)
+ end)
+end)`);
+ const report=contract(unused);
+ assert.equal(report.passed,false);
+ assert.equal(report.findings.filter(f=>f.code==='RUNTIME_GUARD_UNUSED').length,2);
+ assert.ok(contract(good+"\npcall(ModdockVerification.guard,'effect',applied)").findings.some(f=>f.code==='RUNTIME_GUARD_UNUSED'));
+ assert.equal(contract(good+"\nModdockVerification.guard('effect',applied)()").passed,true);
+});
+
+test('real Lua input reproduces silent discarded guard and verifies proper dispatched wrapper',async()=>{
+ const lua=await new LuaFactory().createEngine(),lines=[];let reads=0;
+ try {
+  lua.global.set('print',s=>lines.push(s));lua.global.set('readEffectiveGameState',()=>{reads++;return 42;});
+  const body=good.slice(0,good.indexOf('RegisterKeyBind'));
+  await lua.doString(`Key={END=1}; function RegisterKeyBind(k,fn) handler=fn end; function ExecuteInGameThread(fn) fn() end\n`+bootstrap('marker',body+`RegisterKeyBind(Key.END,function() ModdockVerification.guard('effect',applied) end)`)+`\nhandler()`);
+  assert.equal(reads,0);assert.equal(lines.filter(s=>s.startsWith('MDVERIFY')).length,0);
+  lines.length=0;
+  const fixed=body+`RegisterKeyBind(Key.END,ModdockVerification.guard('effect',function() ExecuteInGameThread(ModdockVerification.guard('effect',applied)) end))`;
+  assert.equal(contract(fixed).passed,true);
+  await lua.doString(bootstrap('marker',fixed)+`\nhandler()`);
+  assert.equal(reads,1);assert.equal(evaluate({text:lines.join('\n'),marker:'marker',contract:contract(fixed)}).status,'behavior_verified');
+ }finally{lua.global.close();}
+});
 test('guard reports Lua callback exceptions and initialization errors',async()=>{
  const lua=await new LuaFactory().createEngine(),lines=[];
  try {
@@ -75,6 +103,81 @@ async function fixture(t,options={}) {
  const studio=new ModStudio(dir,{tools:{luac:false,dotnet:false},integration:{python:false},...options});studio.workspace=async()=>workspace;studio.prepareNative=async()=>{};
  return {studio,game,workspace,dir};
 }
+
+test('library collection requires persisted user acceptance of the exact build',async t=>{
+ const {recordFeedback,confirmed}=require(path.join(app,'studio-user-feedback.cjs'));
+ const {studio,game,workspace}=await fixture(t);
+ const item=await studio.save('owner',game,draft(good));await studio.toolchain.run('owner',game,item.id,workspace);
+ const context={owner:'owner',game,artifactId:item.id,current:()=>true,authorize:async()=>{}};
+ let imported=0;const lifecycle=new StudioLifecycle(studio,{importCreation:async()=>({id:'job'})},{import:async()=>{imported++;}},{});
+ await assert.rejects(lifecycle.keep(context),/确认/);assert.equal(imported,0);
+ const buildId=(await studio.read('owner',item.id)).toolchain.id;
+ await assert.rejects(recordFeedback(studio,'owner',game,{artifactId:item.id,buildId:'stale',status:'accepted'},()=>true),/版本/);
+ await assert.rejects(recordFeedback(studio,'owner',{id:'other'},{artifactId:item.id,buildId,status:'accepted'},()=>true),/当前游戏/);
+ await assert.rejects(recordFeedback(studio,'owner',game,{artifactId:item.id,buildId,status:'rejected',problem:' '},()=>true),/描述/);
+ await recordFeedback(studio,'owner',game,{artifactId:item.id,buildId,status:'accepted'},()=>true);
+ assert.equal(confirmed(await studio.read('owner',item.id)),true);
+ await lifecycle.keep(context);assert.equal(imported,1);
+ await studio.toolchain.run('owner',game,item.id,workspace);
+ assert.equal(confirmed(await studio.read('owner',item.id)),false);
+ await assert.rejects(lifecycle.keep(context),/确认/);
+});
+
+test('negative user feedback preserves draft and runtime context through a real conversation rebuild',async t=>{
+ let request;
+ const {studio,game,workspace}=await fixture(t,{plan:async()=>({title:'Feature',summary:'Fix reported issue',steps:['Repair'],questions:[],kind:'ue4ss-lua'}),generate:async p=>{request=p;return draft(good);}});
+ const initial=await studio.save('owner',game,draft(good));await studio.toolchain.run('owner',game,initial.id,workspace);
+ await fs.writeFile(path.join(studio.recordPath('owner',initial.id),'deployment.json'),JSON.stringify({runtime:{status:'awaiting_trigger',detail:'no callback'}}));
+ const item={id:crypto.randomUUID(),gameId:game.id,title:'Feature',artifactId:initial.id,status:'completed',messages:[{role:'user',content:'Original requested feature'}]};
+ await studio.conversations.persist('owner',item);
+ const buildId=(await studio.read('owner',initial.id)).toolchain.id;
+ const input={id:item.id,artifactId:initial.id,buildId,status:'rejected',problem:'F7 没有反应'};
+ await studio.conversations.feedback('owner',game,input,()=>true,async()=>{});
+ await studio.conversations.runs.get(studio.conversations.key('owner',item.id));
+ const result=await studio.conversations.read('owner',game,item.id);
+ assert.equal(result.status,'completed',result.error);assert.notEqual(result.artifactId,initial.id);
+ assert.equal(request.previousDraft.code,good);assert.equal(request.validation.userFeedback.problem,input.problem);
+ assert.equal(request.validation.runtime.detail,'no callback');
+ assert.equal((await studio.read('owner',initial.id)).feedback.status,'rejected');
+ assert.equal((await studio.read('owner',result.artifactId)).feedback,undefined);
+ assert.equal(require(path.join(app,'studio-mu-client.cjs')).creationPayload(request).validation.userFeedback.problem,input.problem);
+});
+
+test('shipped feedback UI gates collection, requires a problem, and asks again for a new revision',async()=>{
+ const vm=require('node:vm'),bundle=await fs.readFile(path.join(app,'public/auth.js'),'utf8');
+ const a=bundle.indexOf('/* MODDOCK_STUDIO_FACTORY_START */'), b=bundle.indexOf('/* MODDOCK_STUDIO_FACTORY_END */',a);
+ assert.ok(a>=0 && b>a);
+ const context={window:{},document:{querySelector:()=>null,getElementById:()=>null},queueMicrotask,clearTimeout:()=>{},setTimeout:()=>1,DN:{},PN:{},EN:null,RN:null};
+ vm.createContext(context);
+ // Execute the exact factory shipped inside auth.js with controlled API responses.
+ const game={id:'g',name:'Game'}, thread={id:'t',status:'completed',artifactId:'a',updated:'1',messages:[]};
+ let saved={id:'a',adapterId:'ue4ss-lua',installable:true,draft:{name:'Mod'},toolchain:{id:'b',status:'passed',summary:'OK',checks:[],runtime:{detail:'not_run'}}},calls=[];
+ context.options={api:async(route,body)=>{
+  calls.push({route,body});
+  if(route==='studio/conversations/list')return {items:[thread]};
+  if(route==='studio/list')return {items:[]};
+  if(route==='studio/environment' || route==='studio/prepare-environment')return {ready:true};
+  if(route==='studio/workspace')return {};
+  if(route==='studio/conversations/read')return thread;
+  if(route==='studio/read')return saved;
+  if(route==='studio/conversations/feedback'){
+   if(body.status==='accepted'){saved={...saved,feedback:{status:'accepted',buildId:'b'}};return saved.feedback;}
+   saved={...saved,id:'new',toolchain:{...saved.toolchain,id:'new-build'},feedback:undefined};Object.assign(thread,{artifactId:'new',updated:'2'});return thread;
+  }
+  throw new Error(route);
+ },render:()=>{},esc:s=>String(s||'').replaceAll('<','&lt;'),icon:()=>'',getGame:()=>game,getGames:()=>[game],getStatus:()=>({allowed:true,aiAvailable:true})};
+ const patch=bundle.slice(a+'/* MODDOCK_STUDIO_FACTORY_START */'.length,b);
+ vm.runInContext('this.ui=(function(){'+patch+'}).call(null,options)',context);
+ const ui=context.ui;await ui.enter();await ui.click({studioAction:'start'});
+ assert.ok(!ui.render(game).includes('data-studio-action="keep"'));
+ await ui.click({studioAction:'feedback-yes'});assert.ok(ui.render(game).includes('data-studio-action="keep"'));
+ await ui.click({studioAction:'feedback-no'});assert.ok(ui.render(game).includes('data-studio-feedback'));assert.ok(!ui.render(game).includes('data-studio-action="keep"'));
+ const before=calls.length;await ui.click({studioAction:'feedback-submit'});assert.equal(calls.length,before);assert.match(ui.render(game),/请先描述/);
+ ui.input({hasAttribute:name=>name==='data-studio-feedback',value:'F7 没反应'});
+ await ui.click({studioAction:'feedback-submit'});
+ assert.equal(calls.findLast(c=>c.route==='studio/conversations/feedback').body.problem,'F7 没反应');
+ assert.ok(!ui.render(game).includes('data-studio-action="keep"'));ui.reset();
+});
 test('real build rejects missing acceptance contract and compiles injected probe wrapper',async t=>{
  const {studio,game,workspace}=await fixture(t);
  const bad=await studio.save('owner',game,draft('print("success")'));const failed=await studio.toolchain.run('owner',game,bad.id,workspace);

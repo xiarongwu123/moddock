@@ -1,10 +1,17 @@
 # Third-party notices
 
-## 7-Zip Extra
+## 7-Zip
 
-`vendor/archive-tools/7za.exe` is the unmodified x64 standalone console binary
-from 7-Zip Extra 26.04 (Igor Pavlov). It runs only to list and stream entries from
-7z archives; the application validates paths and writes each ordinary file itself.
+`vendor/archive-tools/7z.exe` and `7z.dll` are unmodified x64 binaries from
+7-Zip 26.04 (Igor Pavlov), extracted from the official Windows distribution.
+They list and stream 7z / RAR entries; the application validates paths, limits,
+size and CRC and writes each ordinary file itself. RAR support is unpacking only.
+The original LGPL / BSD / unRAR license notice is in vendor/archive-tools/License.txt.
+The earlier 7za.exe from 7-Zip Extra is retained for compatibility.
+Distribution: https://www.7-zip.org/a/7z2604-x64.exe
+SHA-256: d54bf805f9f3704d1e8db2fa3498ae7ef2df0312b40b558e7c71c734430a665d
+7z.exe SHA-256: 95fff19b73eff77c87c0d7bd32822e43fb90dd2932459f962eb532d8dfb6ba53
+7z.dll SHA-256: 899cd73d7fc60e1c1c35c7de0f5bed3dc69bfe2ceCBD48014d868a347970a0b1
 The upstream license is included at `vendor/archive-tools/License.txt`.
 Binary: https://github.com/ip7z/7zip/releases/download/26.04/7z2604-extra.7z
 Corresponding source: https://github.com/ip7z/7zip/releases/tag/26.04
