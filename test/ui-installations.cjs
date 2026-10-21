@@ -19,7 +19,7 @@ const {createServer}=require('./server-fixture.cjs'),{hash}=require('../installe
   const assertLoading=async()=>{assert.equal(await button().isDisabled(),true);assert.equal(await button().getAttribute('aria-busy'),'true');assert.match(await button().getAttribute('aria-label'),action==='enable'?/正在启用/:/正在停用/);assert.equal(await page.locator('.managed-row .manager-state .spinning').count(),1);assert.equal(await page.locator('.managed-row .row-actions button:enabled').count(),0);};
   try{
    await button().click();await assertLoading();
-   await page.waitForResponse(response=>response.url().endsWith('/api/state'));
+   await page.waitForResponse(response=>response.url().endsWith('/api/state'),{timeout:10000});
    await assertLoading();
    await page.locator('[data-nav="tasks"]').first().click();await page.locator('[data-nav="installed"]').first().click();await assertLoading();
    await button().evaluate(element=>element.click());assert.equal(requests,1);

@@ -1,0 +1,3 @@
+# These vendored files are verified byte-for-byte against UPSTREAM.json.
+vendor/ready-or-not-api/api.json text eol=lf
+vendor/ready-or-not-api/LICENSE text eol=lf

@@ -1,30 +1,34 @@
-# Runtime verification snapshot
+# Runtime regression workflow
 
-This branch imports the verified 0.6.8 desktop source snapshot, including the
-dependencies of its AI Mod workflow, then records its automatic runtime
-verification and repair implementation. The repository's previous main branch
-predates these modules. Existing uncommitted main-worktree changes were not used.
-
-The supplied snapshot contains shipped UI JavaScript. The repository's older
-React authoring sources and platform files are retained unchanged, but they do
-not contain the complete authoring source for this newer shipped UI. Do not
-overwrite the verified bundle by rebuilding the legacy UI. Keep public/auth.js
-and public/mod-studio.js consistent when changing the shipped workflow.
-
-Install the pinned dependencies with `npm install --ignore-scripts`, then run:
+Use Node.js 22.19 or newer. Install the pinned desktop and Pi dependencies:
 
 ```
-node --test test-runtime-repair.cjs test-runtime-safety.cjs test-creation-save.cjs
+npm ci --ignore-scripts
+npm run test:setup
+npm run build
+npm run test:all
 ```
 
-These regressions are separate from real online AI and game acceptance.
-For the archived crash-script cases, set MODDOCK_CRASH_FIXTURE_ROOT to the folder
-containing their backup/ and fixed/ subfolders (locally F:/youxia/qa/ron-crash-fix-20261019).
-After editing public/mod-studio.js, run node scripts/update-studio-bundle.cjs.
-It updates only the shipped studio factory with its existing React bindings and
-refuses an unfamiliar bundle. It does not rebuild the incomplete legacy UI tree.
-See RUNTIME-VERIFICATION.md for the real test results and their limitations.
-Selected runtime evidence is in docs/runtime-e2e; full diagnostic artifacts
-remain in the local F:/youxia/qa/live-ai-runtime-e2e folder. Account sessions,
-credentials, game saves, installed game files and application installers are
-excluded from this commit.
+`npm test` includes the API, installer, authoring, runtime-repair, runtime-safety
+and Windows persistence suites. `npm run test:ui` rebuilds the current sources
+and runs the isolated Chrome workflows, including FOMOD, update notices and
+membership. Chrome must be installed. The UI runner reports the current workflow
+and bounds each child process so an unresponsive workflow cannot hang the run.
+
+The merged repository contains the React authoring sources and components.
+Build `public/auth.js` and `public/auth.css` with `npm run build`; do not patch
+minified symbol names. Both legacy update-bundle scripts now use the same build.
+The runtime suite verifies that shipped UI assets match a fresh source build.
+
+Lua syntax and host contract checks use the bundled Lua 5.4 VM. C# integration
+requires a .NET SDK (MODDOCK_DOTNET can select it); missing game reference
+assemblies block compilation before any compiler download. Optional official
+archive tests require the pinned, checksum-verified archives under
+output/game-environments and output/bg3-extender. Captured crash regressions use
+MODDOCK_CRASH_FIXTURE_ROOT, or locally F:/youxia/qa/ron-crash-fix-20261019, with
+backup/ and fixed/ subfolders. Report any skipped cases explicitly.
+
+These automated regressions do not establish real online AI availability or
+in-game Mod behavior. See RUNTIME-VERIFICATION.md and docs/runtime-e2e for that
+evidence. Keep credentials, sessions, saves, installed game files, compiler SDKs
+and downloaded test archives outside Git.

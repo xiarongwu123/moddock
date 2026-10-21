@@ -90,8 +90,8 @@ test('download before installation can bind only to the matching scanned game, t
  assert.equal((await x.post('workshop/attach', { gameId: x.game.id, jobId: job.id })).status, 200);
  assert.equal(job.gameId, x.game.id); assert.equal(job.import.status, 'ready');
  await x.post('installations/profile', { gameId: x.game.id, rule: { mode: 'copy', sourcePrefix: 'Payload', destination: 'Mods' } });
- const plan = await x.post('installations/plan', { gameId: x.game.id, jobId: job.id }); assert.equal(plan.status, 200);
- const applied = await x.post('installations/apply', { gameId: x.game.id, id: plan.body.id }); assert.equal(applied.status, 200);
+ const plan = await x.post('installations/plan', { gameId: x.game.id, jobId: job.id }); assert.equal(plan.status, 200, JSON.stringify(plan.body));
+ const applied = await x.post('installations/apply', { gameId: x.game.id, id: plan.body.id }); assert.equal(applied.status, 200, JSON.stringify(applied.body));
  assert.equal(await fs.readFile(path.join(x.game.installPath, 'Mods/example.txt'), 'utf8'), 'Workshop fixture payload');
 });
 test('catalog Nexus authorization resumes the intended download when the API key is connected later', async t => {

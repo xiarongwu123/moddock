@@ -13,7 +13,7 @@ const token = 'a'.repeat(64), bytes = Buffer.from('independent-file-transfer');
 async function until(predicate) { for (let n = 0; n < 500; n++) { if (await predicate()) return; await wait(10); } throw new Error('Process isolation state timed out'); }
 async function stop(child, signal = 'SIGTERM') { if (child.exitCode !== null || child.signalCode !== null) return; const ended = new Promise(resolve => child.once('exit', resolve)); child.kill(signal); await ended; }
 async function fixture(t, options = {}) {
- const root = await fs.mkdtemp(path.join(os.tmpdir(), 'moddock-isolation-')), socketPath = path.join(root, 'browser.sock'), children = [];
+ const root = await fs.mkdtemp(path.join(os.tmpdir(), 'moddock-isolation-')), socketPath = process.platform === 'win32' ? '\\\\.\\pipe\\moddock-test-' + crypto.randomUUID() : path.join(root, 'browser.sock'), children = [];
  const browser = new NexusBrowserClient({ socketPath, retry: 30, initialize: channel => channel.request('import') });
  const sources = new Sources(); sources.connect('nexus', 'fixture-backend-key');
  sources.downloadFile = async (_game, _resource, _file, grant) => {
@@ -39,12 +39,12 @@ async function fixture(t, options = {}) {
   assert.equal((await call('/jobs/' + job.id + '/verification/click', { method: 'POST', body: JSON.stringify({ revision: frame.revision, x: 40, y: 50 }) })).status, 200);
   await until(() => service.downloads.jobs.find(item => item.id === job.id).status === 'completed');
  }
- return { root, browser, service, spawn, call, start, complete };
+ return { root, socketPath, browser, service, spawn, call, start, complete };
 }
 
 test('authorization and verification cross a private socket without exposing grants or bypassing owner checks', async t => {
  const x = await fixture(t); await x.spawn(); const job = await x.start();
- assert.equal((await fs.stat(path.join(x.root, 'browser.sock'))).mode & 0o777, 0o600);
+ if (process.platform !== 'win32') assert.equal((await fs.stat(x.socketPath)).mode & 0o777, 0o600);
  assert.equal((await x.call('/jobs/' + job.id + '/verification', {}, 'bob')).status, 404);
  const frame = await (await x.call('/jobs/' + job.id + '/verification')).json(); assert.equal(frame.width, 200);
  await x.complete(job);

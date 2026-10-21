@@ -144,12 +144,11 @@ test('negative user feedback preserves draft and runtime context through a real 
 });
 
 test('shipped feedback UI gates collection, requires a problem, and asks again for a new revision',async()=>{
- const vm=require('node:vm'),bundle=await fs.readFile(path.join(app,'public/auth.js'),'utf8');
- const a=bundle.indexOf('/* MODDOCK_STUDIO_FACTORY_START */'), b=bundle.indexOf('/* MODDOCK_STUDIO_FACTORY_END */',a);
- assert.ok(a>=0 && b>a);
+ const vm=require('node:vm');
+ const source=(await fs.readFile(path.join(app,'public/mod-studio.js'),'utf8')).replace(/^import .*;\r?\n/gm,'').replace('export function createModStudio','function createModStudio');
  const context={window:{},document:{querySelector:()=>null,getElementById:()=>null},queueMicrotask,clearTimeout:()=>{},setTimeout:()=>1,DN:{},PN:{},EN:null,RN:null};
  vm.createContext(context);
- // Execute the exact factory shipped inside auth.js with controlled API responses.
+ // The reproducible-build test below verifies that this factory is shipped.
  const game={id:'g',name:'Game'}, thread={id:'t',status:'completed',artifactId:'a',updated:'1',messages:[]};
  let saved={id:'a',adapterId:'ue4ss-lua',installable:true,draft:{name:'Mod'},toolchain:{id:'b',status:'passed',summary:'OK',checks:[],runtime:{detail:'not_run'}}},calls=[];
  context.options={api:async(route,body)=>{
@@ -166,8 +165,7 @@ test('shipped feedback UI gates collection, requires a problem, and asks again f
   }
   throw new Error(route);
  },render:()=>{},esc:s=>String(s||'').replaceAll('<','&lt;'),icon:()=>'',getGame:()=>game,getGames:()=>[game],getStatus:()=>({allowed:true,aiAvailable:true})};
- const patch=bundle.slice(a+'/* MODDOCK_STUDIO_FACTORY_START */'.length,b);
- vm.runInContext('this.ui=(function(){'+patch+'}).call(null,options)',context);
+ vm.runInContext(source+'\nthis.ui=createModStudio(options)',context);
  const ui=context.ui;await ui.enter();await ui.click({studioAction:'start'});
  assert.ok(!ui.render(game).includes('data-studio-action="keep"'));
  await ui.click({studioAction:'feedback-yes'});assert.ok(ui.render(game).includes('data-studio-action="keep"'));
@@ -385,16 +383,13 @@ test('deployed inactive conversation observes recovery started by a normal libra
  assert.equal(reading,2);assert.equal([...timers.values()].at(-1).ms,1200);ui.reset();
 });
 
-test('shipped UI bundle also polls inactive deployed projects',async()=>{
- const vm=require('node:vm'),source=await fs.readFile(path.join(app,'public/auth.js'),'utf8');
- const start=source.indexOf('function k(U){let N=w(U.id);clearTimeout(N.timer)'),end=source.indexOf('async function O(U)',start);
- assert.ok(start>=0 && end>start);
- const poll = source.slice(start,end), busy = poll.match(/(\w+)\(N\.thread\.status\)/)[1];
- const state={thread:{status:'failed'},saved:{deployment:{runId:'run'}}};let wait;
- const context={w:()=>state,[busy]:s=>s==='observing',F:()=>true,O:()=>{},clearTimeout:()=>{},setTimeout:(_fn,ms)=>{wait=ms;}};
- vm.createContext(context);vm.runInContext(poll+';k({id:"game"})',context);
- assert.equal(wait,5000);state.thread.status='observing';vm.runInContext('k({id:"game"})',context);assert.equal(wait,1200);
- assert.ok(source.includes(`ue&&!${busy}(H.status)&&(N.records=`));
+test('shipped UI reproducibly includes the tested studio feedback and inactive-project polling factory',async t=>{
+ const directory=await fs.mkdtemp(path.join(os.tmpdir(),'moddock-ui-rebuild-'));
+ t.after(()=>fs.rm(directory,{recursive:true,force:true}));
+ await require(path.join(app,'scripts/build-ui.cjs')).buildUi(directory);
+ for(const name of ['auth.js','auth.css']) {
+  assert.deepEqual(await fs.readFile(path.join(app,'public',name)),await fs.readFile(path.join(directory,name)),name+' must be built from current sources');
+ }
 });
 
 test('resume after runtime service failure preserves evidence and does not restart generation',async()=>{

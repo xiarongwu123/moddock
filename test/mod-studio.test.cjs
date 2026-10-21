@@ -37,7 +37,7 @@ async function fixture(t, { pro = true, studio, variant = 'stardew', installers,
  await write(installPath, 'Mods/ContentPatcher/manifest.json', JSON.stringify({ Name: 'Content Patcher', UniqueID: 'Pathoschild.ContentPatcher', Version: '2.9.0', EntryDll: 'ContentPatcher.dll' }));
  await write(installPath, 'Saves/player.sav', 'preserve player save');
  } else if (variant === 'unreal') { await write(installPath, 'Game/Content/Paks/Game.pak', 'fixture'); await write(installPath, 'Game/Binaries/Win64/ue4ss/UE4SS.dll', 'fixture'); }
- else if (variant === 'unity') { await write(installPath, 'UnityPlayer.dll', 'fixture'); await write(installPath, 'Game_Data/Managed/Assembly-CSharp.dll', 'fixture'); }
+ else if (variant === 'unity') { await write(installPath, 'UnityPlayer.dll', 'fixture'); await write(installPath, 'Game_Data/Managed/Assembly-CSharp.dll', 'fixture'); await write(installPath, 'Game.exe', require('./bg3-extender-fixture.cjs').executable); await write(installPath, 'BepInEx/core/BepInEx.dll', 'fixture installed loader'); }
  else if (variant === 're') { await write(installPath, 're_chunk_000.pak', 'fixture'); await write(installPath, 'dinput8.dll', 'fixture'); await fs.mkdir(path.join(installPath, 'reframework/autorun'), { recursive: true }); }
  const account = accountFixture(); if (pro) account.updateAccount({ membership: { tier: 'pro', expiresAt: null } });
  const service = await createServer({ root: path.join(root, 'data'), port: 0, accounts: account.options, studio, chooseStudioGame,
@@ -472,6 +472,7 @@ test('missing compilers and unsupported build adapters preserve source without c
  for (const variant of ['unity','unknown']) {
   const x = await fixture(t, { variant, studio: { plan: async () => ({ ...creationPlan, kind: ({ unreal: 'ue4ss-lua', unity: 'bepinex-plugin', unknown: 'custom-project' })[variant] }), generate: async () => ({ kind: ({ unreal: 'ue4ss-lua', unity: 'bepinex-plugin', unknown: 'custom-project' })[variant], name: 'Build fixture', author: 'Fixture', code: 'print(1)', files: [{ name: 'main.txt', text: 'No registered build adapter.' }] }), tools: { luac: false, dotnet: false } } });
   const thread = await completeTurn(x, { message: variant === 'unknown' ? '只输出源码，制作一个探索助手' : '制作一个探索助手' });
+  assert.ok(thread.artifactId, JSON.stringify(thread));
   const saved = (await x.post('studio/read', { id: thread.artifactId })).body;
   assert.equal(saved.toolchain.status, 'blocked'); assert.equal(saved.toolchain.runtime.status, 'not_run');
   assert.equal(thread.status, 'blocked');
@@ -481,8 +482,7 @@ test('missing compilers and unsupported build adapters preserve source without c
  }
 });
 test('real Lua compilation rejects syntax errors and never executes generated scripts; reserved repair can retry', async t => {
- const { StudioTools } = require('../studio-tools.cjs');
- if (!(await new StudioTools().probe()).lua.available) { t.skip('Host Lua 5.4 compiler is not provisioned'); return; }
+ // Production validates Lua with its bundled Lua 5.4 VM on every platform.
  let repairs = 0;
  const x = await fixture(t, { variant: 'unreal', studio: {
   plan: async () => creationPlan,
@@ -589,7 +589,11 @@ test('a failed revision deployment restores the previous installed package and p
 test('saving a completed Mod to the library is durable, idempotent and does not install or launch it', async t => {
  const x = await fixture(t), saved = (await x.post('studio/save', { draft })).body;
  assert.equal((await x.post('studio/library', { id: saved.id })).status, 400);
- await completeTurn(x, { artifactId: saved.id, message: '重新编译' });
+ const thread = await completeTurn(x, { artifactId: saved.id, message: '重新编译' });
+ const built = (await x.post('studio/read', { id: saved.id })).body;
+ assert.equal((await x.post('studio/library', { id: saved.id })).status, 400);
+ const accepted = await x.post('studio/conversations/feedback', { id: thread.id, artifactId: saved.id, buildId: built.toolchain.id, status: 'accepted' });
+ assert.equal(accepted.status, 200, JSON.stringify(accepted.body));
  const [first, concurrent] = await Promise.all([x.post('studio/library', { id: saved.id }), x.post('studio/library', { id: saved.id })]); assert.equal(first.status, 200, JSON.stringify(first.body)); assert.deepEqual(concurrent.body, first.body);
  assert.equal(x.service.installers.state.mods.length, 0); assert.equal(x.service.installers.state.runs.length, 0);
  assert.equal(x.service.downloads.jobs.length, 1); assert.equal(x.service.downloads.jobs[0].import.status, 'ready');

@@ -44,7 +44,8 @@ async function createBrowserHost({ socketPath, authorizer, verification, mainten
   });
   channel.notify('ready', { pid: process.pid });
  });
- try {
+ const namedPipe = process.platform === 'win32' && socketPath.startsWith('\\\\.\\pipe\\');
+ if (!namedPipe) try {
   const stat = await fs.lstat(socketPath);
   if (!stat.isSocket() || stat.uid !== process.getuid?.()) throw new Error('Invalid browser socket');
   const live = await new Promise(resolve => {
@@ -56,7 +57,7 @@ async function createBrowserHost({ socketPath, authorizer, verification, mainten
   await fs.unlink(socketPath);
  } catch (error) { if (error.code !== 'ENOENT') throw error; }
  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(socketPath, resolve); });
- await fs.chmod(socketPath, 0o600);
- return { server, async close() { peer?.close(); authorizer.close(); await new Promise(resolve => server.close(resolve)); await fs.rm(socketPath, { force: true }); } };
+ if (!namedPipe) await fs.chmod(socketPath, 0o600);
+ return { server, async close() { peer?.close(); authorizer.close(); await new Promise(resolve => server.close(resolve)); if (!namedPipe) await fs.rm(socketPath, { force: true }); } };
 }
 module.exports = { createBrowserHost };

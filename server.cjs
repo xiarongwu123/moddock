@@ -361,12 +361,12 @@ async function createServer(options = {}) {
      if (url.pathname === '/api/studio/prepare-environment') return send(await ensureEnvironment(target));
      if (url.pathname === '/api/studio/conversations/list') return send({ items: await studio.conversations.list(owner, target) });
      if (url.pathname === '/api/studio/conversations/read') return send(await studio.conversations.read(owner, target, body.id));
-     if (url.pathname === '/api/studio/conversations/feedback') return send(await studio.conversations.feedback(owner, target, body, current, authorize));
      if (url.pathname === '/api/studio/conversations/logs') return send(await studio.conversations.diagnostics(owner, target, body.id));
      const authorize = async feature => {
       const permission = await accounts.authorize(sessionId, feature);
       if (!current() || permission.account.id !== owner || !studioAccess(permission.account)) throw new AccountError(403, 'pro_required', '账号或 Pro 权限已变化，操作已停止。');
      };
+     if (url.pathname === '/api/studio/conversations/feedback') return send(await studio.conversations.feedback(owner, target, body, current, authorize));
      if (url.pathname === '/api/studio/library') return send(await lifecycle.keep({ owner, game: target, artifactId: body.id, current, authorize }));
      if (url.pathname === '/api/studio/controls' || url.pathname === '/api/studio/controls/update' || url.pathname === '/api/studio/controls/action-status') {
       const context = { owner, game: target, artifactId: body.id, current, authorize };
@@ -467,12 +467,12 @@ async function createServer(options = {}) {
     if (url.pathname === '/api/installations/restore') return send(await installers.restoreNative(game()));
     if (url.pathname === '/api/installations/plan') {
      const target = game(), rule = creationJob ? await studio.ruleFor(target, creationJob.studio || { adapterId: 'dialogue', draft: { kind: 'dialogue' } }, installers.getProfile(target).rule, profile.id) : undefined;
-     await ensureEnvironment(target);
+     if ((rule || installers.getProfile(target).rule)?.mode !== 'copy') await ensureEnvironment(target);
      return send(await installers.prepare(target, body.jobId, rule));
     }
     if (url.pathname === '/api/installations/discard') return send(await installers.discard(body.id));
-    if (url.pathname === '/api/installations/apply') { const target = game(); await ensureEnvironment(target); return send(await installers.apply(target, body.id, body.allowOverwrite === true)); }
-    if (url.pathname === '/api/installations/action') { const target = game(); if (body.action === 'enable') await ensureEnvironment(target); return send(await installers.action(target, body.id, body.action)); }
+    if (url.pathname === '/api/installations/apply') { const target = game(); if (installers.plans.get(body.id)?.profile.mode !== 'copy') await ensureEnvironment(target); return send(await installers.apply(target, body.id, body.allowOverwrite === true)); }
+    if (url.pathname === '/api/installations/action') { const target = game(); if (body.action === 'enable' && installers.state.mods.find(mod => mod.id === body.id)?.profile.mode !== 'copy') await ensureEnvironment(target); return send(await installers.action(target, body.id, body.action)); }
     if (url.pathname === '/api/installations/launch') {
      const target=game();
      if(installers.state.mods.some(mod=>mod.gameId===target.id&&mod.profile.mode==='bg3'&&(mod.status==='enabled'||body.enabledModIds?.includes(mod.id))))await ensureEnvironment(target);
@@ -555,7 +555,7 @@ async function createServer(options = {}) {
     }
     return send({ error: '接口不存在' }, 404);
    }
-   const files = { '/': 'index.html', '/favicon.svg': 'favicon.svg', '/favicon.ico': 'favicon.svg', '/app.js': 'app.js', '/membership.js':'membership.js', '/membership.css':'membership.css', '/download-bundles.js':'download-bundles.js', '/download-bundles.css':'download-bundles.css', '/style.css': 'style.css', '/auth.js': 'auth.js', '/auth.css': 'auth.css', '/splash.svg': 'splash.svg', '/splash-preview.html': 'splash-preview.html', '/splash-preview.css': 'splash-preview.css', '/splash-preview.js': 'splash-preview.js', '/logo-loading.svg': 'logo-loading.svg', '/logo-loading-preview.html': 'logo-loading-preview.html', '/youxia-ai-mascot.png': 'youxia-ai-mascot.png', '/youxia-ai-mascot.svg': 'youxia-ai-mascot.svg', '/mascot-preview.html': 'mascot-preview.html', '/mascot-preview.css': 'mascot-preview.css', '/mascot-preview.js': 'mascot-preview.js', '/fonts/fusion-pixel-12px-proportional-zh_hans.woff2': 'fonts/fusion-pixel-12px-proportional-zh_hans.woff2' }; const name = (url.pathname === '/fomod.css' ? 'fomod.css' : files[url.pathname]) || (/^\/covers\/\d+\.jpg$/.test(url.pathname) ? url.pathname.slice(1) : undefined); if (!name) { res.writeHead(404); return res.end('Not found'); }
+   const files = { '/': 'index.html', '/favicon.svg': 'favicon.svg', '/favicon.ico': 'favicon.svg', '/app.js': 'app.js', '/membership.js':'membership.js', '/membership.css':'membership.css', '/download-bundles.js':'download-bundles.js', '/download-bundles.css':'download-bundles.css', '/style.css': 'style.css', '/auth.js': 'auth.js', '/auth.css': 'auth.css', '/mod-studio.css': 'mod-studio.css', '/splash.svg': 'splash.svg', '/splash-preview.html': 'splash-preview.html', '/splash-preview.css': 'splash-preview.css', '/splash-preview.js': 'splash-preview.js', '/logo-loading.svg': 'logo-loading.svg', '/logo-loading-preview.html': 'logo-loading-preview.html', '/youxia-ai-mascot.png': 'youxia-ai-mascot.png', '/youxia-ai-mascot.svg': 'youxia-ai-mascot.svg', '/mascot-preview.html': 'mascot-preview.html', '/mascot-preview.css': 'mascot-preview.css', '/mascot-preview.js': 'mascot-preview.js', '/fonts/fusion-pixel-12px-proportional-zh_hans.woff2': 'fonts/fusion-pixel-12px-proportional-zh_hans.woff2' }; const name = (url.pathname === '/fomod.css' ? 'fomod.css' : files[url.pathname]) || (/^\/covers\/\d+\.jpg$/.test(url.pathname) ? url.pathname.slice(1) : undefined); if (!name) { res.writeHead(404); return res.end('Not found'); }
    res.setHeader('Content-Security-Policy', "default-src 'self'; img-src 'self' https://cdn.akamai.steamstatic.com https://shared.akamai.steamstatic.com https://staticdelivery.nexusmods.com https://images.gamebanana.com https://images.steamusercontent.com https://steamuserimages-a.akamaihd.net data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https://api.translate.zvo.cn; frame-ancestors 'none'; base-uri 'none'");
    const content = await fs.readFile(path.join(__dirname, 'public', name));
    res.writeHead(200, { 'Content-Type': name.endsWith('.jpg') ? 'image/jpeg' : name.endsWith('.png') ? 'image/png' : name.endsWith('.woff2') ? 'font/woff2' : name.endsWith('.svg') ? 'image/svg+xml' : name.endsWith('.html') ? 'text/html; charset=utf-8' : name.endsWith('.js') ? 'text/javascript; charset=utf-8' : 'text/css; charset=utf-8' }); res.end(content);

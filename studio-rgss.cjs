@@ -17,6 +17,15 @@ function marshalRead(bytes) {
   const tag = take(1).toString();
   if (tag === '0') return null; if (tag === 'T') return true; if (tag === 'F') return false;
   if (tag === 'i') return integer();
+  if (tag === 'l') {
+   const sign = take(1).toString(), words = integer();
+   if (!['+', '-'].includes(sign) || words < 1 || words > 2) throw new Error('Marshal 整数超限');
+   const bytes = take(words * 2); let number = 0;
+   for (let i = 0; i < bytes.length; i++) number += bytes[i] * 2 ** (8 * i);
+   if (sign === '-') number = -number;
+   if (number < -2147483648 || number > 2147483647) throw new Error('Marshal 整数超限');
+   objects.push(number); return number;
+  }
   if (tag === '@') { const index = integer(); if (index < 0 || index >= objects.length) throw new Error('Marshal 对象引用无效'); return objects[index]; }
   if (tag === ';') { const index = integer(); if (index < 0 || index >= symbols.length) throw new Error('Marshal 符号引用无效'); return symbols[index]; }
   if (tag === ':') { const symbol = { symbol: take(integer()).toString('utf8') }; symbols.push(symbol); return symbol; }
@@ -38,7 +47,15 @@ function marshalWrite(object) {
   const bytes = Buffer.alloc(size + 1); bytes[0] = (n < 0 ? -size : size) & 255; for (let i = 0; i < size; i++) bytes[i + 1] = (n >>> (8 * i)) & 255; chunks.push(bytes);
  }
  function value(v) {
-  if (v === null) return tag('0'); if (v === true) return tag('T'); if (v === false) return tag('F'); if (typeof v === 'number') { tag('i'); return integer(v); }
+  if (v === null) return tag('0'); if (v === true) return tag('T'); if (v === false) return tag('F'); if (typeof v === 'number') {
+   if (!Number.isInteger(v) || v < -2147483648 || v > 2147483647) throw new Error('Marshal 整数超限');
+   // RGSS and portable CRuby use 31-bit Fixnums; larger IDs need a Bignum.
+   if (v < -1073741824 || v > 1073741823) {
+    objects.set(Symbol(), objects.size); tag('l'); tag(v < 0 ? '-' : '+'); integer(2);
+    const bytes = Buffer.alloc(4); bytes.writeUInt32LE(Math.abs(v)); chunks.push(bytes); return;
+   }
+   tag('i'); return integer(v);
+  }
   if (v.symbol !== undefined) { if (symbols.has(v.symbol)) { tag(';'); return integer(symbols.get(v.symbol)); } symbols.set(v.symbol, symbols.size); tag(':'); const b = Buffer.from(v.symbol); integer(b.length); chunks.push(b); return; }
   if (objects.has(v)) { tag('@'); return integer(objects.get(v)); } objects.set(v, objects.size);
   if (Array.isArray(v)) { tag('['); integer(v.length); v.forEach(value); return; }

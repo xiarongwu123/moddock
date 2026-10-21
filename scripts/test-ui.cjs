@@ -2,10 +2,11 @@ const { spawnSync } = require('node:child_process');
 const path = require('node:path');
 
 const project = path.resolve(__dirname, '..');
-const scripts = ['ui-state-polling', 'ui-regression', 'ui-installations', 'ui-features', 'ui-download-access', 'ui-grid-scan', 'ui-drift-wall', 'ui-reflective-card'];
+const scripts = ['ui-state-polling', 'ui-regression', 'ui-installations', 'ui-features', 'ui-download-access', 'ui-grid-scan', 'ui-drift-wall', 'ui-reflective-card', 'ui-fomod', 'ui-game-updates', 'ui-ai-membership'];
 const failed = [];
 for (const name of scripts) {
- const result = spawnSync(process.execPath, [path.join(project, 'test', name + '.cjs')], { cwd: project, stdio: 'inherit' });
+ console.log('Running UI: ' + name);
+ const result = spawnSync(process.execPath, [path.join(project, 'test', name + '.cjs')], { cwd: project, stdio: 'inherit', windowsHide: true, timeout: 180000 });
  if (result.error) console.error(result.error.message);
  if (result.status !== 0) failed.push(name);
 }

@@ -28,12 +28,15 @@ async function fixture(t) {
  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'native-mod-')); t.after(() => fs.rm(directory, { recursive: true, force: true }));
  const root = path.join(directory, 'game'); await fs.mkdir(root); return { directory, root, game: { id: 'native-test', name: 'Native game', installPath: root } };
 }
-test('Ruby Marshal preserves encodings and shared objects and can be read by independent MRI', () => {
+test('Ruby Marshal preserves encodings and shared objects and can be read by independent MRI', async () => {
  const shared = { bytes: Buffer.from('shared'), ivars: [[{ symbol: 'E' }, true]] }, values = [0, 1, 122, 123, 255, 256, 65536, -1, -123, -124, -256, -65536, 2147483647, -2147483648];
  const object = [...values, shared, shared], bytes = rgss.marshalWrite(object), read = rgss.marshalRead(bytes);
  assert.deepEqual(read.slice(0, values.length), values); assert.equal(read.at(-1), read.at(-2));
- const result = spawnSync('/usr/bin/ruby', ['-e', 'a=Marshal.load(STDIN.read); raise "reference" unless a[-1].equal?(a[-2]); puts a[0...-2].join(",")'], { input: bytes, encoding: 'utf8' });
- assert.equal(result.status, 0, result.stderr); assert.equal(result.stdout.trim(), values.join(','));
+ const { DefaultRubyVM } = require('@ruby/wasm-wasi/dist/node');
+ const binary = await fs.readFile(require.resolve('@ruby/3.3-wasm-wasi/dist/ruby.wasm'));
+ const { vm } = await DefaultRubyVM(await WebAssembly.compile(binary), { env: { RUBYOPT: '--disable=gems,error_highlight,did_you_mean,syntax_suggest' } });
+ const result = vm.eval(`a=Marshal.load(["${bytes.toString('hex')}"].pack("H*")); raise "reference" unless a[-1].equal?(a[-2]); a[0...-2].join(",")`);
+ assert.equal(result.toString(), values.join(','));
  assert.throws(() => rgss.marshalRead(Buffer.from([4, 8, 111])), /不支持/);
  assert.throws(() => rgss.marshalRead(bytes.subarray(0, -1)), /越界/);
 });

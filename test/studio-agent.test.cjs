@@ -79,8 +79,16 @@ test('host Lua transport handles reloads, settings validation, disabled actions 
  const built = buildBG3(draft, '11111111-1111-4111-8111-111111111111', (name, text) => ({ name, data: Buffer.from(text) }));
  const files = built.files.filter(file => file.name.endsWith('.lua'));
  for (const [index, file] of files.entries()) await fs.writeFile(path.join(root, index + '.lua'), file.data);
- const result = await runTool(path.resolve('.moddock-tools/bin/lua'), [path.resolve('test/bg3-controls-sandbox.lua'), path.join(root, '0.lua'), path.join(root, '1.lua')]);
- assert.equal(result.code, 0, result.output); assert.match(result.output, /control contract passed/);
+ const { LuaFactory } = require('wasmoon');
+ const factory = new LuaFactory();
+ for (const [index, file] of files.entries()) await factory.mountFile('/' + index + '.lua', file.data);
+ const engine = await factory.createEngine(); let output = '';
+ try {
+  engine.global.set('print', text => { output += text; });
+  await engine.doString('arg = {"/0.lua", "/1.lua"}');
+  await engine.doString(await fs.readFile(path.resolve('test/bg3-controls-sandbox.lua'), 'utf8'));
+  assert.match(output, /control contract passed/);
+ } finally { engine.global.close(); }
 });
 test('API reference utilities are shared with the Pi harness', async () => {
  const direct = require('../studio-api.cjs'); assert.equal(apiSearch, direct.apiSearch); assert.equal(checkReferences, direct.checkReferences);

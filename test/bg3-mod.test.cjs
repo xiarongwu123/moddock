@@ -10,7 +10,7 @@ const { createServer, loginFixture } = require('./server-fixture.cjs');
 const { accountFixture } = require('./account-fixture.cjs');
 const { diagnoseGame } = require('../game-diagnostics.cjs');
 const { runTool } = require('../studio-tools.cjs');
-const { dll } = require('./bg3-extender-fixture.cjs');
+const { dll, executable, release } = require('./bg3-extender-fixture.cjs');
 
 const BASE = '11111111-1111-4111-8111-111111111111', OTHER = '22222222-2222-4222-8222-222222222222';
 const SETTINGS = `<?xml version="1.0"?><save><version major="4" minor="0" revision="9" build="331"/><region id="ModuleSettings"><node id="root"><children><node id="Mods"><children><node id="ModuleShortDesc"><attribute id="UUID" type="FixedString" value="${BASE}"/><attribute id="Folder" type="LSString" value="GustavDev"/><attribute id="Name" type="LSString" value="GustavDev"/></node><node id="ModuleShortDesc"><attribute id="UUID" type="FixedString" value="${OTHER}"/><attribute id="Folder" type="LSString" value="OtherMod"/><attribute id="Name" type="LSString" value="Other &amp; Mod"/><attribute id="Version64" type="int64" value="36028797018963968"/><attribute id="CustomField" type="LSString" value="preserve-me"/></node></children></node><node id="ModOrder"><children><node id="Module"><attribute id="UUID" type="FixedString" value="${OTHER}"/></node></children></node></children></node></region><region id="Unrelated"><node id="root"><attribute id="keep" value="yes" type="LSString"/></node></region></save>`;
@@ -35,9 +35,10 @@ async function fixture(t, overrides = {}) {
  const game = { id: 'steam-1086940', appId: '1086940', name: '博德之门 3 [TEST]', platform: 'Steam', real: true, installPath: path.join(root, 'game') };
  const data = path.join(root, 'userdata'), settings = path.join(data, 'PlayerProfiles/Public/modsettings.lsx'), save = path.join(data, 'PlayerProfiles/Public/Savegames/Story/player.lsv');
  await fs.mkdir(path.join(game.installPath, 'bin'), { recursive: true }); await fs.writeFile(path.join(game.installPath, 'bin/DWrite.dll'), dll);
+ await fs.writeFile(path.join(game.installPath, 'bin/bg3_dx11.exe'), executable);
  await fs.mkdir(path.dirname(save), { recursive: true }); await fs.mkdir(path.join(data, 'Mods')); await fs.writeFile(settings, SETTINGS); await fs.writeFile(save, 'preserve real player progress');
  const account = accountFixture(); account.updateAccount({ membership: { tier: 'pro', expiresAt: null } });
- const service = await createServer({ root: path.join(root, 'app'), port: 0, accounts: account.options, scan: async () => ({ games: [game], roots: [], diagnostics: [] }), studio: { runtimeObservationMs: 1, runtimeAutoObservationMs: 1, runtimePollMs: 1, integration: { python: false }, plan: async payload => ({ ...plan, kind: payload.capability.preferredKind }), generate: async payload => payload.kind === 'bg3-follower' ? followerDraft : draft, ...overrides.studio }, installers: { bg3DataPath: data, processes: async () => [], ...overrides.installers } });
+ const service = await createServer({ root: path.join(root, 'app'), port: 0, accounts: account.options, bg3Extender: { release, fetch: async () => { throw new Error('Script Extender fixture distribution unavailable'); } }, scan: async () => ({ games: [game], roots: [], diagnostics: [] }), studio: { runtimeObservationMs: 1, runtimeAutoObservationMs: 1, runtimePollMs: 1, integration: { python: false }, plan: async payload => ({ ...plan, kind: payload.capability.preferredKind }), generate: async payload => payload.kind === 'bg3-follower' ? followerDraft : draft, ...overrides.studio }, installers: { bg3DataPath: data, processes: async () => [], ...overrides.installers } });
  t.after(async () => { service.studio.cancelOwner('fixture-user'); await service.studio.conversations.settle(); await new Promise(resolve => service.server.close(resolve)); await service.downloads.persist; await fs.rm(root, { recursive: true, force: true }); });
  const login = await loginFixture(service);
  const post = async (route, body = {}) => { const response = await login.fetch(service.url + '/api/' + route, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Moddock-Token': login.state.token }, body: JSON.stringify({ gameId: game.id, ...body }) }); return { status: response.status, body: await response.json() }; };
@@ -56,13 +57,18 @@ test('LSPK v18 contains actual files, rejects tampering and refuses unsafe or ex
  assert.throws(() => writePak([{ name: 'A', data: Buffer.alloc(1) }, { name: 'a', data: Buffer.alloc(1) }]), /重复/);
 });
 test('host follower logic is idempotent across sessions and resumes partial initialization without false success', async t => {
- const lua = path.resolve(__dirname, '../.moddock-tools/bin/lua' + (process.platform === 'win32' ? '.exe' : ''));
- try { await fs.access(lua); } catch { t.skip('Optional Lua interpreter unavailable; luac syntax checks remain covered'); return; }
  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'bg3-follower-contract-')); t.after(() => fs.rm(root, { recursive: true, force: true }));
  const built = buildBG3({ ...followerDraft, followerName: '青岚"; error("injected") --' }, crypto.randomUUID(), textFile);
  const file = path.join(root, 'Follower.lua'); await fs.writeFile(file, built.content.code);
- const result = await runTool(lua, [path.join(__dirname, 'bg3-follower-sandbox.lua'), file]);
- assert.equal(result.code, 0, result.output); assert.match(result.output, /follower contract passed/);
+ const { LuaFactory } = require('wasmoon');
+ const factory = new LuaFactory(); await factory.mountFile('/Follower.lua', built.content.code);
+ const engine = await factory.createEngine(); let output = '';
+ try {
+  engine.global.set('print', text => { output += text; });
+  await engine.doString('arg = {"/Follower.lua"}');
+  await engine.doString(await fs.readFile(path.join(__dirname, 'bg3-follower-sandbox.lua'), 'utf8'));
+  assert.match(output, /follower contract passed/);
+ } finally { engine.global.close(); }
 });
 test('BG3 load order edits preserve campaign, other mods and unknown XML fields', () => {
  const module = readModule(packageFor()).module;
@@ -85,7 +91,9 @@ test('BG3 conversation builds a real PAK, installs it to user Mods, manages stat
  const saved = (await x.post('studio/read', { id: thread.artifactId })).body;
  assert.equal(saved.installable, true); assert.equal(saved.toolchain.status, 'passed'); assert.ok(saved.toolchain.bundle); assert.equal(saved.toolchain.outputs.length, 1);
  const exported = await x.post('studio/export', { id: saved.id }); assert.equal(exported.status, 200); assert.match(exported.body.filename, /-bg3.zip$/); assert.ok(Buffer.from(exported.body.base64, 'base64').includes(Buffer.from('LSPK')));
- const kept = await x.post('studio/library', { id: saved.id }); assert.equal(kept.status, 200);
+ const unconfirmed = await x.post('studio/library', { id: saved.id }); assert.equal(unconfirmed.status, 400);
+ const feedback = await x.post('studio/conversations/feedback', { id: thread.id, artifactId: saved.id, buildId: saved.toolchain.id, status: 'accepted' }); assert.equal(feedback.status, 200, JSON.stringify(feedback.body));
+ const kept = await x.post('studio/library', { id: saved.id }); assert.equal(kept.status, 200, JSON.stringify(kept.body));
  const fromLibrary = await x.post('installations/auto', { jobId: kept.body.jobId }); assert.equal(fromLibrary.status, 200, JSON.stringify(fromLibrary.body));
  const installed = await x.turn('安装', thread.id); assert.equal(installed.status, 'completed', installed.error);
  const mod = x.service.installers.state.mods[0]; assert.equal(mod.profile.mode, 'bg3'); assert.equal(mod.root, await fs.realpath(x.data));

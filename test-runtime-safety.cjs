@@ -18,7 +18,7 @@ const {creationPayload} = require(path.join(app,'studio-mu-client.cjs'));
 const ron={appId:'1144200'};
 const analysis=(code,game=ron)=>analyzeUE4SS(code,{game});
 const codes=result=>result.findings.filter(f=>f.severity==='error').map(f=>f.code);
-const fixtureRoot=process.env.MODDOCK_CRASH_FIXTURE_ROOT || path.resolve(__dirname,'../ron-crash-fix-20261019');
+const fixtureRoot=process.env.MODDOCK_CRASH_FIXTURE_ROOT || path.resolve(__dirname,'../qa/ron-crash-fix-20261019');
 const fixedRoot=path.join(fixtureRoot,'fixed');
 const backupRoot=path.join(fixtureRoot,'backup');
 const names=['Moddock35338a1c62b44ec1823465829a3f2af0','Moddock3e8a018b81c645c992a3d66c1a0d9329','Moddock40f14048ffb944d79bda6199930d4b6b'];

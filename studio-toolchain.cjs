@@ -98,6 +98,15 @@ class StudioToolchain {
    if (!selected?.available) { await step('制作路线', 'blocked', selected?.reason || '当前游戏不支持此制作路线'); return await this.finish(owner, id, report); }
    await step('制作路线', 'passed', `${workspace.diagnostic.engine.name} · ${adapter.name}`);
    if (!['project-plan', 'custom-project'].includes(item.adapterId) && (workspace.diagnostic.antiCheat.length || workspace.diagnostic.onlineOnly)) await step('游戏运行条件', 'blocked', '已保留实际实现；当前存在联网保护特征，尚未确认此版本允许的离线加载方式，暂停构建部署包。');
+   // Missing game references cannot be fixed by downloading a compiler.
+   if (adapter.compiler === 'csharp') {
+    const references = await this.references(game, workspace.diagnostic);
+    const names = references.map(file => path.basename(file).toLowerCase());
+    if (!['bepinex.dll', 'mscorlib.dll', 'unityengine.dll'].every(name => names.includes(name))) {
+     await step('游戏程序集', 'blocked', '缺少 BepInEx.dll、mscorlib.dll 或 UnityEngine.dll；需要此游戏的 BepInEx 5 与 Mono 程序集。');
+     return await this.finish(owner, id, report);
+    }
+   }
    let tools = adapter.compiler ? await this.tools.probe(signal) : {};
    if (adapter.compiler === 'csharp' && !tools.csharp.available) {
     await step('自动准备 C# 编译器', 'checking', '首次 C# 创作将按需下载已校验的 Microsoft SDK；无需手动配置。');

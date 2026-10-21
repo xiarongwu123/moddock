@@ -43,7 +43,7 @@ class StudioTools {
    if (signal?.aborted) throw new Error('制作任务已取消');
    try {
     const result = await runTool(executable, ['--list-sdks'], { signal, timeout: 5000 });
-    const sdks = [...result.output.matchAll(/^(\d+\.\d+\.\d+) \[([^\r\n]+)\]$/gm)].reverse();
+    const sdks = [...result.output.matchAll(/^(\d+\.\d+\.\d+) \[([^\r\n]+)\]\r?$/gm)].reverse();
     for (const [, version, root] of sdks) { const compiler = path.join(root, version, 'Roslyn/bincore/csc.dll'); if ((await fs.stat(compiler)).isFile()) { csharp = { available: true, executable, compiler, version }; break; } }
     if (csharp.available) break;
    } catch { /* A runtime-only installation is not a compiler. */ }

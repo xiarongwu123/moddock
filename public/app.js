@@ -452,9 +452,9 @@ document.addEventListener('click',async e=>{
   if(!m||pendingModActions.has(m.id))return;
   if(d.modAction==='uninstall')openModal({kind:'uninstall',record:m});
   else{
-   pendingModActions.set(m.id,d.modAction);render();
+   pendingModActions.set(m.id,d.modAction);statePoller?.update();render();
    try{await api('installations/action',{gameId:m.gameId,id:m.id,action:d.modAction});await refresh();}
-   finally{pendingModActions.delete(m.id);render();}
+   finally{pendingModActions.delete(m.id);statePoller?.update();render();}
   }
  }
  if('saveRule'in d){const el=id=>document.getElementById('rule-'+id).value.trim();const gameId=modal.gameId,jobId=modal.jobId;await api('installations/profile',{gameId,rule:{mode:el('mode'),root:el('root'),sourcePrefix:el('prefix'),destination:el('destination'),executable:el('executable'),arguments:el('arguments').split('\n').map(s=>s.trim()).filter(Boolean),requires:el('requires').split('\n').map(s=>s.trim()).filter(Boolean),log:el('log'),marker:el('marker')}});closeModal();await refresh();toast('游戏专属安装规则已保存');if(jobId)await previewJob(jobId);}
@@ -489,7 +489,7 @@ export async function mountHome(element,profile){
   const next=await api('state');if(epoch!==homeEpoch)return false;data=next;render();syncInstallationProgress();nexusVerification.update(data.jobs);
   statePoller=createStatePoller({
    read:signal=>api('state',undefined,{signal:AbortSignal.any([signal,AbortSignal.timeout(20000)])}),
-   isActive:()=>installBusy||!!launchingGame||hasActiveWork(data),
+   isActive:()=>installBusy||pendingModActions.size>0||!!launchingGame||hasActiveWork(data),
    isPaused:()=>scanning||!app?.isConnected||!!accountRoot||!installBusy&&data.installations.progress?.status!=='running'&&(view==='studio'||view==='detail'&&gameTab==='studio'),
    apply:next=>{
     if(epoch!==homeEpoch)return;

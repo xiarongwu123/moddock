@@ -10,7 +10,7 @@ function fixture(options = {}) {
  const events = {}, clicks = [], image = { style: {}, dataset: {}, getBoundingClientRect: () => ({ left: 10, top: 20, width: 600, height: 200 }), setPointerCapture() {}, addEventListener: (name, handler) => { events[name] = handler; } }, status = {}, zoom = { value: '1', addEventListener() {} };
  const placeholder = {}, picture = { dataset: {} }, reconnect = {};
  const dialog = { querySelector: selector => selector === 'img' ? image : selector === 'select' ? zoom : selector === '.verification-status' ? status : selector === '.verification-placeholder' ? placeholder : selector === '.verification-picture' ? picture : selector === '[data-reconnect]' ? { addEventListener: (_name, handler) => { reconnect.click = handler; } } : {}, querySelectorAll: () => [], addEventListener() {}, showModal() {}, close() {}, remove() {} };
- const source = fs.readFileSync(path.join(__dirname, '../public/nexus-verification.js'), 'utf8').replace(/^import .*;\n/, '').replace('export function', 'function');
+ const source = fs.readFileSync(path.join(__dirname, '../public/nexus-verification.js'), 'utf8').replace(/^import .*;\r?\n/gm, '').replace('export function', 'function');
  const context = { document: { createElement: () => dialog, body: { appendChild() {} } }, Image: class { async decode() {} }, AbortController, setTimeout: callback => { deadline = callback; return 1; }, clearTimeout() {}, setInterval: callback => { poll = callback; return 1; }, clearInterval() {} };
  runInNewContext(source + '\nglobalThis.make = createNexusVerification;', context);
  const api = options.api || (async (route, input) => {
