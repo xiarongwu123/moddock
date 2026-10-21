@@ -21,6 +21,8 @@ end)
 `;
 const callbacks = { 'factorio-lua': 'script.on_init(callback)', 'dst-lua': 'AddPlayerPostInit(callback)', 'noita-lua': 'OnPlayerSpawned=callback', 'gmod-lua': 'hook.Add("InitPostEntity","__MODDOCK_ID__",callback)', 'zomboid-lua': 'Events.OnGameStart.Add(callback)', 'beamng-lua': 'local M={}\nM.onExtensionLoaded=callback\nreturn M' };
 function draft(kind) {
+ if (mods.SPECS[kind]?.bethesda) return require('./bethesda-fixture.cjs').draft(kind);
+ if (mods.SPECS[kind]?.strategy || kind === 'civ6-data') return require('./strategy-fixture.cjs').draft(kind);
  const meta = { kind, name: 'Native fixture', author: 'Fixture', description: 'Structural adapter test, no game executed.' };
  if (mods.LUA_KINDS.includes(kind)) return { ...meta, code: functionCode + callbacks[kind], ...(kind === 'factorio-lua' ? { targetVersion: '2.0' } : kind === 'zomboid-lua' ? { targetVersion: '42' } : kind === 'dst-lua' ? { scope: 'client' } : {}) };
  if (kind.startsWith('minecraft-')) return { ...meta, targetVersion: '1.21.4', files: kind === 'minecraft-datapack' ? [{ name: 'data/__MODDOCK_ID__/function/load.mcfunction', text: 'say fixture' }] : [{ name: 'assets/minecraft/lang/zh_cn.json', text: '{"item.minecraft.apple":"测试苹果"}' }] };
@@ -36,7 +38,7 @@ async function fixture(t, kind) {
  await write(user,'Saves/preserve.sav','personal-save'); await write(game.installPath,'unrelated.txt','untouched');
  return {root,game,user,options:{processes:async()=>[],gameModRoots:{[kind]:user}}};
 }
-for (const kind of Object.keys(mods.SPECS).filter(kind => !mods.SPECS[kind].minecraft)) {
+for (const kind of Object.keys(mods.SPECS).filter(kind => !mods.SPECS[kind].minecraft && !mods.SPECS[kind].bethesda)) {
  test(kind+' creates actual game files, builds, installs, toggles and uninstalls without touching saves',async t=>{
   const x=await fixture(t,kind), account=accountFixture(); account.updateAccount({membership:{tier:'pro',expiresAt:null}});
   const service=await createServer({root:path.join(x.root,'service'),port:0,accounts:account.options,scan:async()=>({games:[x.game],roots:[],diagnostics:[]}),installers:x.options,studio:{integration:{python:false}}});
@@ -57,7 +59,7 @@ for (const kind of Object.keys(mods.SPECS).filter(kind => !mods.SPECS[kind].mine
   if(kind==='factorio-lua')assert.equal(JSON.parse(preview.files.find(file=>file.name==='mod/info.json').text).factorio_version,'2.0');
   if(kind==='zomboid-lua')assert.ok(preview.files.some(file=>file.name==='mod/42/mod.info'));
   if(kind==='beamng-lua')assert.ok(preview.files.some(file=>file.name.endsWith('/modScript.lua')));
-  if(kind==='ck3-data'){assert.ok(preview.files.find(file=>file.name.endsWith('.yml')).text.startsWith('\uFEFF'));assert.ok(preview.files.some(file=>file.name==='mod/'+item.manifest.UniqueID+'.mod'));}
+  if(kind==='ck3-data'||mods.SPECS[kind].strategy){assert.ok(preview.files.find(file=>file.name.endsWith('.yml')).text.startsWith('\uFEFF'));assert.ok(preview.files.some(file=>file.name==='mod/'+item.manifest.UniqueID+'.mod'));}
   const prepared=await post('studio/prepare',{id:item.id}); assert.equal(prepared.status,200,JSON.stringify(prepared.body));
   assert.ok(prepared.body.files.every(file=>mods.allowedDestination({modKind:kind,modId:item.manifest.UniqueID},file.destination)));
   const applied=await post('installations/apply',{id:prepared.body.id}); assert.equal(applied.status,200,JSON.stringify(applied.body));
@@ -109,7 +111,7 @@ test('user-root installation rejects wrong game identity, symlinks, changed game
  const link=path.join(x.root,'user-link');await fs.symlink(x.user,link,'junction');
  await assert.rejects(mods.installRoot(x.game,p,{gameModRoots:{'zomboid-lua':link}}),/链接/);
 });
-for(const kind of ['factorio-lua','ck3-data','barotrauma-content','minecraft-datapack','minecraft-resourcepack'])test(kind+' Pi writes and validates actual source before artifact submission',async t=>{
+for(const kind of ['factorio-lua','ck3-data','barotrauma-content','minecraft-datapack','minecraft-resourcepack','hoi4-data','civ6-data','skyrimse-esp'])test(kind+' Pi writes and validates actual source before artifact submission',async t=>{
  const value=draft(kind),fixture=await piFixture(t,{game:{name:mods.SPECS[kind].game,appId:mods.SPECS[kind].ids[0]},result:value,respond:async({phase})=>phase==='author'&&value.files?{calls:[...value.files.map(file=>({name:'write_project_file',arguments:{path:file.name,text:file.text}})),{name:'validate_project',arguments:{}}]}:phase==='submit'?{result:{...value,code:undefined,files:undefined}}:null});
  const result=await createDeepSeek({apiKey:fixture.key,pi:fixture.pi}).generate({kind,prompt:'Implement fixture gameplay',context:{game:fixture.game},capability:{deliverable:'mod'}});
  assert.equal(result.kind,kind);if(value.files)assert.deepEqual(result.files,value.files);else assert.equal(result.code,value.code);

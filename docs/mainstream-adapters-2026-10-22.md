@@ -1,0 +1,44 @@
+# 主流游戏制作适配：本批代码范围
+
+本批新增七款游戏的专用非 Lua 制作路线。完成的是限定类型的生成、源文件检查、原生格式构建、导出与文件部署。**尚未完成全部主流游戏适配，也没有达到千款目标。** 没有生产部署或真实游戏内效果验收。
+
+| 游戏 | 路线 | 本批可制作内容 | 加载方式 |
+|---|---|---|---|
+| 上古卷轴 5 SE | skyrimse-esp | 本机 Skyrim.esm 中现有 GMST/GLOB 数值覆盖，实际 ESP 二进制 | Data/<作品ID>.esp，用户在正常插件管理流程中启用 |
+| 辐射 4 | fallout4-esp | 本机 Fallout4.esm 中现有 GMST/GLOB 数值与布尔覆盖，实际 ESP 二进制 | 同上；不支持 VR 或 DLC 主文件 |
+| 钢铁雄心 4 | hoi4-data | 国策、决议、事件、ideas、scripted_effects/triggers 与本地化 | 原生描述文件、Windows 默认用户 mod 目录；用户加入启动器播放集 |
+| 群星 | stellaris-data | 事件、法令、政策、国民理念与脚本数据 | 同上；不含飞船模型或星图 |
+| 欧陆风云 4 | eu4-data | 事件、决议、理念、修正与脚本数据 | 原生 mod 包；本路线仅覆盖英文本地化，不推断民间汉化兼容 |
+| 维多利亚 3 | vic3-data | 决议、日志条目、法律、事件与脚本数据 | 原生 mod 包，用户加入播放集 |
+| 文明 6 Steam Windows | civ6-data | GameData XML 数据库修改、LocalizedText；宿主生成 GUID .modinfo、UpdateDatabase/UpdateText 与实际文件 MD5 | 系统 Documents/My Games/Sid Meier's Civilization VI/Mods/<作品ID>，用户在额外内容启用 |
+
+## ESP 的边界
+
+输入为一个 changes.json，最多 12 条修改，只能选择本机确实存在且唯一的 GMST/GLOB EditorID。没有 Lua、Papyrus、SKSE/F4SE、新记录、装备、任务、地图、美术或字符串 GMST 制作。
+
+宿主读取主文件的真实记录头、FormID、字段类型与浮点/整数布局，保留未修改字段，支持受限的压缩记录读取与扩展子记录长度。生成独立 ESP，写入原版主文件依赖和记录计数，回读核对目标数值。ESM 始终只读，不在交付包中分发。
+
+整个原版 ESM 的 SHA256 随构建保存。安装、应用方案和重新启用时检查基线；游戏更新后旧构建会阻止启用，仍允许禁用和卸载。不会修改 plugins.txt、INI、存档或自动加载顺序。文件有效不等于数值在游戏中产生预期效果，仍需用户试玩确认当前构建。
+
+## 策略数据包的边界
+
+Clausewitz/YAML 和 XML 检查是结构校验，不是游戏脚本或数据库语义编译器。明确的游戏版本与本机 launcher-settings 版本不匹配时阻止构建；没有语义版本证据时标记待核对，Steam buildId 不作为语义版本。
+
+每个游戏有独立的允许目录和语言规则；原生文件名加作品前缀、本地化写入 BOM，宿主生成 descriptor.mod 与同级 .mod。自动安装仅使用已存在的默认游戏用户目录；发现未支持的自定义 launcher gameDataPath 时停止并保留可导出产物，不猜测位置。不会改启动器数据库、播放集、dlc_load.json、Mods.sqlite 或游戏存档。
+
+本地定义调查只读取相应游戏允许的 common/events/decisions 或 Civilization VI Gameplay/Data 目录，有文件数、字节数和快照上限，不读取存档或凭据。ESP 的私有服务查询使用客户端提供的真实记录快照，不访问服务器上不存在的 Windows 游戏路径。文件写入工具描述区分数据、资源和 Lua，不再向非 Lua 配方提示 main.lua。
+
+新增路线的界面按钮只安装文件，并直接显示游戏内启用步骤；不会把文件托管状态写成游戏内已启用，也不会在启用步骤完成前擅自启动游戏。Windows 下载历史的原子替换增加临时文件锁重试，非临时错误仍保留旧记录并返回失败。
+
+## 当前仍需补齐
+
+之前已接入赛博朋克 CET、博德之门 3、星露谷、Minecraft、异星工厂、饥荒联机版、Noita、GMod、僵尸毁灭工程、BeamNG、王国风云 3、潜渊症的各自限定路线。它们不代表这些游戏的所有 Mod 类型都支持。
+
+仍缺专用制作链路的常见主流目标包括巫师 3、GTA V、荒野大镖客 2、泰拉瑞亚/tModLoader、骑砍 2、无人深空、武装突袭 3、DayZ、太空工程师、杀戮尖塔和文明 7。上古卷轴/辐射的 Papyrus、任务和资产制作也没有由此次数值 ESP 路线覆盖。通用 Unity/Unreal 等引擎路径需要按本机接口和工具条件验证，不能直接计作这些缺口完成。
+
+## 格式核对与证据
+
+- Bethesda 数值布局对照 [xEdit TES5 定义](https://github.com/TES5Edit/TES5Edit/blob/dev-4.1.6/Core/wbDefinitionsTES5.pas)与[FO4 定义](https://github.com/TES5Edit/TES5Edit/blob/dev-4.1.6/Core/wbDefinitionsFO4.pas)，实现未复制这些源文件。
+- P 社目录与加载结构参考对应官方 Wiki 及已有固定版本知识记录；本机定义和版本证据优先。此次查询部分官方 Wiki 无法访问，不能据此声称核对了当前版本全部接口。
+- Civ6 数据包对照作者维护的 [Civ-6-Mods](https://github.com/mikepmerritt/Civ-6-Mods) 项目与现有知识记录；不冒充 Firaxis 完整语义验证器。
+- 隔离回归验证构建/导出/安装/恢复、错误类型/路径/目录、主文件变更及真实二进制回读。生产模型、真实游戏加载与玩法效果未验证，交付日志分别保留，不合并为实机通过。

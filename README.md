@@ -14,6 +14,8 @@ MU 临时网页错误不会清除有效登录；安全的查询可自动重试�
 
 ## Pro AI Mod 创作工作台
 
+主流非 Lua 路线继续增加上古卷轴 5 SE/辐射 4 的本机记录数值 ESP，以及钢铁雄心 4、群星、欧陆风云 4、维多利亚 3、文明 6 的原生数据包。均为限定制作类型；实际范围及仍缺游戏见 [主流适配说明](docs/mainstream-adapters-2026-10-22.md)。
+
 Minecraft Java 新增非 Lua 数据包与资源包路线，支持真实 mcfunction、JSON、16×16 PNG 和原生 ZIP；资源包可部署，数据包暂需导出并由用户选择目标世界。支持版本及边界见 [Minecraft 制作说明](docs/minecraft-packs-deployment.md)。
 
 2026-10-22 新增异星工厂、饥荒联机版、Noita、Garry's Mod、僵尸毁灭工程、BeamNG、王国风云 3、潜渊症的限定范围脚本/内容制作路线，接通源文件校验、原生结构导出与安装管理。支持范围、游戏内启用步骤和未完成项见 [最新制作适配核对](docs/studio-capability-audit-2026-10-22.md)，同步发布步骤见 [部署说明](docs/native-game-mods-deployment.md)。代码链路通过测试不代表真实游戏玩法已验收。

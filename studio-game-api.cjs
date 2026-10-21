@@ -31,9 +31,17 @@ async function verify() {
 }
 
 const isReadyOrNot = game => game?.appId ? String(game.appId) === '1144200' : /^(?:ready\s*or\s*not|严阵以待)(?:\s*\[TEST\])?$/i.test(game?.searchName || game?.name || '');
-async function search(game, query) {
+async function search(game, query, evidence) {
  if (require('./studio-cyberpunk.cjs').isCyberpunk(game || {})) return require('./studio-cyberpunk.cjs').searchCET(query);
  if (typeof query !== 'string' || query.length > 100 || !query.trim() || /[\r\n\0]/.test(query)) throw new Error('接口查询需为单行文本');
+ const kind = require('./studio-game-mods.cjs').forGame(game || {});
+ if (require('./studio-game-mods.cjs').SPECS[kind]?.bethesda) {
+  const snapshot = evidence?.documents?.find(doc => doc.path === 'moddock-bethesda-records.json');
+  const terms = require('./studio-native-evidence.cjs').termsFor(query);
+  const result = snapshot ? JSON.parse(snapshot.text) : await require('./studio-bethesda.cjs').evidence(game, kind, query);
+  if (snapshot) result.records = result.records.filter(record => terms.some(term => (record.editorId + ' ' + record.signature).toLowerCase().includes(term)));
+  return { source: result.master, matches: result.records.map(record => ({ path: record.signature + ':' + record.editorId, signature: JSON.stringify(record) })), runtimeVerified: false, note: result.blocked || '本机主文件中的真实设置；数值修改与游戏效果需实测。' };
+ }
  if (isReadyOrNot(game)) await verify();
  const index = isReadyOrNot(game) ? JSON.parse(await fs.readFile(path.join(__dirname, 'vendor/ready-or-not-api/api.json'), 'utf8')) : { entries: [], source: docs };
  const terms = query.toLowerCase().split(/[\s,]+/).filter(Boolean);

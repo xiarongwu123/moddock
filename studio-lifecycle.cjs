@@ -64,7 +64,7 @@ class StudioLifecycle {
    const verified = await this.installers.action(game, existing.id, 'verify');
    if (verified.verification.status !== 'files_ok') throw new Error(verified.verification.message);
    const deployment = { ...item.deployment, status: 'installed', modId: existing.id, jobId: job.id, buildId: item.buildId, sha256: item.sha256, message: '此版本已安装并启用，托管文件校验通过。' };
-   if (item.adapterId === 'minecraft-resourcepack') deployment.message = '资源包已部署，文件校验通过。请从自己的启动器打开对应 Minecraft 版本，在资源包菜单启用；游戏效果尚未验证。';
+   if (item.manualActivation) deployment.message = 'Mod 文件已部署，文件校验通过。' + item.manualActivation + '游戏效果尚未验证。';
    await this.persist(owner, artifactId, deployment); return deployment;
   }
   const predecessors = this.predecessors(owner, game, item);
@@ -78,7 +78,7 @@ class StudioLifecycle {
    await this.permission(context, 'library.manage');
    const mod = await this.installers.apply(game, plan.id, item.adapterId === 'engine-mod' && plan.files.every(file => !file.originalHash || rule.baseHashes?.[file.destination] === file.originalHash));
    const deployment = { status: 'installed', modId: mod.id, jobId: job.id, buildId: item.buildId, sha256: item.sha256, message: previous ? '当前版本已安装并启用，已替换此对话的上一版本；文件校验通过。' : '产物已安装并启用，文件校验通过。可以继续说“启动游戏并检查日志”。' };
-   if (item.adapterId === 'minecraft-resourcepack') deployment.message = '资源包已部署，文件校验通过。请从自己的启动器打开对应 Minecraft 版本，在资源包菜单启用；游戏效果尚未验证。';
+   if (item.manualActivation) deployment.message = 'Mod 文件已部署，文件校验通过。' + item.manualActivation + '游戏效果尚未验证。';
    await this.persist(owner, artifactId, deployment); return deployment;
   } catch (error) {
    if (removed && !this.installers.state.mods.some(mod => mod.jobId === job.id && mod.gameId === game.id)) {

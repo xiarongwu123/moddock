@@ -19,7 +19,7 @@ class ModStudio {
  constructor(root, options = {}) { this.root = path.join(root, 'creations'); this.options = options; this.integration = new UniversalModder(options.integration); this.pending = new Map(); this.queues = new Map(); this.native = new (require('./studio-native-projects.cjs').NativeProjects)(options.tools); this.toolchain = new StudioToolchain(this, options.tools); this.conversations = new StudioConversations(this); this.ready = removeStudioSamples(this.root); this.ready.catch(() => {}); }
  status(account) { return { allowed: studioAccess(account), requiredTier: 'pro', aiAvailable: typeof this.options.plan === 'function' && typeof this.options.generate === 'function', provider: this.options.provider || null, npcs: NPCS, days: DAYS }; }
  directory(owner) { return path.join(this.root, crypto.createHash('sha256').update(owner).digest('hex')); }
- async workspace(game) {
+ async workspace(game, query = '') {
   const diagnostic = await this.integration.diagnose(game, await diagnoseGame(game));
   const context = await this.integration.context(game, diagnostic);
   if (require('./studio-cyberpunk.cjs').isCyberpunk(game)) context.guide.text = (require('./studio-cyberpunk.cjs').GUIDE + '\n' + context.guide.text).slice(0, 12000);
@@ -28,7 +28,7 @@ class ModStudio {
   const gameModKind = require('./studio-game-mods.cjs').forGame(game);
   if (gameModKind) {
    context.guide.text = (require('./studio-game-mods.cjs').guide(gameModKind) + '\n' + context.guide.text).slice(0, 12000);
-   context.engineEvidence = await require('./studio-game-mods.cjs').evidence(game, context.engineEvidence);
+   context.engineEvidence = await require('./studio-game-mods.cjs').evidence(game, context.engineEvidence, query);
   }
   if (diagnostic.engine.key === 'unreal') {
    const safety = require('./studio-ue4ss-safety.cjs');
@@ -100,6 +100,8 @@ class ModStudio {
   if (!item.adapterId) Object.assign(item, { adapterId: item.draft.kind, output: '内容包', installable: ['dialogue','texture'].includes(item.draft.kind) });
   item.toolchain = await this.toolchain.latest(owner, id);
   item.exportOnly = !!require('./studio-game-mods.cjs').SPECS[item.adapterId]?.exportOnly;
+  item.requiresBuild = ['bepinex-plugin', 'bg3-lua', 'bg3-follower', 'engine-mod'].includes(item.adapterId) || require('./studio-game-mods.cjs').has(item.adapterId);
+  item.manualActivation = require('./studio-game-mods.cjs').activation(item.adapterId);
   if (['bepinex-plugin', 'bg3-lua', 'bg3-follower', 'engine-mod'].includes(item.adapterId) && item.toolchain?.status === 'passed' && item.toolchain.bundle) item.installable = true;
   if (require('./studio-game-mods.cjs').has(item.adapterId) && item.toolchain?.status === 'passed' && item.toolchain.bundle) item.installable = !require('./studio-game-mods.cjs').SPECS[item.adapterId].exportOnly;
   if (item.toolchain && item.toolchain.status !== 'passed') item.installable = false;

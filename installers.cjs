@@ -104,6 +104,10 @@ function profile(input) {
   if (!input.baseHashes || typeof input.baseHashes !== 'object' || Array.isArray(input.baseHashes) || Object.keys(input.baseHashes).length > (p.fileMappings ? 2000 : 24)) throw new Error('原文件版本约束无效');
   p.baseHashes = Object.fromEntries(Object.entries(input.baseHashes).map(([name, value]) => { if (value !== null && !/^[a-f0-9]{64}$/.test(value)) throw new Error('原文件摘要无效'); return [relative(name), value]; }));
  }
+ if (p.mode === 'game-mod' && require('./studio-game-mods.cjs').SPECS[p.modKind]?.bethesda) {
+  const master = require('./studio-game-mods.cjs').SPECS[p.modKind].master;
+  if (Object.keys(p.baseHashes || {}).length !== 1 || !/^[a-f0-9]{64}$/.test(p.baseHashes?.[master] || '')) throw new Error('ESP 安装必须绑定此游戏的原版主文件摘要');
+ }
  if (input.generatedCaches !== undefined) {
   if (!Array.isArray(input.generatedCaches) || input.generatedCaches.length > 12 || input.generatedCaches.some(name => typeof name !== 'string' || !/(?:^|\/)game\/Moddock[a-f0-9]+\.rpyc$/.test(name))) throw new Error('派生脚本缓存规则无效');
   p.generatedCaches = input.generatedCaches.map(name => relative(name));
@@ -177,6 +181,7 @@ class Installers {
   }
  }
  async prerequisites(root,p) {
+  if (p.mode === 'game-mod' && require('./studio-game-mods.cjs').SPECS[p.modKind]?.bethesda) await this.checkBaseHashes(root,p);
   for(const rel of p.requires)if(!await fileHash(await target(root,rel)))throw new Error('缺少前置文件：'+rel);
   if (p.mode === 'bg3') {
    const bin = await target(p.bg3GameRoot, 'bin'), names = await fs.readdir(bin).catch(() => []), loaders = names.filter(name => /^dwrite\.dll$/i.test(name));

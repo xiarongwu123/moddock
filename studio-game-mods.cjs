@@ -8,6 +8,13 @@ const parser = require('./vendor/luaparse/luaparse.cjs');
 const { DOMParser } = require('@xmldom/xmldom');
 
 const SPECS = {
+ 'skyrimse-esp': { game: '上古卷轴 5 SE', ids: ['489830'], match: /skyrim.*special edition|上古卷轴.*5.*(?:se|特别版)/i, bethesda: true, master: 'Data/Skyrim.esm', executables: ['SkyrimSE.exe'], prefix: 'Data', docs: 'https://github.com/TES5Edit/TES5Edit', scope: '从本机 Skyrim.esm 读取真实 GMST/GLOB 数值记录并生成 ESP 覆盖；不含 Papyrus、装备、任务、新记录或模型，需手动启用插件。' },
+ 'fallout4-esp': { game: '辐射 4', ids: ['377160'], match: /fallout\s*4|辐射\s*4/i, bethesda: true, master: 'Data/Fallout4.esm', executables: ['Fallout4.exe'], prefix: 'Data', docs: 'https://github.com/TES5Edit/TES5Edit', scope: '从本机 Fallout4.esm 读取真实 GMST/GLOB 数值记录并生成 ESP 覆盖；不含 Papyrus、F4SE、装备、任务或资产，需手动启用插件。' },
+ 'hoi4-data': { game: '钢铁雄心 4', ids: ['394360'], match: /hearts of iron.*(?:iv|4)|钢铁雄心.*4/i, strategy: true, executables: ['hoi4.exe'], location: 'hoi4', prefix: 'mod', docs: 'https://hoi4.paradoxwikis.com/Mod_structure', scope: '国策、决议、事件、ideas 与本地化文本包；结构校验和原生描述文件打包，需在启动器启用，不含地图或模型。' },
+ 'stellaris-data': { game: '群星', ids: ['281990'], match: /\bstellaris\b|群星/i, strategy: true, executables: ['stellaris.exe'], location: 'stellaris', prefix: 'mod', docs: 'https://stellaris.paradoxwikis.com/Mod_structure', scope: '事件、法令、政策、国民理念和脚本数据包；结构校验与原生打包，需在启动器启用，不含飞船模型或星图。' },
+ 'eu4-data': { game: '欧陆风云 4', ids: ['236850'], match: /europa universalis.*(?:iv|4)|欧陆风云.*4/i, strategy: true, executables: ['eu4.exe'], location: 'eu4', prefix: 'mod', docs: 'https://eu4.paradoxwikis.com/Mod_structure', scope: '事件、决议、理念、修正与英文本地化数据包；不把民间汉化兼容当作原生支持，不含地图。' },
+ 'vic3-data': { game: '维多利亚 3', ids: ['529340'], match: /victoria.*3|维多利亚.*3/i, strategy: true, executables: ['binaries/victoria3.exe'], location: 'vic3', prefix: 'mod', docs: 'https://vic3.paradoxwikis.com/Mod_structure', scope: '决议、日志条目、法律、事件和本地化数据包；结构检查、原生打包与部署，需在启动器启用，不含地图或模型。' },
+ 'civ6-data': { game: '文明 6', ids: ['289070'], match: /civilization.*(?:vi|6)\b|文明.*6/i, executables: ['Base/Binaries/Win64Steam/CivilizationVI.exe', 'Base/Binaries/Win64Steam/CivilizationVI_DX12.exe'], location: 'civ6', prefix: 'Mods', docs: 'https://github.com/mikepmerritt/Civ-6-Mods', scope: 'GameData XML 数据库修改与本地化；宿主生成 GUID modinfo、动作和文件摘要；不含 Lua、SQL、模型或新地图，需在额外内容启用。' },
  'minecraft-datapack': { game: 'Minecraft Java', ids: [], match: /^(?:minecraft(?: java(?: edition)?)?|我的世界(?:java版)?)(?:\s*\[TEST\])?$/i, minecraft: true, exportOnly: true, executables: ['java.exe', 'javaw.exe'], prefix: 'datapacks', docs: 'https://www.minecraft.net/en-us/article/minecraft-java-edition-1-21', scope: 'Java 版命令函数、配方与 JSON 数据包；导出原生 ZIP 后由用户明确选择目标世界；不生成 Java 插件，不自动写入存档。' },
  'minecraft-resourcepack': { game: 'Minecraft Java', ids: [], match: /^(?:minecraft(?: java(?: edition)?)?|我的世界(?:java版)?)(?:\s*\[TEST\])?$/i, minecraft: true, executables: ['java.exe', 'javaw.exe'], prefix: 'resourcepacks', docs: 'https://www.minecraft.net/en-us/article/minecraft-java-edition-1-21-4', scope: 'Java 版资源包：语言、模型 JSON、16×16 方块/物品 PNG 贴图；自动部署到已核对实例，游戏内启用；不生成 Forge/Fabric 插件或音频。' },
  'factorio-lua': { game: '异星工厂', ids: ['427520'], match: /factorio|异星工厂/i, lua: '5.2', entry: 'control.lua', executables: ['bin/x64/factorio.exe'], location: 'factorio', prefix: 'mods', log: 'factorio-current.log', printer: 'log', docs: 'https://lua-api.factorio.com/latest/auxiliary/mod-structure.html', scope: '仅运行时 control.lua 玩法脚本；不生成新模型或原型资产。' },
@@ -24,6 +31,13 @@ const DATA_KINDS = Object.keys(SPECS).filter(kind => !SPECS[kind].lua);
 const has = kind => Object.hasOwn(SPECS, kind || '');
 const matches = (kind, game = {}) => has(kind) && (game.appId ? SPECS[kind].ids.includes(String(game.appId)) : SPECS[kind].match.test(game.searchName || game.name || ''));
 const forGame = game => Object.keys(SPECS).find(kind => !SPECS[kind].exportOnly && matches(kind, game)) || Object.keys(SPECS).find(kind => matches(kind, game));
+function activation(kind) {
+ if (SPECS[kind]?.bethesda) return '请在游戏或你使用的插件管理器中启用当前 ESP，再进入游戏试玩。';
+ if (SPECS[kind]?.strategy) return '请在 Paradox 启动器的播放集中添加并启用当前作品，再进入游戏试玩。';
+ if (kind === 'civ6-data') return '请在文明 6 的“额外内容 → 模组”中启用当前作品，再开始游戏试玩。';
+ if (kind === 'minecraft-resourcepack') return '请从自己的启动器打开对应 Minecraft 版本，在资源包菜单启用当前作品。';
+ return null;
+}
 const idFor = id => 'moddock_' + id.replaceAll('-', '').toLowerCase();
 const xmlEscape = text => String(text).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[c]);
 function checkLua(kind, code) {
@@ -77,7 +91,7 @@ function dataSources(kind, files) {
     if (!new RegExp('^\\s*l_' + language + ':\\s*$', 'm').test(file.text.replace(/^\uFEFF/, ''))) throw new Error('CK3 本地化语言头与目录不一致');
     for (const line of file.text.replace(/^\uFEFF/, '').split('\n').filter(line => line.trim() && !/^\s*(?:#|l_(?:english|simp_chinese):)/.test(line))) if (!/^\s+[^\s:]+:\d*\s+"(?:[^"\\]|\\.)*"\s*(?:#.*)?$/.test(line)) throw new Error('CK3 本地化行格式无效');
    } else throw new Error('CK3 此路线仅接受决议、事件、scripted_effects/triggers 和本地化');
-  } else if (SPECS[kind].minecraft) {
+  } else if (SPECS[kind].minecraft || SPECS[kind].strategy || SPECS[kind].bethesda || kind === 'civ6-data') {
    // The complete pack is checked below, including cross-file entry requirements.
   } else {
    if (!/^(?:Items|Afflictions)\/[a-zA-Z0-9_-]+\.xml$/.test(name)) throw new Error('潜渊症此路线仅接受 Items/Afflictions XML');
@@ -87,6 +101,9 @@ function dataSources(kind, files) {
   return { name, text: file.text };
  });
  if (SPECS[kind].minecraft) require('./studio-minecraft.cjs').validateSources(kind, sources);
+ if (SPECS[kind].strategy) require('./studio-strategy.cjs').validateSources(kind, sources, { checkClausewitz });
+ if (kind === 'civ6-data') require('./studio-civilization.cjs').validateSources(sources, checkXML);
+ if (SPECS[kind].bethesda) require('./studio-bethesda.cjs').changes(sources);
  return sources;
 }
 const version = value => { if (typeof value !== 'string' || !/^\d+\.\d+(?:\.\d+){0,2}$/.test(value)) throw new Error('需要已核对的目标游戏版本（如 2.0 或 1.14.2），不能使用通配版本'); return value; };
@@ -122,9 +139,16 @@ function build(input, id) {
   if (kind === 'beamng-lua') add(`scripts/${uid}/modScript.lua`, `extensions.load(${JSON.stringify(uid)})\n`);
   content = { language: 'Lua ' + spec.lua, loader: spec.game, code: wrapped };
  } else {
-  draft.targetVersion = version(input.targetVersion); draft.files = dataSources(kind, input.files);
-  if (spec.minecraft) {
+  if (!spec.bethesda) draft.targetVersion = version(input.targetVersion);
+  draft.files = dataSources(kind, input.files);
+  if (spec.bethesda) {
+   add('changes.json', draft.files[0].text);
+  } else if (spec.minecraft) {
    files.push(...require('./studio-minecraft.cjs').build(input, uid, draft.files));
+  } else if (spec.strategy) {
+   files.push(...require('./studio-strategy.cjs').build(input, uid, draft.files));
+  } else if (kind === 'civ6-data') {
+   files.push(...require('./studio-civilization.cjs').build(input, uid, draft.files));
   } else if (kind === 'ck3-data') {
    for (const file of draft.files) add(uid + '/' + path.posix.dirname(file.name) + '/' + uid + '_' + path.posix.basename(file.name), (file.name.endsWith('.yml') ? '\uFEFF' : '') + replace(file.text).replace(/^\uFEFF/, ''));
    const descriptor = `version="1.0.0"\nname=${JSON.stringify(input.name)}\nsupported_version=${JSON.stringify(draft.targetVersion)}\n`;
@@ -133,7 +157,7 @@ function build(input, id) {
    for (const file of draft.files) add(file.name, replace(file.text));
    add('filelist.xml', `<contentpackage name="${xmlEscape(input.name)}" modversion="1.0.0" gameversion="${draft.targetVersion}" corepackage="false">\n${draft.files.map(file => `  <${file.name.startsWith('Items/') ? 'Item' : 'Afflictions'} file="%ModDir%/${file.name}" />`).join('\n')}\n</contentpackage>`);
   }
-  content = { language: spec.minecraft ? 'Minecraft JSON / mcfunction / PNG' : kind === 'ck3-data' ? 'Clausewitz' : 'XML', files: draft.files, runtimeVerified: false };
+  content = { language: spec.bethesda ? 'Native ESP override source' : spec.minecraft ? 'Minecraft JSON / mcfunction / PNG' : spec.strategy || kind === 'ck3-data' ? 'Clausewitz' : 'XML', files: draft.files, runtimeVerified: false };
  }
  return { draft, manifest: { Name: input.name, Author: input.author, Version: '1.0.0', UniqueID: uid }, files, runtime, content, summary: `${spec.game} · ${spec.scope}`, adapterId: kind, output: spec.lua ? '原生脚本 Mod' : '游戏内容 Mod', installable: false };
 }
@@ -141,11 +165,11 @@ function validateBuilt(kind, files) {
  const results = [];
  for (const file of files.filter(file => file.name.startsWith('mod/'))) {
   if (file.name.endsWith('.lua')) results.push({ path: file.name, ...checkLua(kind, file.text) });
-  else { try { if (/\.(?:json|mcmeta)$/.test(file.name)) JSON.parse(file.text); if (file.name.endsWith('.mcfunction')) require('./studio-minecraft.cjs').command(file.text); if (file.name.endsWith('.png')) require('./content-pack.cjs').pngBytes(file.image); if (file.name.endsWith('.xml')) checkXML(file.text); if (file.name.endsWith('.mod')) checkClausewitz(file.text); results.push({ path: file.name, passed: true, detail: '宿主生成的清单/文本结构检查；游戏语义仍需实测' }); } catch (error) { results.push({ path: file.name, passed: false, detail: error.message }); } }
+  else { try { if (/\.(?:json|mcmeta)$/.test(file.name)) JSON.parse(file.text); if (file.name.endsWith('.mcfunction')) require('./studio-minecraft.cjs').command(file.text); if (file.name.endsWith('.png')) require('./content-pack.cjs').pngBytes(file.image); if (/\.(?:xml|modinfo)$/.test(file.name)) checkXML(file.text); if (file.name.endsWith('.mod')) checkClausewitz(file.text); results.push({ path: file.name, passed: true, detail: '宿主生成的清单/文本结构检查；游戏语义仍需实测' }); } catch (error) { results.push({ path: file.name, passed: false, detail: error.message }); } }
  }
  return results;
 }
-function exportPrefix(kind, uid) { return kind === 'factorio-lua' ? uid + '_1.0.0' : SPECS[kind]?.minecraft || ['beamng-lua', 'ck3-data'].includes(kind) ? '' : uid; }
+function exportPrefix(kind, uid) { return kind === 'factorio-lua' ? uid + '_1.0.0' : SPECS[kind]?.minecraft || SPECS[kind]?.strategy || SPECS[kind]?.bethesda || ['beamng-lua', 'ck3-data'].includes(kind) ? '' : uid; }
 function exportFiles(item, files) {
  const uid = item.manifest.UniqueID, kind = item.adapterId;
  const prefix = exportPrefix(kind, uid) ? exportPrefix(kind, uid) + '/' : '';
@@ -154,6 +178,7 @@ function exportFiles(item, files) {
 function targetCompatibility(item, workspace) {
  const kind = item.adapterId, docs = workspace.context?.engineEvidence?.documents || [];
  let actual;
+ if (SPECS[kind]?.bethesda) return { status: 'pending', detail: 'ESP 以本机原版主文件 SHA256 为版本基线；原生构建阶段读取真实记录并绑定，安装时再次检查。' };
  if (SPECS[kind]?.minecraft) {
   const versions = docs.filter(doc => /^versions\//.test(doc.path)).map(doc => JSON.parse(doc.text).id);
   return { status: versions.includes(item.draft.targetVersion) ? 'passed' : 'blocked', detail: versions.includes(item.draft.targetVersion) ? '目标 Java 版本清单和 JAR 容器匹配；尚未实机运行' : '未找到目标 Minecraft Java 版本的本机清单与 JAR，请选择已安装版本；不会猜测包格式。' };
@@ -161,8 +186,8 @@ function targetCompatibility(item, workspace) {
  if (kind === 'factorio-lua') {
   const doc = docs.find(doc => doc.path === 'data/base/info.json');
   if (doc) actual = JSON.parse(doc.text).version;
- } else if (kind === 'ck3-data') {
-  const doc = docs.find(doc => doc.path === 'launcher-settings.json');
+ } else if (kind === 'ck3-data' || SPECS[kind]?.strategy) {
+  const doc = docs.find(doc => /(?:^|\/)launcher-settings\.json$/.test(doc.path));
   if (doc) { const value = JSON.parse(doc.text); actual = [value.rawVersion, value.gameVersion, value.version].find(value => typeof value === 'string' && /^\d+\.\d+(?:\.\d+){0,2}$/.test(value)); }
  }
  if (!actual) return { status: 'pending', detail: '缺少可核对的本机语义版本证据；目标版本声明和游戏接口兼容性仍需验证。Steam buildId 不当作游戏语义版本。' };
@@ -171,12 +196,18 @@ function targetCompatibility(item, workspace) {
  return { status: same ? 'passed' : 'blocked', detail: same ? '目标版本与本机版本证据匹配：' + actual : `目标版本 ${requested} 与本机 ${actual} 不匹配，请按已安装版本重新制作。` };
 }
 function rule(item) {
+ if (SPECS[item.adapterId]?.bethesda) {
+  const master = item.toolchain?.bethesda?.master;
+  if (master?.path !== SPECS[item.adapterId].master || !/^[a-f0-9]{64}$/.test(master.sha256 || '')) throw new Error('ESP 构建缺少本机主文件版本基线');
+  return { mode: 'game-mod', modKind: item.adapterId, modId: item.manifest.UniqueID, baseHashes: { [master.path]: master.sha256 } };
+ }
  return { mode: 'game-mod', modKind: item.adapterId, modId: item.manifest.UniqueID, sourcePrefix: 'mod' };
 }
-function destination(kind, uid) { return kind === 'ck3-data' ? 'mod' : `${SPECS[kind].prefix}/${uid}${kind === 'factorio-lua' ? '_1.0.0' : ''}`; }
+function destination(kind, uid) { return SPECS[kind]?.bethesda ? 'Data' : kind === 'ck3-data' || SPECS[kind]?.strategy ? 'mod' : `${SPECS[kind].prefix}/${uid}${kind === 'factorio-lua' ? '_1.0.0' : ''}`; }
 function allowedDestination(p, name) {
  const base = destination(p.modKind, p.modId);
- return p.modKind === 'ck3-data' ? name === `mod/${p.modId}.mod` || name.startsWith(`mod/${p.modId}/`) : name.startsWith(base + '/');
+ if (SPECS[p.modKind]?.bethesda) return name === `Data/${p.modId}.esp`;
+ return p.modKind === 'ck3-data' || SPECS[p.modKind]?.strategy ? name === `mod/${p.modId}.mod` || name.startsWith(`mod/${p.modId}/`) : name.startsWith(base + '/');
 }
 async function ordinary(root, rel) {
  let current = await fs.realpath(root);
@@ -224,7 +255,17 @@ async function installRoot(game, p, options = {}) {
   else if (spec.location === 'beamng') {
    try { const text = await fs.readFile(await ordinary(root, 'startup.ini'), 'utf8'); if (/^\s*UserPath\s*=\s*\S+/mi.test(text)) throw new Error('BeamNG 自定义 UserPath 尚不能唯一核对，可先导出 Mod'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
    if (!process.env.LOCALAPPDATA) throw new Error('无法定位 Windows LocalAppData'); configured = path.join(process.env.LOCALAPPDATA, 'BeamNG/BeamNG.drive/current');
-  } else configured = path.join(await documents(options), 'Paradox Interactive/Crusader Kings III');
+  } else {
+   const directory = spec.strategy ? require('./studio-strategy.cjs').SOURCES[p.modKind].userDirectory : p.modKind === 'civ6-data' ? "My Games/Sid Meier's Civilization VI" : 'Paradox Interactive/Crusader Kings III';
+   if (spec.strategy || p.modKind === 'ck3-data') for (const rel of ['launcher-settings.json', 'launcher/launcher-settings.json']) {
+    try {
+     const file = await ordinary(root, rel), st = await fs.stat(file); if (st.size > 128 * 1024) throw new Error('启动器配置过大，不能确认 Mod 目录');
+     const value = JSON.parse(await fs.readFile(file, 'utf8'));
+     if (value.gameDataPath !== undefined && (typeof value.gameDataPath !== 'string' || value.gameDataPath.replace(/\\/g, '/').replace(/\/$/, '') !== '%USER_DOCUMENTS%/' + directory)) throw new Error('检测到自定义 Paradox 数据目录，当前不猜测部署位置；可导出游戏 Mod 包。');
+    } catch (error) { if (error.code !== 'ENOENT') throw error; }
+   }
+   configured = path.join(await documents(options), directory);
+  }
  }
  let configuredStat;
  try { configuredStat = await fs.lstat(configured); } catch (error) { if (error.code === 'ENOENT') throw new Error('未找到已存在的游戏用户目录，请先运行游戏一次；当前产物仍可导出。'); throw error; }
@@ -236,15 +277,27 @@ async function installRoot(game, p, options = {}) {
 function guide(kind) {
  const spec = SPECS[kind];
  if (spec.minecraft) return require('./studio-minecraft.cjs').GUIDE + '\n' + spec.scope;
+ if (spec.strategy) return require('./studio-strategy.cjs').guide(kind);
+ if (kind === 'civ6-data') return require('./studio-civilization.cjs').GUIDE;
+ if (spec.bethesda) return require('./studio-bethesda.cjs').GUIDE;
  return `${spec.game} host recipe ${kind}. ${spec.scope}\n${spec.docs}\n${spec.lua ? `Write actual complete main.lua using Lua ${spec.lua} syntax; no table.pack/table.unpack or later-language operators. Host supplies the game entry, metadata and packaging. Use ModdockVerification.expect/begin/check with real game state and guard(id,callback) for callbacks; callback registration and constant values are not gameplay proof.\n${kind === 'factorio-lua' ? 'Use script events and game only at runtime; never access game in on_load or top-level. targetVersion must match installed base major.minor. No prototype/data-stage implementation in this recipe.' : ''}\n${kind === 'beamng-lua' ? 'Return your module table M. Host preserves the return value and adds scripts/<id>/modScript.lua to load the extension.' : ''}\n${kind === 'zomboid-lua' ? 'targetVersion must be exactly 41 or 42; do not infer from Steam buildId. GLOBAL events must use actual known Kahlua APIs.' : ''}\n${kind === 'dst-lua' ? 'scope must be client or server; server gameplay callbacks must guard GLOBAL.TheWorld.ismastersim. No automatic server configuration edits.' : ''}` : 'Write actual project files using write_project_file, then validate_project. Supply files and exact targetVersion in metadata. CK3 paths: common/decisions, common/scripted_effects, common/scripted_triggers, events, localization/english or localization/simp_chinese. Barotrauma paths: Items/*.xml or Afflictions/*.xml; host builds filelist.xml. These are structural checks, not a full game semantic compiler.'}\nUse __MODDOCK_ID__ token for unique identifiers and file references; host replaces it with the current artifact namespace. Use only verified game APIs and identifiers, inspect local evidence and read references. If version, API or assets are missing, report specific blockers; do not invent compatibility or substitute a document. No filesystem, process or network operations in generated Lua. Host installation and any in-game activation are separate from actual runtime acceptance.`;
 }
-function schema(kind) { return `kind="${kind}", name<=60, author<=60, description<=240, ${SPECS[kind].lua ? 'code: complete main.lua <=24000 chars' : 'files: 1..12 {name: allowed relative path,text: complete content}, <=128KB total, targetVersion: exact numeric game version'}, ${['factorio-lua','zomboid-lua'].includes(kind) ? 'targetVersion: required verified game version,' : ''}${kind === 'dst-lua' ? 'scope: "client" or "server",' : ''} ${guide(kind)}`; }
-async function evidence(game, existing) {
+function schema(kind) { if (SPECS[kind].bethesda) return `kind="${kind}", name<=60, author<=60, description<=240, files: [{name:"changes.json",text: JSON encoded changes object}]. ${guide(kind)}`; return `kind="${kind}", name<=60, author<=60, description<=240, ${SPECS[kind].lua ? 'code: complete main.lua <=24000 chars' : 'files: 1..12 {name: allowed relative path,text: complete content}, <=128KB total, targetVersion: exact numeric game version'}, ${['factorio-lua','zomboid-lua'].includes(kind) ? 'targetVersion: required verified game version,' : ''}${kind === 'dst-lua' ? 'scope: "client" or "server",' : ''} ${guide(kind)}`; }
+async function evidence(game, existing, query = '') {
  const kind = forGame(game); if (!kind) return existing;
  const root = await fs.realpath(game.installPath), docs = [...(existing?.documents || [])];
  if (SPECS[kind].minecraft) docs.push(...await require('./studio-minecraft.cjs').evidence(root));
- const paths = kind === 'factorio-lua' ? ['data/base/info.json', 'data/core/lualib/event_handler.lua'] : kind === 'ck3-data' ? ['launcher-settings.json'] : kind === 'barotrauma-content' ? ['Content/ContentPackages/Vanilla.xml'] : [];
+ if (SPECS[kind].bethesda) {
+  let index = await require('./studio-bethesda.cjs').evidence(game, kind, query);
+  if (query && !index.records.length && !index.blocked) index = await require('./studio-bethesda.cjs').evidence(game, kind);
+  const text = JSON.stringify(index, null, 1);
+  docs.push({ path: 'moddock-bethesda-records.json', text, complete: !index.truncated, sha256: crypto.createHash('sha256').update(text).digest('hex') });
+ }
+ const definitions = SPECS[kind].strategy ? require('./studio-strategy.cjs').SOURCES[kind].directories : kind === 'civ6-data' ? ['Base/Assets/Gameplay/Data'] : [];
+ const local = definitions.length ? await require('./studio-native-evidence.cjs').collect(root, definitions, query) : { documents: [], inventory: [], truncated: false };
+ docs.push(...local.documents);
+ const paths = kind === 'factorio-lua' ? ['data/base/info.json', 'data/core/lualib/event_handler.lua'] : kind === 'ck3-data' || SPECS[kind].strategy ? ['launcher-settings.json', 'launcher/launcher-settings.json'] : kind === 'barotrauma-content' ? ['Content/ContentPackages/Vanilla.xml'] : [];
  for (const rel of paths) { try { const file = await ordinary(root, rel), st = await fs.stat(file); if (st.size > 24000) continue; const bytes = await fs.readFile(file); docs.push({ path: rel, text: bytes.toString('utf8'), sha256: crypto.createHash('sha256').update(bytes).digest('hex'), complete: true }); } catch (error) { if (error.code !== 'ENOENT') throw error; } }
- return { ...(existing || {}), family: 'native-game-mod', mode: kind, documents: docs, inventory: docs.map(doc => ({ path: doc.path, size: Buffer.byteLength(doc.text) })), gameModKind: kind, routes: [SPECS[kind].scope] };
+ return { ...(existing || {}), family: 'native-game-mod', mode: kind, documents: docs, inventory: [...local.inventory, ...docs.filter(doc => !local.inventory.some(file => file.path === doc.path)).map(doc => ({ path: doc.path, size: Buffer.byteLength(doc.text) }))], truncated: local.truncated, gameModKind: kind, routes: [SPECS[kind].scope] };
 }
-module.exports = { SPECS, LUA_KINDS, DATA_KINDS, has, matches, forGame, idFor, checkLua, dataSources, checkClausewitz, checkXML, build, validateBuilt, exportPrefix, exportFiles, targetCompatibility, rule, destination, allowedDestination, installRoot, guide, schema, evidence };
+module.exports = { SPECS, LUA_KINDS, DATA_KINDS, has, matches, forGame, activation, idFor, checkLua, dataSources, checkClausewitz, checkXML, build, validateBuilt, exportPrefix, exportFiles, targetCompatibility, rule, destination, allowedDestination, installRoot, guide, schema, evidence };

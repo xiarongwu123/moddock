@@ -7,7 +7,7 @@ const { CET, isCyberpunk, checkCET } = require('./studio-cyberpunk.cjs');
 const gameMods = require('./studio-game-mods.cjs');
 
 const definitions = [
- ...Object.entries(gameMods.SPECS).map(([id, spec]) => ({ id, name: spec.game + (spec.lua ? ' · 原生 Lua Mod' : ' · 内容 Mod'), category: spec.game, description: spec.scope, output: spec.lua ? '原生脚本 Mod' : '游戏内容 Mod', installable: false })),
+ ...Object.entries(gameMods.SPECS).map(([id, spec]) => ({ id, name: spec.game + (spec.bethesda ? ' · ESP 数值插件' : spec.lua ? ' · 原生 Lua Mod' : ' · 内容 Mod'), category: spec.game, description: spec.scope, output: spec.bethesda ? 'ESP 插件' : spec.lua ? '原生脚本 Mod' : '游戏内容 Mod', installable: false })),
  { id: 'cyberpunk-cet-lua', name: '赛博朋克 2077 · CET 脚本', category: '赛博朋克 2077', description: '生成 CET Lua 玩法脚本，校验 Lua 5.1 语法并打包；安装需匹配游戏版本的 Cyber Engine Tweaks。', output: 'CET 脚本 Mod', installable: true },
  { id: 'project-plan', name: '开发方案', category: '通用', description: '结合引擎指南与社区经验，整理任意游戏的 Mod 创作计划。', output: '方案工程', installable: false },
  { id: 'custom-project', name: '自定义 Mod 工程', category: '通用', description: '自由组织脚本、代码和配置文件，适用于更多游戏与创作方向。', output: '源码工程', installable: false },

@@ -17,7 +17,7 @@ const { build } = require('esbuild');
  runtime.push('game-diagnostics.cjs', 'content-pack.cjs', 'mod-studio.cjs', 'universal-modder.cjs', 'studio-recipes.cjs', 'studio-conversations.cjs', 'studio-mu-client.cjs', 'studio-games.cjs', 'studio-preload.cjs', 'studio-migration.cjs', 'studio-lifecycle.cjs', 'studio-tools.cjs', 'studio-toolchain.cjs', 'larian-pak.cjs', 'bg3-mod.cjs', 'THIRD-PARTY-NOTICES.md');
  runtime.push('studio-agent.cjs', 'studio-lua.cjs', 'bg3-controls.cjs', 'studio-control-host.cjs', 'bg3-extender.cjs');
  runtime.push('studio-skills.cjs', 'studio-api.cjs', 'studio-events.cjs', 'studio-intent.cjs', 'studio-game-api.cjs');
- runtime.push('studio-engines.cjs', 'studio-cyberpunk.cjs', 'studio-game-mods.cjs', 'studio-coverage.cjs', 'studio-minecraft.cjs', 'studio-pixels.cjs');
+ runtime.push('studio-engines.cjs', 'studio-cyberpunk.cjs', 'studio-game-mods.cjs', 'studio-coverage.cjs', 'studio-minecraft.cjs', 'studio-pixels.cjs', 'studio-strategy.cjs', 'studio-civilization.cjs', 'studio-bethesda.cjs', 'studio-native-evidence.cjs');
  runtime.push('fomod.cjs', 'game-updates.cjs', 'studio-user-feedback.cjs');
  runtime.push('studio-errors.cjs');
  runtime.push('studio-native-tools.cjs', 'studio-native-projects.cjs', 'studio-native-patch.cjs', 'studio-godot.cjs', 'studio-rgss.cjs', 'studio-ruby.cjs', 'studio-il2cpp.cjs');

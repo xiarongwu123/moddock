@@ -265,7 +265,7 @@ class StudioConversations {
    check();
    await this.studio.options.ensureEnvironment?.({ owner, game, current, authorize, signal: controller.signal, onEvent }); check();
    await this.studio.prepareNative?.(game, { owner, current, authorize, signal: controller.signal, onEvent }); check();
-   const workspace = await Promise.race([this.studio.workspace(game), aborted]); check();
+   const workspace = await Promise.race([this.studio.workspace(game, item.messages.filter(message => message.role === 'user').at(-1)?.content || ''), aborted]); check();
    const diagnostic = workspace.diagnostic;
    item.analysis = analysisFor(workspace);
    const types = workspace.types.filter(type => type.available);

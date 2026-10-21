@@ -1,0 +1,74 @@
+const { test } = require('node:test'), assert = require('node:assert/strict');
+const fs = require('node:fs/promises'), path = require('node:path'), os = require('node:os'), crypto = require('node:crypto');
+const esp = require('../studio-bethesda.cjs'), mods = require('../studio-game-mods.cjs'), fixture = require('./bethesda-fixture.cjs');
+async function setup(t, kind) {
+ const root = await fs.mkdtemp(path.join(os.tmpdir(), 'native-esp-')), game = { id: 'steam-' + mods.SPECS[kind].ids[0], appId: mods.SPECS[kind].ids[0], name: mods.SPECS[kind].game, installPath: path.join(root, 'game'), real: true };
+ t.after(() => fs.rm(root, { recursive: true, force: true, maxRetries: 3 }));
+ await fs.mkdir(path.join(game.installPath, 'Data'), { recursive: true });
+ await fs.writeFile(path.join(game.installPath, mods.SPECS[kind].executables[0]), require('./bg3-extender-fixture.cjs').executable);
+ const master = path.join(game.installPath, esp.MASTERS[kind]); await fs.writeFile(master, fixture.master(kind));
+ return { root, game, master };
+}
+for (const kind of Object.keys(esp.MASTERS)) test(kind + ' writes actual typed ESP records, preserves FormIDs/unknown fields and round-trips native ZIP', async t => {
+ const x = await setup(t, kind), account = require('./account-fixture.cjs').accountFixture(); account.updateAccount({ membership: { tier: 'pro', expiresAt: null } });
+ const service = await require('./server-fixture.cjs').createServer({ root: path.join(x.root, 'service'), port: 0, accounts: account.options, scan: async () => ({ games: [x.game], roots: [], diagnostics: [] }), installers: { processes: async () => [] }, studio: { integration: { python: false } } });
+ t.after(async () => { await new Promise(resolve => service.server.close(resolve)); await service.studio.conversations.settle(); await service.downloads.persist; });
+ const login = await require('./server-fixture.cjs').loginFixture(service);
+ const post = async (route, body) => { const response = await login.fetch(service.url + '/api/' + route, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Moddock-Token': login.state.token }, body: JSON.stringify({ gameId: x.game.id, ...body }) }); return { status: response.status, body: await response.json() }; };
+ const index = await esp.readMaster(x.game, kind); assert.equal(index.records.length, 4);
+ const matches = await require('../studio-game-api.cjs').search(x.game, 'jump'); assert.equal(matches.matches[0].path, 'GMST:fJumpHeightMin');
+ const saved = await post('studio/save', { draft: fixture.draft(kind) }); assert.equal(saved.status, 200, JSON.stringify(saved.body));
+ const report = await service.studio.toolchain.run('fixture-user', x.game, saved.body.id, await service.studio.workspace(x.game)); assert.equal(report.status, 'passed', JSON.stringify(report));
+ assert.equal(report.bethesda.master.sha256, crypto.createHash('sha256').update(await fs.readFile(x.master)).digest('hex'));
+ const bundle = await service.studio.toolchain.bundle('fixture-user', x.game, saved.body.id, report.id), zip = path.join(x.root, 'native.zip'); await fs.writeFile(zip, Buffer.from(bundle.base64, 'base64'));
+ const entries = await require('../installers.cjs').extract(zip, path.join(x.root, 'export')); assert.equal(entries.length, 1); assert.ok(entries[0].source.endsWith('.esp'));
+ const bytes = await fs.readFile(path.join(x.root, 'export', entries[0].source)), inspected = esp.inspect(bytes);
+ assert.equal(inspected.master, path.basename(x.master)); assert.equal(inspected.records.length, 4);
+ assert.deepEqual(inspected.records.map(record => [record.formId, record.value]), [[0x1001, 150], [0x1002, 10], [0x1003, false], [0x1004, 10]]);
+ assert.ok(bytes.includes(Buffer.from('unchanged'))); assert.equal(bytes.readUInt16LE(20), kind === 'skyrimse-esp' ? 44 : 131);
+ const item = await service.studio.read('fixture-user', saved.body.id); assert.equal(item.requiresBuild, true); assert.equal(item.installable, true);
+ const planned = await post('studio/prepare', { id: saved.body.id }); assert.equal(planned.status, 200, JSON.stringify(planned.body));
+ assert.deepEqual(planned.body.files.map(file => file.destination), ['Data/' + item.manifest.UniqueID + '.esp']);
+ const original = await fs.readFile(x.master); await fs.appendFile(x.master, Buffer.from([0]));
+ const rejected = await post('installations/apply', { id: planned.body.id }); assert.notEqual(rejected.status, 200); assert.match(rejected.body.error, /版本已变化/);
+ await fs.writeFile(x.master, original);
+ const applied = await post('installations/apply', { id: planned.body.id }); assert.equal(applied.status, 200, JSON.stringify(applied.body));
+ for (const action of ['verify', 'disable', 'enable']) assert.equal((await post('installations/action', { id: applied.body.id, action })).status, 200);
+ await fs.appendFile(x.master, Buffer.from([0]));
+ assert.equal((await post('installations/action', { id: applied.body.id, action: 'disable' })).status, 200);
+ const stale = await post('installations/action', { id: applied.body.id, action: 'enable' }); assert.notEqual(stale.status, 200); assert.match(stale.body.error, /版本已变化/);
+ assert.equal((await post('installations/action', { id: applied.body.id, action: 'uninstall' })).status, 200);
+ await fs.writeFile(x.master, original); assert.deepEqual(await fs.readFile(x.master), original);
+ assert.equal(await fs.access(path.join(x.game.installPath, 'plugins.txt')).then(() => true, () => false), false);
+});
+test('ESP rejects invented EditorIDs, type mismatches, malformed master groups and unbound installation profiles', async t => {
+ const kind = 'skyrimse-esp', x = await setup(t, kind), draft = fixture.draft(kind), item = { adapterId: kind, draft, manifest: { UniqueID: 'moddock_' + 'a'.repeat(32) } };
+ const edited = value => ({ ...item, draft: { ...draft, files: [{ name: 'changes.json', text: JSON.stringify({ changes: [value] }) }] } });
+ await assert.rejects(esp.compile(x.game, edited({ signature: 'GMST', editorId: 'fInventedSetting', value: 1 })), /未找到唯一记录/);
+ await assert.rejects(esp.compile(x.game, edited({ signature: 'GMST', editorId: 'bFixtureToggle', value: 1 })), /布尔/);
+ await assert.rejects(esp.compile(x.game, edited({ signature: 'GMST', editorId: 'iTrainingNumAllowedPerLevel', value: 1.5 })), /int32/);
+ await assert.rejects(esp.compile(x.game, edited({ signature: 'GMST', editorId: 'fJumpHeightMin', value: 1e39 })), /float32/);
+ assert.throws(() => esp.changes([{ name: 'changes.json', text: '{"changes":[{"signature":"WEAP","editorId":"foo","value":1}]}' }]), /仅支持/);
+ assert.throws(() => require('../installers.cjs').profile({ mode: 'game-mod', modKind: kind, modId: item.manifest.UniqueID }), /摘要/);
+ assert.equal(mods.allowedDestination({ modKind: kind, modId: item.manifest.UniqueID }, 'Data/Skyrim.esm'), false);
+ const original = await fs.readFile(x.master), malformed = Buffer.from(original); malformed.writeUInt32LE(0xffffffff, 24 + original.readUInt32LE(4) + 4); await fs.writeFile(x.master, malformed);
+ await assert.rejects(esp.readMaster(x.game, kind), /边界/);
+});
+test('Fallout 4 boolean GLOB values use FLTV floats and remote search uses the supplied host snapshot', async t => {
+ const kind = 'fallout4-esp', x = await setup(t, kind), bytes = await fs.readFile(x.master);
+ bytes[bytes.indexOf(Buffer.from('FNAM')) + 6] = 'b'.charCodeAt(0); bytes.writeFloatLE(1, bytes.indexOf(Buffer.from('FLTV')) + 6); await fs.writeFile(x.master, bytes);
+ const item = { adapterId: kind, manifest: { UniqueID: 'moddock_' + 'b'.repeat(32) }, draft: { name: 'bool', author: 'Fixture', files: [{ name: 'changes.json', text: '{"changes":[{"signature":"GLOB","editorId":"TimeScale","value":false}]}' }] } };
+ const built = await esp.compile(x.game, item); assert.equal(esp.inspect(built.files[0].data).records[0].value, false);
+ const data = await mods.evidence(x.game, null, '时间');
+ const matches = await require('../studio-game-api.cjs').search({ ...x.game, installPath: 'Z:/not-on-server' }, 'TimeScale', data);
+ assert.equal(matches.matches[0].path, 'GLOB:TimeScale'); assert.equal(matches.runtimeVerified, false);
+});
+test('private Pi authors ESP change files and searches host records without reading a client-only path', async t => {
+ const kind = 'skyrimse-esp', value = fixture.draft(kind), game = { appId: '489830', name: 'Skyrim Special Edition', installPath: 'Z:/client-only-game' };
+ const index = { master: { path: 'Data/Skyrim.esm', sha256: 'a'.repeat(64) }, records: [{ signature: 'GMST', editorId: 'fJumpHeightMin', type: 'f', value: 100, formId: 0x1001 }] };
+ const backend = await require('./pi-fixture.cjs').piFixture(t, { game, result: value, respond: async ({ phase }) => phase === 'author' ? { calls: [{ name: 'search_api', arguments: { query: 'jump' } }, ...value.files.map(file => ({ name: 'write_project_file', arguments: { path: file.name, text: file.text } })), { name: 'validate_project', arguments: {} }] } : phase === 'submit' ? { result: { ...value, files: undefined } } : null });
+ const result = await require('../studio-ai.cjs').createDeepSeek({ apiKey: backend.key, pi: backend.pi }).generate({ kind, prompt: '生成已核对的 ESP 数值调整', context: { game, engineEvidence: { gameModKind: kind, documents: [{ path: 'moddock-bethesda-records.json', text: JSON.stringify(index), complete: true }] } }, capability: { deliverable: 'mod' } });
+ assert.deepEqual(result.files, value.files);
+ assert.ok(backend.requests.some(request => request.body.tools?.some(tool => tool.function.name === 'write_project_file' && tool.function.description.includes('changes.json'))));
+ assert.ok(backend.requests.some(request => request.body.messages.some(message => message.role === 'tool' && message.content.includes('GMST:fJumpHeightMin'))));
+});

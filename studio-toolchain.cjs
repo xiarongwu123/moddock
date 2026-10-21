@@ -155,7 +155,7 @@ class StudioToolchain {
       result.findings.map(f => `${f.code} ${file.name}:${f.line} [${f.severity}] ${f.message}`).join('\n') || result.coverage);
     }
    }
-   let compiled;
+   let compiled, nativeOutputs;
    if (require('./studio-game-mods.cjs').has(item.adapterId)) {
     const version = require('./studio-game-mods.cjs').targetCompatibility(item, workspace);
     await step('游戏版本证据', version.status, version.detail);
@@ -163,6 +163,13 @@ class StudioToolchain {
     if (!checked.length) throw new Error('专用 Mod 缺少实际产物文件');
     for (const result of checked) await step('游戏 Mod · ' + result.path, result.passed ? 'passed' : 'failed', result.detail);
     report.installation = { ready: null, detail: require('./studio-game-mods.cjs').SPECS[item.adapterId].exportOnly ? '可导出游戏原生 ZIP；数据包需要用户明确选择目标世界，当前不自动写入存档。' : '安装时自动核对原生入口和专用目录；部分游戏还需在游戏内或启动器中启用 Mod。' };
+    if (require('./studio-game-mods.cjs').SPECS[item.adapterId].bethesda) {
+     try {
+      const result = await require('./studio-bethesda.cjs').compile(game, item); check();
+      nativeOutputs = result.files; report.bethesda = { master: result.master, records: result.records };
+      await step('ESP 原生构建与回读', 'passed', `${result.records.length} 条真实记录；保留 FormID、主文件依赖和未修改字段，数值回读匹配。`);
+     } catch (error) { if (error.code === 'ENOENT') await step('ESP 原生构建', 'blocked', '未找到本机原版 ESM；需要已安装游戏后读取真实记录，不能凭空制作插件。'); else throw error; }
+    }
    } else if (item.adapterId === 'cyberpunk-cet-lua') {
     const scripts = files.filter(file => file.name.endsWith('.lua'));
     if (scripts.length !== 1 || scripts[0].name !== 'mod/init.lua') throw new Error('CET 产物必须包含唯一的 mod/init.lua 入口');
@@ -224,12 +231,12 @@ class StudioToolchain {
    }
    if ((['ue4ss-lua', 'reframework-lua', 'cyberpunk-cet-lua'].includes(item.adapterId) || require('./studio-game-mods.cjs').has(item.adapterId)) && !report.checks.some(entry => ['failed', 'blocked'].includes(entry.status))) {
     const native = require('./studio-game-mods.cjs').has(item.adapterId);
-    const sources = native ? require('./studio-game-mods.cjs').exportFiles(item, files) : files.filter(file => file.name.startsWith('mod/')).map(file => ({ name: file.name, data: Buffer.from(file.text || '') }));
+    const sources = nativeOutputs || (native ? require('./studio-game-mods.cjs').exportFiles(item, files) : files.filter(file => file.name.startsWith('mod/')).map(file => ({ name: file.name, data: Buffer.from(file.text || '') })));
     const bytes = zipContent(native ? sources : [...sources, { name: 'BUILD.json', data: Buffer.from(JSON.stringify({ gameId: game.id, adapter: item.adapterId, sourceSha256: item.sha256, runtimeVerified: false, installation: report.installation }, null, 2)) }]);
     await fs.writeFile(path.join(directory, 'compiled.zip'), bytes, { flag: 'wx' });
     report.bundle = { sha256: hash(bytes), size: bytes.length, filename: item.draft.name + '-mod.zip' };
     report.outputs.push(...sources.map(file => ({ name: file.name, size: file.data.length, sha256: hash(file.data) })));
-    await step('脚本 Mod 打包', 'passed', `${sources.length} 个实际加载文件；Lua 编译通过并已打包 ZIP，游戏效果待实测。`);
+    await step('游戏 Mod 打包', 'passed', `${sources.length} 个实际加载文件；已完成对应文件检查并打包 ZIP，游戏效果待实测。`);
    }
    if (['bg3-lua', 'bg3-follower'].includes(item.adapterId) && !report.checks.some(entry => ['failed', 'blocked'].includes(entry.status))) {
     const sources = files.filter(file => file.name.startsWith('package/')).map(file => ({ name: file.name.slice(8), data: Buffer.from(file.text) }));
