@@ -16,7 +16,7 @@ const {createServer}=require('./server-fixture.cjs'),{hash}=require('../installe
   const handler=async route=>{requests++;await gate;if(fail)await route.fulfill({status:400,contentType:'application/json',body:JSON.stringify({error:'测试操作失败'})});else await route.continue();};
   await page.route('**/api/installations/action',handler);
   const button=()=>page.locator(`[data-mod-action="${action}"]`);
-  const assertLoading=async()=>{assert.equal(await button().isDisabled(),true);assert.equal(await button().getAttribute('aria-busy'),'true');assert.match(await button().innerText(),action==='enable'?/正在启用/:/正在停用/);assert.equal(await button().locator('.spinning').count(),1);assert.equal(await page.locator('.managed-row .row-actions button:enabled').count(),0);};
+  const assertLoading=async()=>{assert.equal(await button().isDisabled(),true);assert.equal(await button().getAttribute('aria-busy'),'true');assert.match(await button().getAttribute('aria-label'),action==='enable'?/正在启用/:/正在停用/);assert.equal(await page.locator('.managed-row .manager-state .spinning').count(),1);assert.equal(await page.locator('.managed-row .row-actions button:enabled').count(),0);};
   try{
    await button().click();await assertLoading();
    await page.waitForResponse(response=>response.url().endsWith('/api/state'));
