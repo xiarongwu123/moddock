@@ -5,6 +5,13 @@ const { downloadAllowed } = require('./sources.cjs');
 const { LIMITS, assertSize } = require('./archive-limits.cjs');
 const {archiveFormat,formatError}=require('./archive-format.cjs');
 const { transfer } = require('./download-transfer.cjs');
+const { setTimeout: persistenceDelay } = require('node:timers/promises');
+async function replaceHistory(temporary, destination) {
+ for (let attempt = 0; ; attempt++) {
+  try { await fs.rename(temporary, destination); return; }
+  catch (error) { if (!['EPERM', 'EACCES', 'EBUSY'].includes(error.code) || attempt >= 7) throw error; await persistenceDelay(20 * 2 ** attempt); }
+ }
+}
 function filename(value) { const name = String(value || 'mod.zip').split(/[\\/]/).pop().replace(/[<>:"|?*\x00-\x1f]/g, '_').replace(/[. ]+$/g, '').slice(0, 150); return !name || /^(con|prn|aux|nul|com\d|lpt\d)(\.|$)/i.test(name) ? 'mod-' + (name || 'file.zip') : name; }
 class Downloads {
  constructor(root, sources, options = {}) { this.root = path.resolve(root, 'downloads'); this.sources = sources; this.clients = new Map(); this.verifications = new Map(); this.fetch = options.fetch || globalThis.fetch; this.jobs = []; this.controllers = new Map(); this.persist = Promise.resolve(); this.authorizations=new Map(); this.onCompleted=options.onCompleted; this.onAuthorizationRequired=options.onAuthorizationRequired; this.maxParallel=options.maxParallel||3; this.beforeDownload=options.beforeDownload; }
@@ -15,7 +22,7 @@ class Downloads {
   if (this.sources.nexusPlatform) for (const j of this.jobs) if (j.status === 'authorization_required') { j.status = 'failed'; j.message = '已切换至平台下载服务，可重新下载'; }
   await this.save(); return this;
  }
- save() { const state = JSON.stringify(this.jobs); this.persist = this.persist.catch(() => {}).then(async () => { await fs.writeFile(path.join(this.root, 'history.tmp'), state); await fs.rename(path.join(this.root, 'history.tmp'), path.join(this.root, 'history.json')); }); return this.persist; }
+ save() { const state = JSON.stringify(this.jobs); this.persist = this.persist.catch(() => {}).then(async () => { await fs.writeFile(path.join(this.root, 'history.tmp'), state); await replaceHistory(path.join(this.root, 'history.tmp'), path.join(this.root, 'history.json')); }); return this.persist; }
  start(game, resourceId, fileId, name, authorization, client = this.sources) {
   client.resource(game, resourceId); if (!/^\d+$/.test(String(fileId))) throw new Error('文件 ID 无效');
   if (this.jobs.filter(j => ['queued','running'].includes(j.status)).length >= 20) throw new Error('下载队列已满');
