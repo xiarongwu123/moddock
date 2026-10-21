@@ -17,12 +17,13 @@ async function fixture(t) {
  let now = Date.parse('2026-10-20T00:00:00Z');
  const account = async id => ({ id, membership: { tier: id === 'standard' ? 'standard' : 'pro', expiresAt: id === 'expired' ? '2020-01-01' : null }, features: [{ key: 'library.manage', allowed: true }] });
  const ledger = new AILedger({ filename, account, clock: () => now, lease: 1000 });
- t.after(async () => { ledger.close(); await fs.rm(root, { recursive: true, force: true }); });
- return { root, filename, ledger, account, time: n => now = n };
+ const connections = [ledger];
+ t.after(async () => { for (const connection of connections.reverse()) connection.close(); await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
+ return { root, filename, ledger, account, connections, time: n => now = n };
 }
 test('live Pro checks, atomic shared reservations, exact settlement and replay across connections', async t => {
- const { ledger, filename, account } = await fixture(t);
- const second = new AILedger({ filename, account, clock: ledger.clock, lease: 1000 }); t.after(() => second.close());
+ const { ledger, filename, account, connections } = await fixture(t);
+ const second = new AILedger({ filename, account, clock: ledger.clock, lease: 1000 }); connections.push(second);
  for (const id of ['standard', 'expired']) await assert.rejects(ledger.reserve(id, 'task', 10), { code: 'pro_required' });
  ledger.quota('a');
  ledger.db.prepare("UPDATE ModdockAiPeriods SET used=980000 WHERE owner='a'").run();
