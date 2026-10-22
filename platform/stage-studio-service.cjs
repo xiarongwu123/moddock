@@ -11,7 +11,10 @@ const crypto = require('node:crypto');
  names.push('studio-errors.cjs', 'studio-mu-client.cjs', 'platform/studio-tasks.cjs', 'platform/studio-progress.cjs');
  names.push('ai-policy.cjs', 'platform/ai-ledger.cjs', 'platform/ai-ledger.sql', 'platform/ai-meter.mjs', 'platform/reconcile-ai-usage.cjs');
  for (const name of names) {
-  const bytes = await fs.readFile(path.join(root, name));
+  const original = await fs.readFile(path.join(root, name));
+  // Archives may be built from an existing Windows checkout before Git
+  // attributes have refreshed its working-tree files.
+  const bytes = name.endsWith('.sh') ? Buffer.from(original.toString('utf8').replace(/\r\n?/g, '\n')) : original;
   await fs.mkdir(path.dirname(path.join(destination, name)), { recursive: true });
   await fs.writeFile(path.join(destination, name), bytes, { flag: 'wx', mode: 0o600 });
   hashes[name] = crypto.createHash('sha256').update(bytes).digest('hex');
@@ -24,7 +27,7 @@ const crypto = require('node:crypto');
   for (const entry of await fs.readdir(path.join(destination, directory), { withFileTypes: true })) {
    const name = path.join(directory, entry.name);
    if (entry.isDirectory()) await record(name);
-   else if (entry.isFile()) hashes[name] = crypto.createHash('sha256').update(await fs.readFile(path.join(destination, name))).digest('hex');
+   else if (entry.isFile()) hashes[name.split(path.sep).join('/')] = crypto.createHash('sha256').update(await fs.readFile(path.join(destination, name))).digest('hex');
    else throw new Error('Service snapshot must contain regular files only');
   }
  }
