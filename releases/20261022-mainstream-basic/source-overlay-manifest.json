@@ -1,0 +1,32 @@
+{
+  "baseCommit": "66215e54c1a31bece951ee23eac158db59c9d9a2",
+  "hashes": {
+    "README.md": "667c0b1f515ef3083cb1823a2a1fc9c2fe7727db22a28f03c2e18a4dc02cb8f0",
+    "downloads.cjs": "a87c432b3b301cea185557ce03e34fbc69d1793e21a0e6bb17754e8ee493fe24",
+    "installers.cjs": "0590a205e51a75a0e6bea96f5edaaefbfbb6c99ced708ee13180751a7bed0eee",
+    "mod-studio.cjs": "60f8d5d5d72420fda358c688f3a5d65f941acd1e11dcdd7db8297064c82ab2fe",
+    "platform/stage-studio-service.cjs": "31d713188ff39c77a00c7abed21bd78a2fad55676bcb0dc9b2fc2e333c5fc703",
+    "platform/studio-pi.mjs": "947057a1ca735ce294910a552db045af1b9bebcc07a0e46579620e7d76042667",
+    "public/auth.js": "4852d46cccfcebe33ffc83b8732e018468919addb65e56330b0b760eb9706a17",
+    "public/mod-studio.js": "904b36bf40aa6a483a0d9dc52069e87ac837861f6bb458488c1c68c59eb782e5",
+    "scripts/package-windows.py": "0149c93239701771ffee8525d57a88ceafd3a0f7a3a26571f46a0d49385e3ee6",
+    "scripts/stage-review-build.cjs": "0165245b125f2629ef42f81ac55f56f3c71913f0a89867cc2fa7d3b3b9133d47",
+    "studio-conversations.cjs": "9b3c9c5da2dafbb33db0d85dcacc1db6f7a366b5de622996ff8c2364068210bd",
+    "studio-game-api.cjs": "44f7ecba0cdeb1d78e8cb5e650a644cfde231f14c4b5a9911fdac6ba8ee00b97",
+    "studio-game-mods.cjs": "a5ce2301a562d60d46ac18158acc346af962114dddca64587faaf6b8a9e0c7f4",
+    "studio-lifecycle.cjs": "45b6970cafb5fde56497cb60822390e8d956f8941fa51212c7aea8a3dae1a498",
+    "studio-recipes.cjs": "27ae466732679eeab0bbfd3710a1fc80014b408f3094506e9092b16976ba128f",
+    "studio-toolchain.cjs": "b3094fa722d73f1009b3c423389ce1b0e294d8fcd880a6c682433cd0b4d007a0",
+    "test/studio-game-mods.test.cjs": "42bda8bbf3423379ad4a20a0f7b214ce857e477f420d201230cf0ef44321c42e",
+    "docs/mainstream-adapters-2026-10-22.md": "fe769b6f8d32c53c50b70fd860a495fd2c49d9557b206cab9ecabe20e397928a",
+    "studio-bethesda.cjs": "ee789854a9d8d1ae772aee1ee94c28c3f330e7d7028b7a3da1628d03153e9ac0",
+    "studio-civilization.cjs": "b2f292e11936af013cdb8edba25ea5a98eb3c9c9d9991edd83ac4f9092985449",
+    "studio-native-evidence.cjs": "95133aa68c84c388b1846aea7ffeaca0a54c541bad140e386057ba4c3e61b2f4",
+    "studio-strategy.cjs": "23ee05da52494a7f028ec8b1d49b1cec9a3a5bc357a7f32002f43b3a01f6a83c",
+    "test/bethesda-fixture.cjs": "4105347ab8ad62c62fc16f066b62990c062853401bd2cdf646358e2b8956ec46",
+    "test/download-persistence.test.cjs": "366c6417c32bae4a4b10e0d376ffca1d82730602dce301deb94eafb365b4c960",
+    "test/strategy-fixture.cjs": "7d760ff424b3916ac9d479e99cfeb0192bc289496aaaa85de185d9727333427e",
+    "test/studio-bethesda.test.cjs": "2db40323714aa7a75a982c4f14611008298102692baf1417fabb94f61e4df4a8",
+    "test/studio-strategy.test.cjs": "dbd3328457ed3e93442ba6af4ff9225f512ed0e6d8d4560414ce98d4eff24ec0"
+  }
+}

@@ -1,0 +1,62 @@
+{
+  "sourceFiles": 27,
+  "baseCommit": "66215e54c1a31bece951ee23eac158db59c9d9a2",
+  "clientFilesVerified": 875,
+  "serviceFilesVerified": 315,
+  "tests": {
+    "total": 520,
+    "passed": 520,
+    "failed": 0
+  },
+  "initialFullRun": {
+    "total": 518,
+    "passed": 517,
+    "failed": 1,
+    "reason": "Transient Windows history rename lock; fix and regression added."
+  },
+  "browser": [
+    {
+      "kind": "skyrimse-esp",
+      "stagedClient": true,
+      "fixtureAI": true,
+      "nativeArtifact": true,
+      "installOnly": true,
+      "manualActivationShown": true,
+      "libraryBuildBound": true,
+      "staleConfirmationCleared": true,
+      "pageErrors": [],
+      "gameplayTested": false
+    },
+    {
+      "kind": "hoi4-data",
+      "stagedClient": true,
+      "fixtureAI": true,
+      "nativeArtifact": true,
+      "installOnly": true,
+      "manualActivationShown": true,
+      "libraryBuildBound": true,
+      "staleConfirmationCleared": false,
+      "pageErrors": [],
+      "gameplayTested": false
+    },
+    {
+      "kind": "civ6-data",
+      "stagedClient": true,
+      "fixtureAI": true,
+      "nativeArtifact": true,
+      "installOnly": true,
+      "manualActivationShown": true,
+      "libraryBuildBound": true,
+      "staleConfirmationCleared": false,
+      "pageErrors": [],
+      "gameplayTested": false
+    }
+  ],
+  "realAI": false,
+  "gameplayTested": false,
+  "deployed": false,
+  "allMainstreamGamesComplete": false,
+  "thousandGamesTargetReached": false,
+  "mainCommit": "f28835de46c681ddac2c4dc19716a0a65af89063",
+  "remotePushVerified": true
+}
